@@ -583,9 +583,10 @@ a.online-row:hover { background: var(--hover); }
 .emoji-bar { position: relative; display: flex; gap: 8px; margin: 6px 0; }
 .emoji-btn { border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 999px; padding: 3px 14px; font-size: 13px; cursor: pointer; transition: border-color .15s, color .15s; }
 .emoji-btn:hover { border-color: var(--accent); color: var(--accent); }
-.emoji-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 80; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; display: grid; grid-template-columns: repeat(8, 34px); gap: 2px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
+.emoji-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 90; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; display: grid; grid-template-columns: repeat(8, 34px); gap: 2px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
 .emoji-item { border: none; background: none; font-size: 19px; line-height: 32px; height: 32px; cursor: pointer; border-radius: 8px; }
 .emoji-item:hover { background: var(--hover); }
+.emoji-pop[hidden] { display: none; } /* 关键：覆盖 display:grid，让 hidden 属性真正生效 */
 
 /* Markdown 扩展：上标 / 下标 / 脚注区 */
 .md sup, .md sub { line-height: 0; }
