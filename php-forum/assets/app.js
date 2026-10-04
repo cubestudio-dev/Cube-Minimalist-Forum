@@ -420,4 +420,104 @@
       }
     });
   }
+
+  /* ---------- 表情选择器（v1.10.0）----------
+     自动注入到所有 Markdown 输入框（发帖 / 回复 / 后台公告，即 textarea[name=content]）；
+     点击按钮弹出表情面板，点选后以 :name: 短代码插入光标处，服务端 Markdown 渲染为表情。 */
+  var EMOJIS = [
+    ['smile', '😄'], ['laughing', '😆'], ['joy', '😂'], ['rofl', '🤣'], ['smiley', '😃'], ['grin', '😁'],
+    ['wink', '😉'], ['blush', '😊'], ['innocent', '😇'], ['upside_down', '🙃'], ['relieved', '😌'],
+    ['heart_eyes', '😍'], ['kissing_heart', '😘'], ['thinking', '🤔'], ['neutral', '😐'], ['expressionless', '😑'],
+    ['smirk', '😏'], ['unamused', '😒'], ['roll_eyes', '🙄'], ['pensive', '😔'], ['cry', '😢'], ['sob', '😭'],
+    ['angry', '😠'], ['rage', '😡'], ['scream', '😱'], ['cold_sweat', '😰'], ['sleepy', '😪'], ['mask', '😷'],
+    ['sunglasses', '😎'], ['nerd', '🤓'], ['clown', '🤪'], ['star_struck', '🤩'], ['party', '🥳'], ['pleading', '🥺'],
+    ['shushing', '🤫'], ['ghost', '👻'], ['alien', '👽'], ['robot', '🤖'], ['skull', '💀'], ['poop', '💩'],
+    ['clown_face', '🤡'], ['eyes', '👀'], ['brain', '🧠'], ['hug', '🤗'], ['thumbsup', '👍'], ['thumbsdown', '👎'],
+    ['ok_hand', '👌'], ['v', '✌️'], ['wave', '👋'], ['clap', '👏'], ['pray', '🙏'], ['muscle', '💪'],
+    ['point_right', '👉'], ['point_left', '👈'], ['point_up', '☝️'], ['point_down', '👇'], ['raised_hands', '🙌'],
+    ['handshake', '🤝'], ['fist', '✊'], ['bow', '🙇'], ['running', '🏃'], ['dancer', '💃'], ['couple', '👫'],
+    ['family', '👪'], ['heart', '❤️'], ['orange_heart', '🧡'], ['yellow_heart', '💛'], ['green_heart', '💚'],
+    ['blue_heart', '💙'], ['purple_heart', '💜'], ['black_heart', '🖤'], ['broken_heart', '💔'], ['heartpulse', '💗'],
+    ['sparkling_heart', '💖'], ['two_hearts', '💕'], ['revolving_hearts', '💞'], ['star', '⭐'], ['sparkles', '✨'],
+    ['fire', '🔥'], ['boom', '💥'], ['zap', '⚡'], ['rainbow', '🌈'], ['sunny', '☀️'], ['moon', '🌙'],
+    ['cloud', '☁️'], ['snowflake', '❄️'], ['umbrella', '☔'], ['gift', '🎁'], ['bell', '🔔'], ['mega', '📢'],
+    ['lock', '🔒'], ['key', '🔑'], ['bulb', '💡'], ['books', '📚'], ['book', '📖'], ['memo', '📝'],
+    ['pencil', '✏️'], ['calendar', '📅'], ['alarm_clock', '⏰'], ['white_check_mark', '✅'], ['x', '❌'],
+    ['question', '❓'], ['exclamation', '❗'], ['warning', '⚠️'], ['no_entry', '⛔'], ['recycle', '♻️'],
+    ['100', '💯'], ['hot', '🥵'], ['cold_face', '🥶'], ['coffee', '☕'], ['tea', '🍵'], ['beer', '🍺'],
+    ['cake', '🍰'], ['apple', '🍎'], ['watermelon', '🍉'], ['pizza', '🍕'], ['ice_cream', '🍦'],
+    ['moon_cake', '🥮'], ['fish', '🐟'], ['rice', '🍚'], ['noodles', '🍜'], ['bread', '🍞'], ['egg', '🥚'],
+    ['popcorn', '🍿'], ['cat', '🐱'], ['dog', '🐶'], ['mouse', '🐭'], ['rabbit', '🐰'], ['fox', '🦊'],
+    ['bear', '🐻'], ['panda', '🐼'], ['tiger', '🐯'], ['lion', '🦁'], ['cow', '🐮'], ['pig', '🐷'],
+    ['frog', '🐸'], ['chicken', '🐤'], ['penguin', '🐧'], ['owl', '🦉'], ['bee', '🐝'], ['butterfly', '🦋'],
+    ['snail', '🐌'], ['turtle', '🐢'], ['octopus', '🐙'], ['whale', '🐳'], ['dolphin', '🐬'],
+    ['blossom', '🌸'], ['rose', '🌹'], ['sunflower', '🌻'], ['four_leaf_clover', '🍀'], ['seedling', '🌱'],
+    ['cactus', '🌵'], ['palm_tree', '🌴'], ['computer', '💻'], ['iphone', '📱'], ['camera', '📷'],
+    ['headphones', '🎧'], ['music', '🎵'], ['guitar', '🎸'], ['video_game', '🎮'], ['car', '🚗'],
+    ['airplane', '✈️'], ['train', '🚄'], ['ship', '🚢'], ['house', '🏠'], ['moneybag', '💰'], ['gem', '💎'],
+    ['trophy', '🏆'], ['medal', '🏅'], ['soccer', '⚽'], ['basketball', '🏀'], ['ping_pong', '🏓'],
+    ['art', '🎨'], ['ticket', '🎫'], ['balloon', '🎈'], ['tada', '🎉'], ['confetti_ball', '🎊'],
+    ['crown', '👑'], ['eyeglasses', '👓']
+  ];
+
+  function emojiInsertAt(ta, text) {
+    var s = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
+    var e = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : s;
+    ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+    ta.selectionStart = ta.selectionEnd = s + text.length;
+    try { ta.dispatchEvent(new Event('input', { bubbles: true })); } catch (err) { /* 字数统计兼容 */ }
+  }
+
+  $$('textarea[name="content"]').forEach(function (ta) {
+    if (ta.getAttribute('data-emoji-ready') === '1') return;
+    ta.setAttribute('data-emoji-ready', '1');
+
+    var bar = document.createElement('div');
+    bar.className = 'emoji-bar';
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'emoji-btn';
+    btn.setAttribute('aria-label', '插入表情');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.textContent = '😀 表情';
+
+    var pop = document.createElement('div');
+    pop.className = 'emoji-pop';
+    pop.hidden = true;
+    pop.setAttribute('role', 'menu');
+    pop.setAttribute('aria-label', '表情列表（点选插入 :name: 短代码）');
+
+    EMOJIS.forEach(function (it) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'emoji-item';
+      b.title = ':' + it[0] + ':';
+      b.setAttribute('aria-label', ':' + it[0] + ':');
+      b.textContent = it[1];
+      b.addEventListener('click', function () {
+        emojiInsertAt(ta, ':' + it[0] + ':');
+        pop.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+        ta.focus();
+      });
+      pop.appendChild(b);
+    });
+
+    btn.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      pop.hidden = !pop.hidden;
+      btn.setAttribute('aria-expanded', pop.hidden ? 'false' : 'true');
+    });
+    document.addEventListener('click', function (ev) {
+      if (!pop.hidden && ev.target !== btn && !pop.contains(ev.target)) {
+        pop.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    bar.appendChild(btn);
+    bar.appendChild(pop);
+    ta.parentNode.insertBefore(bar, ta);
+  });
 })();
