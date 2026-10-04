@@ -1,0 +1,15 @@
+# 极简论坛 robots.txt —— 控制爬虫抓取频率，保护后台与私有页面
+User-agent: *
+Crawl-delay: 10
+Disallow: /install.php
+Disallow: /index.php?p=admin
+Disallow: /index.php?p=login
+Disallow: /index.php?p=register
+Disallow: /index.php?p=settings
+Disallow: /index.php?p=notifications
+Disallow: /index.php?a=
+Allow: /
+
+# 数据目录（Apache 已由 .htaccess 拦截；nginx 请参考 README 配置）
+Disallow: /data/
+Disallow: /src/
