@@ -231,10 +231,17 @@ function code_send(string $email, string $purpose, string &$err = ''): bool
     Store::unlock($lk);
 
     $site = (string)cfg('site_name', '论坛');
+    $siteEsc = htmlspecialchars(cut_str($site, 40), ENT_QUOTES, 'UTF-8');
+    $inner = '<p style="margin:0 0 16px">您正在 <b>' . $siteEsc . '</b> 进行邮箱验证，请使用以下验证码：</p>'
+        . '<div style="margin:0 0 16px;background:#f4f4f5;border:1px solid #e5e5ea;border-radius:12px;padding:18px;text-align:center">'
+        . '<span style="font-size:32px;font-weight:700;letter-spacing:10px;color:#18181b;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">' . $code . '</span>'
+        . '</div>'
+        . '<p style="margin:0 0 12px">验证码 <b>5 分钟内有效</b>，请勿泄露给他人。</p>'
+        . '<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:10px;padding:10px 14px;font-size:13px;line-height:1.7;color:#713f12">若非本人操作，请忽略本邮件，您的账号安全不会受到影响。</div>';
     [$ok, $smtpErr] = mail_send(
         $email,
         $site . ' · 邮箱验证码',
-        "您的验证码是：{$code}\r\n\r\n验证码 5 分钟内有效，请勿泄露给他人。\r\n若非本人操作，请忽略本邮件。\r\n\r\n—— {$site}"
+        mail_template('邮箱验证码', $inner)
     );
     if (!$ok) {
         $err = '邮件发送失败：' . $smtpErr;
