@@ -306,25 +306,22 @@ function sysmon_storage_alert(bool $manual = false, bool $force = false): array
     $mb = round($total / 1048576, 1);
     $th = (int)cfg('monitor_mb', 95);
     $site = (string)cfg('site_name', '论坛');
-    $lines = [
-        "【存储告警】{$site}",
-        '',
-        "站点总占用已达 {$mb}MB，超过告警阈值 {$th}MB（虚拟主机配额通常为 100MB，请尽快清理）。",
-        '',
-        '占用明细：',
-        '· 程序本体：' . fmt_bytes($app),
-        '· 数据目录：' . fmt_bytes($data) . '（其中操作日志 ' . fmt_bytes(sysmon_content_stats()[4]) . '）',
-        '',
-        '建议操作（后台「系统 / 日志 / 监控」页）：',
-        '1. 清理过期操作日志（日志页「立即清理」或调低保留天数）；',
-        '2. 下载并删除旧的数据备份与更新前备份（保留最近 1-2 份即可）；',
-        '3. 删除不再需要的测试内容；',
-        '4. 如持续紧张，导出数据后联系主机服务商扩容。',
-        '',
-        '本邮件由论坛监控系统自动发送（阈值 ' . $th . 'MB，冷却 ' . round(SYSMON_ALERT_COOLDOWN / 3600) . ' 小时）。',
-        '时间：' . date('Y-m-d H:i:s'),
-    ];
-    $body = implode("\r\n", $lines);
+    $pct = min(100, (int)round($total / (100 * 1048576) * 100));
+    $inner = '<p style="margin:0 0 14px">站点总占用已达 <b style="color:#b45309">' . $mb . 'MB</b>，超过告警阈值 <b>' . $th . 'MB</b>（虚拟主机配额通常为 100MB，请尽快清理）。</p>'
+        . '<div style="margin:0 0 14px;background:#f4f4f5;border-radius:8px;height:14px;overflow:hidden"><div style="width:' . $pct . '%;height:100%;background:' . ($pct >= 95 ? '#dc2626' : '#f59e0b') . '"></div></div>'
+        . '<p style="margin:0 0 8px"><b>占用明细</b></p>'
+        . '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 16px">'
+        . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">程序本体</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . fmt_bytes($app) . '</b></td></tr>'
+        . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">数据目录</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . fmt_bytes($data) . '</b>（其中操作日志 ' . fmt_bytes(sysmon_content_stats()[4]) . '）</td></tr>'
+        . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">总占用 / 100MB 配额</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . $pct . '%</b></td></tr>'
+        . '</table>'
+        . '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.9;color:#713f12">'
+        . '<b>建议操作</b>（后台「系统 / 日志 / 监控」页）：<br>'
+        . '1. 清理过期操作日志（日志页「立即清理」或调低保留天数）；<br>'
+        . '2. 下载并删除旧的数据备份与更新前备份（保留最近 1-2 份即可）；<br>'
+        . '3. 删除不再需要的测试内容；<br>'
+        . '4. 如持续紧张，导出数据后联系主机服务商扩容。</div>';
+    $body = mail_template('存储告警', $inner, ['note' => '本邮件由论坛监控系统自动发送（阈值 ' . $th . 'MB，冷却 ' . round(SYSMON_ALERT_COOLDOWN / 3600) . ' 小时）。']);
     $sent = 0;
     $lastErr = '';
     $admins = 0;
