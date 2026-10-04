@@ -1,14 +1,54 @@
 <?php
 /**
- * 极简论坛 · 极简 Markdown 渲染（v1.7.0 扩展版）
- * 支持：标题(#)、加粗(**)、斜体(* 或 _)、删除线(~~)、高亮(==)、行内代码(`)、
- *       围栏代码块(```)、链接([]())、图片(仅 https 外链，懒加载)、裸链接自动识别、
- *       有序/无序列表、任务列表(- [ ] / - [x])、多级引用(>)、表格(| 对齐可选)、分割线(---)
+ * 极简论坛 · 极简 Markdown 渲染（v1.10.0 扩展版）
+ * 支持：标题(#)、加粗(**)、斜体(* 或 _)、删除线(~~)、高亮(==)、上标(^)、下标(~)、行内代码(`)、
+ *       围栏代码块(```)、脚注([^1])、Emoji 短代码(:smile:)、链接([]())、图片(仅 https 外链，懒加载)、
+ *       裸链接自动识别、有序/无序列表、任务列表(- [ ] / - [x])、多级引用(>)、表格(| 对齐可选)、分割线(---)
  * 安全：任何内嵌 HTML 先整体转义（防 XSS）；
  *       图片地址仅接受 https:// 外链；链接/图片地址均为转义后文本，无法闭合属性注入；
  *       已生成的 <code>/<a>/<img> 一律进入占位符保护，避免被后续语法规则破坏。
  */
 defined('APP') or exit('Forbidden');
+
+/** 内置 Emoji 短代码表（name => 字符）：前台表情选择器与 :name: 渲染共用同一套名称 */
+const MD_EMOJI = [
+    'smile' => '😄', 'laughing' => '😆', 'joy' => '😂', 'rofl' => '🤣', 'smiley' => '😃',
+    'grin' => '😁', 'wink' => '😉', 'blush' => '😊', 'innocent' => '😇', 'upside_down' => '🙃',
+    'relieved' => '😌', 'heart_eyes' => '😍', 'kissing_heart' => '😘', 'thinking' => '🤔', 'neutral' => '😐',
+    'expressionless' => '😑', 'smirk' => '😏', 'unamused' => '😒', 'roll_eyes' => '🙄', 'pensive' => '😔',
+    'cry' => '😢', 'sob' => '😭', 'angry' => '😠', 'rage' => '😡', 'scream' => '😱',
+    'cold_sweat' => '😰', 'sleepy' => '😪', 'mask' => '😷', 'sunglasses' => '😎', 'nerd' => '🤓',
+    'clown' => '🤪', 'star_struck' => '🤩', 'party' => '🥳', 'pleading' => '🥺', 'shushing' => '🤫',
+    'zombie' => '🧟', 'ghost' => '👻', 'alien' => '👽', 'robot' => '🤖', 'skull' => '💀',
+    'poop' => '💩', 'clown_face' => '🤡', 'eyes' => '👀', 'brain' => '🧠', 'hug' => '🤗',
+    'thumbsup' => '👍', 'thumbsdown' => '👎', 'ok_hand' => '👌', 'v' => '✌️', 'wave' => '👋',
+    'clap' => '👏', 'pray' => '🙏', 'muscle' => '💪', 'point_right' => '👉', 'point_left' => '👈',
+    'point_up' => '☝️', 'point_down' => '👇', 'raised_hands' => '🙌', 'handshake' => '🤝', 'fist' => '✊',
+    'bow' => '🙇', 'running' => '🏃', 'dancer' => '💃', 'couple' => '👫', 'family' => '👪',
+    'heart' => '❤️', 'orange_heart' => '🧡', 'yellow_heart' => '💛', 'green_heart' => '💚', 'blue_heart' => '💙',
+    'purple_heart' => '💜', 'black_heart' => '🖤', 'broken_heart' => '💔', 'heartpulse' => '💗', 'sparkling_heart' => '💖',
+    'two_hearts' => '💕', 'revolving_hearts' => '💞', 'star' => '⭐', 'sparkles' => '✨', 'fire' => '🔥',
+    'boom' => '💥', 'zap' => '⚡', 'rainbow' => '🌈', 'sunny' => '☀️', 'moon' => '🌙',
+    'cloud' => '☁️', 'snowflake' => '❄️', 'umbrella' => '☔', 'gift' => '🎁', 'bell' => '🔔',
+    'mega' => '📢', 'lock' => '🔒', 'key' => '🔑', 'bulb' => '💡', 'books' => '📚',
+    'book' => '📖', 'memo' => '📝', 'pencil' => '✏️', 'calendar' => '📅', 'alarm_clock' => '⏰',
+    'white_check_mark' => '✅', 'x' => '❌', 'question' => '❓', 'exclamation' => '❗', 'warning' => '⚠️',
+    'no_entry' => '⛔', 'recycle' => '♻️', '100' => '💯', 'hot' => '🥵', 'cold_face' => '🥶',
+    'coffee' => '☕', 'tea' => '🍵', 'beer' => '🍺', 'cake' => '🍰', 'apple' => '🍎',
+    'watermelon' => '🍉', 'pizza' => '🍕', 'ice_cream' => '🍦', 'moon_cake' => '🥮', 'fish' => '🐟',
+    'rice' => '🍚', 'noodles' => '🍜', 'bread' => '🍞', 'egg' => '🥚', 'popcorn' => '🍿',
+    'cat' => '🐱', 'dog' => '🐶', 'mouse' => '🐭', 'rabbit' => '🐰', 'fox' => '🦊',
+    'bear' => '🐻', 'panda' => '🐼', 'tiger' => '🐯', 'lion' => '🦁', 'cow' => '🐮',
+    'pig' => '🐷', 'frog' => '🐸', 'chicken' => '🐤', 'penguin' => '🐧', 'owl' => '🦉',
+    'bee' => '🐝', 'butterfly' => '🦋', 'snail' => '🐌', 'turtle' => '🐢', 'octopus' => '🐙',
+    'whale' => '🐳', 'dolphin' => '🐬', 'blossom' => '🌸', 'rose' => '🌹', 'sunflower' => '🌻',
+    'four_leaf_clover' => '🍀', 'seedling' => '🌱', 'cactus' => '🌵', 'palm_tree' => '🌴', 'computer' => '💻',
+    'iphone' => '📱', 'camera' => '📷', 'headphones' => '🎧', 'music' => '🎵', 'guitar' => '🎸',
+    'video_game' => '🎮', 'car' => '🚗', 'airplane' => '✈️', 'train' => '🚄', 'ship' => '🚢',
+    'house' => '🏠', 'moneybag' => '💰', 'gem' => '💎', 'trophy' => '🏆', 'medal' => '🏅',
+    'soccer' => '⚽', 'basketball' => '🏀', 'ping_pong' => '🏓', 'art' => '🎨', 'ticket' => '🎫',
+    'balloon' => '🎈', 'tada' => '🎉', 'confetti_ball' => '🎊', 'crown' => '👑', 'eyeglasses' => '👓',
+];
 
 function md_inline(string $s): string
 {
@@ -23,6 +63,12 @@ function md_inline(string $s): string
     // 1) 行内代码最先保护（其中的 *、_、URL 等不再参与后续语法）
     $s = preg_replace_callback('/`([^`]+)`/', function ($m) use ($keep) {
         return $keep('<code>' . $m[1] . '</code>');
+    }, $s) ?? $s;
+
+    // 1.5) 脚注引用 [^label] → 上标链接（定义项由 md_render 收集后在文末渲染）
+    $fnPre = (string)($GLOBALS['MF_FN_PRE'] ?? 'fn-');
+    $s = preg_replace_callback('/\[\^([a-zA-Z0-9_\-]{1,20})\]/', function ($m) use ($keep, $fnPre) {
+        return $keep('<sup class="fn-ref" id="fnref-' . $fnPre . $m[1] . '"><a href="#fn-' . $fnPre . $m[1] . '">' . $m[1] . '</a></sup>');
     }, $s) ?? $s;
 
     // 占位符安全检查：URL 若含引号实体（&quot;/&#039;）则放弃渲染，降为纯文本
@@ -46,10 +92,14 @@ function md_inline(string $s): string
         return $keep('<a href="' . $m[2] . '" target="_blank" rel="nofollow noopener">' . $m[1] . '</a>');
     }, $s) ?? $s;
 
-    // 4) 高亮 / 加粗 / 删除线 / 斜体
+    // 4) 高亮 / 加粗 / 删除线 / 下标 / 上标 / 斜体
     $s = preg_replace('/==([^=\n]+)==/', '<mark>$1</mark>', $s) ?? $s;
     $s = preg_replace('/\*\*([^*]+)\*\*/', '<strong>$1</strong>', $s) ?? $s;
     $s = preg_replace('/~~([^~]+)~~/', '<del>$1</del>', $s) ?? $s;
+    // 下标 ~x~（单个波浪线；删除线 ~~ 已先行消费，前后防粘连）
+    $s = preg_replace('/(?<!~)~([^~\n]{1,32})~(?!~)/', '<sub>$1</sub>', $s) ?? $s;
+    // 上标 ^x^
+    $s = preg_replace('/\^([^^\n]{1,32})\^/', '<sup>$1</sup>', $s) ?? $s;
     $s = preg_replace('/\*([^*\s][^*]*)\*/', '<em>$1</em>', $s) ?? $s;
     // _斜体_：前后不能是字母/数字/下划线（避免破坏 URL、文件名与 snake_case）
     $s = preg_replace('/(?<![\p{L}\p{N}_])_([^_\s][^_]*)_(?![\p{L}\p{N}_])/u', '<em>$1</em>', $s) ?? $s;
@@ -62,6 +112,12 @@ function md_inline(string $s): string
         $url = rtrim($m[1], '.,;:!?，。；：！？、）)】》');
         $rest = substr($m[1], strlen($url));
         return $keep('<a href="' . $url . '" target="_blank" rel="nofollow noopener">' . $url . '</a>') . $rest;
+    }, $s) ?? $s;
+
+    // 5.5) Emoji 短代码：:name: → 表情字符（仅识别内置表内名称；时间 10:30 等不会误转换）
+    $s = preg_replace_callback('/:([a-zA-Z0-9_\-]{2,30}):/', function ($m) {
+        $e = MD_EMOJI[strtolower($m[1])] ?? null;
+        return $e !== null ? $e : $m[0];
     }, $s) ?? $s;
 
     // 6) 还原占位符（上限 10 轮，防构造死循环）
@@ -79,6 +135,11 @@ function md_render(string $text): string
     // 防御：剔除控制字符（含 \x01/\x03 内部占位符标记），杜绝用户输入干扰渲染机制
     $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text) ?? $text;
     $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+
+    // 脚注：每次渲染分配独立 ID 前缀（避免同页多个富文本块的锚点冲突），并初始化定义收集器
+    $GLOBALS['MF_FN_SEQ'] = (isset($GLOBALS['MF_FN_SEQ']) ? (int)$GLOBALS['MF_FN_SEQ'] : 0) + 1;
+    $GLOBALS['MF_FN_PRE'] = 'fn' . $GLOBALS['MF_FN_SEQ'] . '-';
+    $fndefs = [];
 
     // 围栏代码块先摘出为占位符
     $blocks = [];
@@ -157,6 +218,11 @@ function md_render(string $text): string
         if (preg_match('/^\x03(\d+)\x03$/', $t, $m)) {
             $flushAll();
             $html[] = $blocks[(int)$m[1]] ?? '';
+            continue;
+        }
+        // 脚注定义：[^label]: 说明文字（收集后在文末统一渲染脚注区）
+        if (preg_match('/^\[\^([a-zA-Z0-9_\-]{1,20})\]:\s*(.*)$/', $t, $fm)) {
+            $fndefs[$fm[1]] = $fm[2];
             continue;
         }
         if (preg_match('/^(#{1,4})\s+(.*)$/', $t, $m)) {
@@ -255,5 +321,14 @@ function md_render(string $text): string
         $para[] = $t;
     }
     $flushAll();
+    // 文末脚注区（仅当正文里写了 [^label]: 定义时出现）
+    if ($fndefs) {
+        $items = '';
+        foreach ($fndefs as $fk => $fv) {
+            $items .= '<li id="fn-' . $GLOBALS['MF_FN_PRE'] . $fk . '">' . md_inline($fv)
+                . ' <a href="#fnref-' . $GLOBALS['MF_FN_PRE'] . $fk . '" aria-label="返回正文">↩</a></li>';
+        }
+        $html[] = '<div class="md-fn"><ol>' . $items . '</ol></div>';
+    }
     return implode("\n", $html);
 }
