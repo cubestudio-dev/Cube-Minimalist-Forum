@@ -393,7 +393,9 @@
       }).then(function (r) { return r.json(); }).then(function (res) {
         geoBtn.disabled = false;
         geoBtn.textContent = old;
-        if (!res.ok) return;
+        var msgEl = document.getElementById('fw-geo-msg');
+        if (msgEl) msgEl.textContent = (res && res.msg) ? res.msg : '';
+        if (!res || !res.ok) return;
         cells.forEach(function (c) {
           var ip = c.getAttribute('data-fw-geo-for');
           if (res.geo && res.geo[ip]) c.textContent = res.geo[ip];
@@ -401,6 +403,8 @@
       }).catch(function () {
         geoBtn.disabled = false;
         geoBtn.textContent = old;
+        var msgEl = document.getElementById('fw-geo-msg');
+        if (msgEl) msgEl.textContent = '请求失败，请刷新页面后重试';
       });
     });
   }

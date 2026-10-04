@@ -100,6 +100,7 @@ function route_action(string $a): void
         case 'admin_update':        admin_tab_guard(); act_admin_update(); return;
         case 'admin_logs_settings': admin_tab_guard(); act_admin_logs_settings(); return;
         case 'admin_logs_clear':    admin_tab_guard(); act_admin_logs_clear(); return;
+        case 'admin_fw_on':           admin_tab_guard(); act_admin_fw_on(); return;
         case 'admin_fw_save':         admin_tab_guard(); act_admin_fw_save(); return;
         case 'admin_fw_intel_save':   admin_tab_guard(); act_admin_fw_intel_save(); return;
         case 'admin_fw_intel_sync':   admin_tab_guard(); act_admin_fw_intel_sync(); return;
@@ -1231,11 +1232,21 @@ function act_admin_logs_clear(): void
 
 /* ================= 管理员：防火墙（安全防护） ================= */
 
-/** 保存防护设置：总开关 / 限流 / 自动策略 / 白名单 / 反代识别 */
+/** 保存防火墙总开关（总览页独立小表单：只动总开关本身，绝不触碰限流 / 策略 / 白名单 / CF 适配等其他设置） */
+function act_admin_fw_on(): void
+{
+    $on = array_key_exists('fw_on', $_POST) ? (!empty($_POST['fw_on']) ? 1 : 0) : (int)cfg('fw_on', 1);
+    cfg_update(['fw_on' => $on]);
+    log_action('fw_save', '防护总开关：' . ($on ? '开' : '关') . '（其余防护设置保持不变）');
+    act_ok('总开关已保存，其余防护设置未改动', u('p=admin&tab=security'));
+}
+
+/** 保存防护设置：总开关 / 限流 / 自动策略 / 白名单 / 反代识别（完整表单；未提交的字段保留原值） */
 function act_admin_fw_save(): void
 {
     $kv = [
-        'fw_on'              => !empty($_POST['fw_on']) ? 1 : 0,
+        // 旧 bug：总开关小表单也提交到这里，缺字段全部按默认值覆盖；现在缺省字段一律回退当前值，不再误重置
+        'fw_on'              => array_key_exists('fw_on', $_POST) ? (!empty($_POST['fw_on']) ? 1 : 0) : (int)cfg('fw_on', 1),
         'fw_rl_on'           => !empty($_POST['fw_rl_on']) ? 1 : 0,
         'fw_rl_pm'           => max(5, min(10000, (int)($_POST['fw_rl_pm'] ?? 60))),
         'fw_rl_ban_min'      => max(0, min(1440, (int)($_POST['fw_rl_ban_min'] ?? 0))),
@@ -1505,10 +1516,10 @@ function act_admin_fw_geo_batch(): void
     if (!$arr) {
         json_response(['ok' => false, 'msg' => '没有有效的 IP']);
     }
-    $geo = fw_geo_lookup($arr);
+    $r = fw_geo_lookup($arr);
     $out = [];
-    foreach ($geo as $ip => $r) {
-        $out[$ip] = fw_geo_label($r);
+    foreach (($r['geo'] ?? []) as $ip => $g) {
+        $out[$ip] = fw_geo_label($g);
     }
-    json_response(['ok' => true, 'geo' => $out]);
+    json_response(['ok' => true, 'geo' => $out, 'msg' => (string)($r['msg'] ?? '')]);
 }

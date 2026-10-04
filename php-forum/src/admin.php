@@ -749,16 +749,17 @@ function admin_tab_security(): void
         '<div class="stat"><b>' . count($bans) . '</b><span>封禁名单</span></div>' .
         '<div class="stat"><b>' . (int)$intel['total'] . '</b><span>危险库条数</span></div>' .
         '</div>' .
-        '<form method="post" action="' . e(u('a=admin_fw_save')) . '" class="inline-form">' . csrf_field() .
+        '<form method="post" action="' . e(u('a=admin_fw_on')) . '" class="inline-form">' . csrf_field() .
         '<label class="field" style="max-width:260px"><span class="field-l">防火墙总开关</span><select name="fw_on" class="input">' .
         '<option value="1"' . ($on ? ' selected' : '') . '>开启（推荐）</option>' .
         '<option value="0"' . (!$on ? ' selected' : '') . '>关闭（仅统计不拦截）</option></select></label>' .
         '<button class="btn btn-primary" type="submit">保存总开关</button></form>' .
-        '<p class="hint">五道防线依次执行：白名单 → 封禁名单 → 危险 IP 库 → 限流 → 自动策略。已登录的管理员不受拦截；危险 IP 库数据来自公开威胁情报源，误判时可把对方 IP 加入白名单。</p></div>';
+        '<p class="hint">此表单<b>只切换总开关</b>，不会改动下方「限流与自动策略 / 白名单 / 真实 IP 识别」等任何其他设置。五道防线依次执行：白名单 → 封禁名单 → 危险 IP 库 → 限流 → 自动策略。已登录的管理员不受拦截；危险 IP 库数据来自公开威胁情报源，误判时可把对方 IP 加入白名单。</p></div>';
 
     /* ---- 防护设置（限流 / 策略 / 白名单 / 代理） ---- */
     echo '<div class="card form-card"><h2 class="card-title">限流与自动策略</h2>' .
-        '<form method="post" action="' . e(u('a=admin_fw_save')) . '">' . csrf_field();
+        '<form method="post" action="' . e(u('a=admin_fw_save')) . '">' . csrf_field() .
+        '<input type="hidden" name="fw_on" value="' . ($on ? '1' : '0') . '">';
     echo '<div class="grid2">';
     echo '<label class="field"><span class="field-l">访问限流</span><select name="fw_rl_on" class="input">' .
         '<option value="1"' . ($rlOn ? ' selected' : '') . '>开启</option><option value="0"' . (!$rlOn ? ' selected' : '') . '>关闭</option></select></label>';
@@ -915,8 +916,9 @@ function admin_tab_security(): void
     }
     echo '</tbody></table></div>';
     echo '<button class="btn btn-ghost btn-sm" type="button" data-fw-geo>查询本页归属地（免key接口，未查询到的才会请求）</button> ';
+    echo '<span class="muted" id="fw-geo-msg"></span>';
     echo paginate($ipTotal, $ipPer, $ipPage, 'p=admin&tab=security&ssort=' . $sort);
-    echo '<p class="hint">统计随访问自动聚合（每 60 秒落盘一次）；7 天不活跃的 IP 自动移除统计。归属地通过 ip-api.com 免费接口批量查询并缓存 30 天。</p></div>';
+    echo '<p class="hint">统计随访问自动聚合（每 60 秒落盘一次）；7 天不活跃的 IP 自动移除统计。归属地通过 ip-api.com 免费接口批量查询并缓存 30 天（主源连不上时自动改用备用源，查不到的 IP 稍后重试，不会留下错误的「未知」记录）。</p></div>';
 
     /* ---- 封禁管理 ---- */
     echo '<div class="card form-card"><h2 class="card-title">手动封禁</h2>' .

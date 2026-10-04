@@ -680,6 +680,39 @@ function fw_http_get(string $url, int $timeout = 20): string
     return is_string($body) ? $body : '';
 }
 
+/** POST JSON 请求（cURL 优先，回退 file_get_contents 流上下文），失败返回空串 */
+function fw_http_post(string $url, string $payload, int $timeout = 15): string
+{
+    if (!preg_match('#^https?://#i', $url) || $payload === '') {
+        return '';
+    }
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_USERAGENT      => 'CubeMinimalistForum/' . app_version(),
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
+        $body = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return ($code === 200 && is_string($body)) ? $body : '';
+    }
+    $ctx = stream_context_create(['http' => [
+        'timeout'    => $timeout,
+        'method'     => 'POST',
+        'header'     => "Content-Type: application/x-www-form-urlencoded\r\n",
+        'content'    => $payload,
+        'user_agent' => 'CubeMinimalistForum/' . app_version(),
+    ]]);
+    $body = @file_get_contents($url, false, $ctx);
+    return is_string($body) ? $body : '';
+}
+
 /**
  * 同步危险 IP 库：内置源（按后台开关）+ 自定义源 → 解析合并 → 写 fw_intel.php
  * @return array 摘要 ['synced','total','ips','nets','sources'=>{key:[ok,name,err,count]}]
@@ -1049,12 +1082,31 @@ function fw_geo_cache_read(): array
     return is_array($g) ? $g : [];
 }
 
-/** 取归属地缓存文案；未命中返回 null */
+/** 判定归属地缓存条目是否为空（历史版本曾把查询失败的行也缓存成全空条目，导致永久显示「未知」） */
+function fw_geo_entry_empty(array $r): bool
+{
+    return (string)($r['c'] ?? '') === ''
+        && (string)($r['r'] ?? '') === ''
+        && (string)($r['city'] ?? '') === ''
+        && (string)($r['isp'] ?? '') === '';
+}
+
+/** 取归属地缓存文案；未命中或空条目（视为未查询）返回 null */
 function fw_geo_get(string $ip): ?array
 {
     $g = fw_geo_cache_read();
     $r = $g[$ip] ?? null;
-    return is_array($r) ? $r : null;
+    if (!is_array($r) || fw_geo_entry_empty($r)) {
+        return null;
+    }
+    return $r;
+}
+
+/** 归属地失败重试节流表：{ip: 最早可重试时间戳}，避免对失败 IP / 不可达数据源每页都反复请求 */
+function fw_geo_miss_read(): array
+{
+    $m = Store::read('fw_geo_miss.php', []);
+    return is_array($m) ? $m : [];
 }
 
 /** 归属地展示文案 */
@@ -1073,7 +1125,10 @@ function fw_geo_label(array $r): string
 
 /**
  * 批量查询归属地（每批 ≤ 60 个），结果并入缓存（保留最近 3000 条）
- * @return array {ip: {c,r,city,isp}} 仅本次查询成功的
+ * 主源：ip-api.com 免费批量接口（HTTP，免 key，cURL / file_get_contents 双通道）
+ * 备源：主源整体不可用或全部失败时，逐个查询 ipwho.is（HTTPS，免 key，单请求最多 8 个）
+ * 失败的 IP 不再写缓存（旧版会把失败行缓存成空条目 → 永久显示「未知」），改为记入节流表稍后自动重试
+ * @return array {geo: {ip: {c,r,city,isp}}, msg: string} geo 仅含本次成功结果；msg 为给管理员的诊断提示（可为空）
  */
 function fw_geo_lookup(array $ips): array
 {
@@ -1081,62 +1136,113 @@ function fw_geo_lookup(array $ips): array
         return is_string($x) && filter_var($x, FILTER_VALIDATE_IP) !== false;
     }));
     if (!$ips) {
-        return [];
+        return ['geo' => [], 'msg' => ''];
     }
     $ips = array_slice(array_unique($ips), 0, 60);
     $cache = fw_geo_cache_read();
+    $miss = fw_geo_miss_read();
+    $now = time();
     $need = [];
     foreach ($ips as $ip) {
-        if (!isset($cache[$ip]) || time() - (int)($cache[$ip]['ts'] ?? 0) > 30 * 86400) {
+        $c = $cache[$ip] ?? null;
+        // 无缓存 / 已过期 / 全空条目（历史污染）→ 都需要（重新）查询
+        if (!is_array($c) || fw_geo_entry_empty($c) || $now - (int)($c['ts'] ?? 0) > 30 * 86400) {
+            if ((int)($miss[$ip] ?? 0) > $now) {
+                continue; // 失败节流中，本次先不重试
+            }
             $need[] = $ip;
         }
     }
-    if ($need && function_exists('curl_init')) {
-        $url = 'http://ip-api.com/batch?fields=query,status,country,regionName,city,isp&lang=zh-CN';
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => json_encode($need),
-            CURLOPT_TIMEOUT        => 15,
-            CURLOPT_CONNECTTIMEOUT => 8,
-        ]);
-        $body = curl_exec($ch);
-        curl_close($ch);
-        $list = is_string($body) ? json_decode($body, true) : null;
+    $msg = '';
+    if ($need) {
+        $okCount = 0;
+        // 主源：ip-api.com 批量
+        $body = fw_http_post('http://ip-api.com/batch?fields=query,status,country,regionName,city,isp&lang=zh-CN', json_encode($need), 15);
+        $list = is_string($body) && $body !== '' ? json_decode($body, true) : null;
         if (is_array($list)) {
             foreach ($list as $row) {
                 if (!is_array($row) || empty($row['query'])) {
                     continue;
                 }
                 $ip = (string)$row['query'];
+                if ((string)($row['status'] ?? '') !== 'success') {
+                    // 查询失败（保留段 / 限流等）：不缓存，30 分钟内不重试
+                    $miss[$ip] = $now + 1800;
+                    continue;
+                }
                 $cache[$ip] = [
                     'c'    => cut_str((string)($row['country'] ?? ''), 20),
                     'r'    => cut_str((string)($row['regionName'] ?? ''), 20),
                     'city' => cut_str((string)($row['city'] ?? ''), 20),
                     'isp'  => cut_str((string)($row['isp'] ?? ''), 30),
-                    'ts'   => time(),
+                    'ts'   => $now,
                 ];
+                $okCount++;
             }
         }
-        // 缓存上限
-        if (count($cache) > 3000) {
-            uasort($cache, function ($a, $b) {
-                return (int)($b['ts'] ?? 0) <=> (int)($a['ts'] ?? 0);
-            });
-            $cache = array_slice($cache, 0, 3000, true);
+        if ($okCount === 0) {
+            // 主源不可用（无 curl、外网不通、被限流等）→ 备源逐个查询，单请求最多 8 个避免拖慢页面
+            $fb = 0;
+            foreach (array_slice($need, 0, 8) as $ip) {
+                $b = fw_http_get('https://ipwho.is/' . rawurlencode($ip), 10);
+                $j = is_string($b) && $b !== '' ? json_decode($b, true) : null;
+                if (!is_array($j) || empty($j['success'])) {
+                    $miss[$ip] = $now + 1800;
+                    continue;
+                }
+                $cache[$ip] = [
+                    'c'    => cut_str((string)($j['country'] ?? ''), 20),
+                    'r'    => cut_str((string)($j['region'] ?? ''), 20),
+                    'city' => cut_str((string)($j['city'] ?? ''), 20),
+                    'isp'  => cut_str((string)(is_array($j['connection'] ?? null) ? ($j['connection']['isp'] ?? '') : ''), 30),
+                    'ts'   => $now,
+                ];
+                $okCount++;
+                $fb++;
+            }
+            if ($okCount === 0) {
+                foreach ($need as $ip) {
+                    $miss[$ip] = $now + 3600;
+                }
+                $msg = '归属地数据源暂时连不上（服务器当前访问不了 ip-api.com / ipwho.is，请检查主机外网连通性），稍后再点一次即可';
+            } else {
+                $msg = '主源暂不可用，已用备用源查到 ' . $fb . ' 个（其余稍后自动补查）';
+            }
+        } elseif ($okCount < count($need)) {
+            $msg = '查询完成：成功 ' . $okCount . ' 个，' . (count($need) - $okCount) . ' 个暂查不到（30 分钟后自动重试）';
         }
-        $lk = Store::lock('fw_geo', 3);
-        Store::write('fw_geo.php', $cache);
+    }
+    // 缓存上限
+    if (count($cache) > 3000) {
+        uasort($cache, function ($a, $b) {
+            return (int)($b['ts'] ?? 0) <=> (int)($a['ts'] ?? 0);
+        });
+        $cache = array_slice($cache, 0, 3000, true);
+    }
+    $lk = Store::lock('fw_geo', 3);
+    Store::write('fw_geo.php', $cache);
+    Store::unlock($lk);
+    // 失败节流表：清理已过期项，最多保留 300 条
+    $missBefore = count($miss);
+    $miss = array_filter($miss, function ($t) {
+        return (int)$t > time();
+    });
+    if (count($miss) > 300) {
+        arsort($miss);
+        $miss = array_slice($miss, 0, 300, true);
+    }
+    if (count($miss) !== $missBefore || $miss) {
+        $lk = Store::lock('fw_geo_miss', 3);
+        Store::write('fw_geo_miss.php', $miss);
         Store::unlock($lk);
     }
     $out = [];
     foreach ($ips as $ip) {
-        if (isset($cache[$ip]) && is_array($cache[$ip])) {
+        if (isset($cache[$ip]) && is_array($cache[$ip]) && !fw_geo_entry_empty($cache[$ip])) {
             $out[$ip] = $cache[$ip];
         }
     }
-    return $out;
+    return ['geo' => $out, 'msg' => $msg];
 }
 
 /* ================= 拦截页面 ================= */
