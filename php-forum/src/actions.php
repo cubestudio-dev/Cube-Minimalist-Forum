@@ -668,7 +668,9 @@ function act_admin_test_mail(): void
     if (!valid_email($to)) {
         json_response(['ok' => false, 'msg' => '请填写有效的测试收件邮箱']);
     }
-    [$ok, $err] = mail_send($to, (string)cfg('site_name', '论坛') . ' · SMTP 测试邮件', "这是一封测试邮件。\r\n如果您收到了它，说明邮件配置正确。\r\n\r\n—— " . (string)cfg('site_name', '论坛'), $ov);
+    $inner = '<p style="margin:0 0 12px">这是一封 <b>SMTP 配置测试邮件</b>。</p>'
+        . '<div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.7;color:#065f46">如果您收到了这封邮件（含本美化版式），说明邮件配置正确，验证码 / 通知 / 告警等系统邮件均会以此格式发送。</div>';
+    [$ok, $err] = mail_send($to, (string)cfg('site_name', '论坛') . ' · SMTP 测试邮件', mail_template('SMTP 测试邮件', $inner), $ov);
     if ($ok) {
         log_action('admin_test_mail', '测试邮件已发送至 ' . $to);
     }
