@@ -119,9 +119,7 @@ function page_thread(): void
     echo '<div class="art-ops">';
     if ($u) {
         echo like_btn('t', $tid, 0, $t['likes'] ?? [], $uid);
-        if (!$admin) {
-            echo report_box('t', $tid, 0);
-        }
+        echo report_box('t', $tid, 0);
         if ($author === $uid) {
             echo '<form method="post" action="' . e(u('a=thread_delete')) . '" class="inline" data-confirm="确认删除自己的这条帖子？此操作不可恢复。">' .
                 '<input type="hidden" name="tid" value="' . $tid . '">' . csrf_field() . hidden_back() .
@@ -183,9 +181,7 @@ function page_thread(): void
         echo '<div class="reply-ops">';
         if ($u && !$rhidden) {
             echo like_btn('r', $tid, $rid, $r['likes'] ?? [], $uid);
-            if (!$admin) {
-                echo report_box('r', $tid, $rid);
-            }
+            echo report_box('r', $tid, $rid);
             if ((int)$r['author'] === $uid) {
                 echo '<form method="post" action="' . e(u('a=reply_delete')) . '" class="inline" data-confirm="确认删除自己的这条回复？">' .
                     '<input type="hidden" name="tid" value="' . $tid . '"><input type="hidden" name="rid" value="' . $rid . '">' .
@@ -340,6 +336,7 @@ function page_user(): void
         '<div class="stat"><b>' . (int)($p['likes_recv'] ?? 0) . '</b><span>被赞</span></div>' .
         '<div class="stat"><b>' . (int)($p['replies_recv'] ?? 0) . '</b><span>被回复</span></div>' .
         '<div class="stat"><b>' . e(fmt_dt((int)($p['created'] ?? 0))) . '</b><span>加入时间</span></div>' .
+        '<div class="stat"><b>' . max(1, (int)floor((time() - (int)($p['created'] ?? time())) / 86400) + 1) . ' 天</b><span>加入论坛</span></div>' .
         '</div></div>';
 
     echo page_head('TA 的帖子');
@@ -448,6 +445,73 @@ function page_announcements(): void
         }
         echo '</div>';
     }
+    layout_footer();
+}
+
+/* ---------------- 在线详情（v1.10.0） ---------------- */
+
+/** 逗逛时长文案：X 小时 Y 分 / X 分 Y 秒 / Y 秒 */
+function online_dur(int $in): string
+{
+    $s = max(0, time() - $in);
+    if ($s >= 3600) {
+        return floor($s / 3600) . ' 小时 ' . floor(($s % 3600) / 60) . ' 分';
+    }
+    if ($s >= 60) {
+        return floor($s / 60) . ' 分 ' . ($s % 60) . ' 秒';
+    }
+    return $s . ' 秒';
+}
+
+function page_online(): void
+{
+    $d = online_details();
+    $w = (int)$d['window'];
+    $nu = count($d['users']);
+    $ng = count($d['guests']);
+    layout_header('当前在线', 0);
+    echo page_head('当前在线', "最近 {$w} 秒内有活动：{$nu} 位注册用户 · {$ng} 位游客");
+
+    /* 注册用户：点击进入个人主页 */
+    echo '<div class="card online-card"><h2 class="card-title">注册用户（' . $nu . '）</h2><div class="online-list">';
+    if (!$d['users']) {
+        echo '<p class="muted" style="padding:6px 4px">当前没有注册用户在线</p>';
+    }
+    foreach ($d['users'] as $x) {
+        echo '<a class="online-row" href="' . e(u('p=user&id=' . (int)$x['uid'])) . '">' .
+            '<span class="avatar avatar-sm" aria-hidden="true">' . e(cut_str((string)$x['name'], 1)) . '</span>' .
+            '<span class="online-name"><b>' . e((string)$x['name']) . '</b>' .
+            '<span class="muted">已逛 ' . online_dur((int)$x['in']) . '</span></span>' .
+            '<span class="muted online-last">活跃 ' . fmt_time((int)$x['t']) . '</span></a>';
+    }
+    echo '</div></div>';
+
+    /* 游客：名称 = 游客 + 逗逛时长；时长相同的按 A/B/C 字母区分 */
+    $durs = [];
+    foreach ($d['guests'] as $i => $g) {
+        $durs[online_dur((int)$g['in'])][] = $i;
+    }
+    $letters = [];
+    foreach ($durs as $idxs) {
+        if (count($idxs) > 1) {
+            foreach ($idxs as $k => $i) {
+                $letters[$i] = chr(65 + min($k, 25));
+            }
+        }
+    }
+    echo '<div class="card online-card"><h2 class="card-title">游客（' . $ng . '）</h2><div class="online-list">';
+    if (!$d['guests']) {
+        echo '<p class="muted" style="padding:6px 4px">当前没有游客在线</p>';
+    }
+    foreach ($d['guests'] as $i => $g) {
+        $tag = isset($letters[$i]) ? ' <span class="badge badge-info online-tag">' . $letters[$i] . '</span>' : '';
+        echo '<div class="online-row">' .
+            '<span class="avatar avatar-sm avatar-guest" aria-hidden="true">客</span>' .
+            '<span class="online-name"><b>游客' . $tag . '</b>' .
+            '<span class="muted">已逛 ' . online_dur((int)$g['in']) . '</span></span>' .
+            '<span class="muted online-last">活跃 ' . fmt_time((int)$g['t']) . '</span></div>';
+    }
+    echo '</div><p class="hint" style="margin:10px 4px 2px">游客按时长相同者标注 A / B / C 以便区分；刷新页面可查看最新名单。</p></div>';
     layout_footer();
 }
 
