@@ -98,3 +98,7 @@ minimal-forum_tmp/
 /robots.txt
 /CHANGELOG.md
 /.htaccess
+
+# 开发期测试脚本（本地保留，不入交付仓库）
+tests-fw/
+/tests-md/

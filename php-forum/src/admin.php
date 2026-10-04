@@ -1,7 +1,7 @@
 <?php
 /**
  * 极简论坛 · 后台管理（仅管理员）
- * 标签页：基本 / 邮件 / AI / 板块 / 用户 / 内容 / AI 队列 / 人工待审 / 举报记录 / 公告 / 主题 / 日志 / 监控 / 更新升级 / 系统
+ * 标签页：基本 / 邮件 / AI / 板块 / 用户 / 内容 / AI 队列 / 人工待审 / 举报记录 / 公告 / 主题 / 日志 / 安全防护 / 监控 / 更新升级 / 系统
  */
 defined('APP') or exit('Forbidden');
 
@@ -18,7 +18,7 @@ function page_admin(): void
     $tabs = [
         'basic' => '基本', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
-        'anns' => '公告', 'theme' => '主题', 'logs' => '日志', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
+        'anns' => '公告', 'theme' => '主题', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
     echo '<div class="admin-tabs">';
     foreach ($tabs as $k => $v) {
@@ -39,6 +39,7 @@ function page_admin(): void
         case 'anns': admin_tab_anns(); break;
         case 'theme': admin_tab_theme(); break;
         case 'logs': admin_tab_logs(); break;
+        case 'security': admin_tab_security(); break;
         case 'monitor': admin_tab_monitor(); break;
         case 'update': admin_tab_update(); break;
         case 'system': admin_tab_system($me); break;
@@ -717,4 +718,314 @@ function admin_tab_update(): void
             '</div>';
     }
     echo '</div></div>';
+}
+
+/* ================= 安全防护（防火墙） ================= */
+
+/** 安全防护总览（防火墙 / 限流 / 策略 / 危险 IP 库 / 访问统计 / 封禁 / 事件日志） */
+function admin_tab_security(): void
+{
+    // 访问统计已随每次计数原子落盘（fw_state_save），直接读 fw_state.php 即为最新数据
+    $on = (int)cfg('fw_on', 1) === 1;
+    $st = Store::read('fw_state.php', []);
+    if (!is_array($st)) {
+        $st = [];
+    }
+    $days = is_array($st['days'] ?? null) ? $st['days'] : [];
+    $today = $days[date('Y-m-d')] ?? ['req' => 0, 'blocked' => 0, 'bans' => 0];
+    $yKey = date('Y-m-d', time() - 86400);
+    $yday = $days[$yKey] ?? ['req' => 0, 'blocked' => 0, 'bans' => 0];
+    $bans = function_exists('fw_bans_all') ? fw_bans_all() : [];
+    $intel = function_exists('fw_intel_load') ? fw_intel_load() : ['synced' => 0, 'total' => 0, 'sources' => []];
+    $rlOn = (int)cfg('fw_rl_on', 1) === 1;
+    $scOn = (int)cfg('fw_score_on', 1) === 1;
+
+    /* ---- 总览 ---- */
+    echo '<div class="card form-card"><h2 class="card-title">防护总览</h2><div class="stat-row">' .
+        '<div class="stat"><b>' . (int)($today['req'] ?? 0) . '</b><span>今日请求</span></div>' .
+        '<div class="stat"><b style="color:var(--danger)">' . (int)($today['blocked'] ?? 0) . '</b><span>今日拦截</span></div>' .
+        '<div class="stat"><b>' . (int)($today['bans'] ?? 0) . '</b><span>今日新增封禁</span></div>' .
+        '<div class="stat"><b>' . (int)($yday['req'] ?? 0) . '</b><span>昨日请求</span></div>' .
+        '<div class="stat"><b>' . count($bans) . '</b><span>封禁名单</span></div>' .
+        '<div class="stat"><b>' . (int)$intel['total'] . '</b><span>危险库条数</span></div>' .
+        '</div>' .
+        '<form method="post" action="' . e(u('a=admin_fw_save')) . '" class="inline-form">' . csrf_field() .
+        '<label class="field" style="max-width:260px"><span class="field-l">防火墙总开关</span><select name="fw_on" class="input">' .
+        '<option value="1"' . ($on ? ' selected' : '') . '>开启（推荐）</option>' .
+        '<option value="0"' . (!$on ? ' selected' : '') . '>关闭（仅统计不拦截）</option></select></label>' .
+        '<button class="btn btn-primary" type="submit">保存总开关</button></form>' .
+        '<p class="hint">五道防线依次执行：白名单 → 封禁名单 → 危险 IP 库 → 限流 → 自动策略。已登录的管理员不受拦截；危险 IP 库数据来自公开威胁情报源，误判时可把对方 IP 加入白名单。</p></div>';
+
+    /* ---- 防护设置（限流 / 策略 / 白名单 / 代理） ---- */
+    echo '<div class="card form-card"><h2 class="card-title">限流与自动策略</h2>' .
+        '<form method="post" action="' . e(u('a=admin_fw_save')) . '">' . csrf_field();
+    echo '<div class="grid2">';
+    echo '<label class="field"><span class="field-l">访问限流</span><select name="fw_rl_on" class="input">' .
+        '<option value="1"' . ($rlOn ? ' selected' : '') . '>开启</option><option value="0"' . (!$rlOn ? ' selected' : '') . '>关闭</option></select></label>';
+    echo '<label class="field"><span class="field-l">每 IP 每分钟请求上限</span><input class="input" type="number" name="fw_rl_pm" min="5" max="10000" value="' . (int)cfg('fw_rl_pm', 60) . '"><span class="hint">超限返回 429；登录管理员不受限</span></label>';
+    $rlBan = (int)cfg('fw_rl_ban_min', 0);
+    echo '<label class="field"><span class="field-l">超限自动临时封禁（分钟，0=只限流不封）</span><input class="input" type="number" name="fw_rl_ban_min" min="0" max="1440" value="' . $rlBan . '"></label>';
+    echo '<label class="field"><span class="field-l">自动策略引擎</span><select name="fw_score_on" class="input">' .
+        '<option value="1"' . ($scOn ? ' selected' : '') . '>开启</option><option value="0"' . (!$scOn ? ' selected' : '') . '>关闭</option></select></label>';
+    echo '<label class="field"><span class="field-l">自动封禁风险阈值</span><input class="input" type="number" name="fw_score_threshold" min="20" max="10000" value="' . (int)cfg('fw_score_threshold', 100) . '"><span class="hint">10 分钟窗口内风险分累计达到阈值即自动封禁</span></label>';
+    echo '<label class="field"><span class="field-l">自动封禁时长（小时）</span><input class="input" type="number" name="fw_auto_ban_hours" min="1" max="720" value="' . (int)cfg('fw_auto_ban_hours', 24) . '"></label>';
+    echo '</div>';
+    echo '<div class="field"><span class="field-l">内置策略规则（可单独开关）</span><div class="check-grid">';
+    $rules = [
+        'fw_r_empty_ua'  => ['空 UA 请求（+40 分）', 1],
+        'fw_r_script_ua' => ['脚本 / 攻击工具 UA（+50 分）', 1],
+        'fw_r_scan_path' => ['敏感路径探测 wp-admin/.env 等（+80 分）', 1],
+        'fw_r_inject'    => ['SQL 注入 / XSS / 目录穿越特征（+90 分）', 1],
+        'fw_spider_allow' => ['放行搜索引擎蜘蛛 UA（不误伤收录）', 1],
+    ];
+    foreach ($rules as $k => $v) {
+        $val = (int)cfg($k, $v[1]) === 1;
+        echo '<label class="check"><input type="checkbox" name="' . $k . '" value="1"' . ($val ? ' checked' : '') . '> ' . e($v[0]) . '</label>';
+    }
+    echo '</div></div>';
+    echo '<label class="field"><span class="field-l">IP 白名单（逗号或换行分隔，支持网段 1.2.3.0/24；命中后跳过一切拦截）</span>' .
+        '<textarea class="input" name="fw_whitelist" rows="2" placeholder="如：203.0.113.7, 198.51.100.0/24">' . e((string)cfg('fw_whitelist', '')) . '</textarea>' .
+        '<span class="hint">你当前的 IP：<b>' . e(fw_ip()) . '</b>（建议加入白名单，避免自己被误拦）</span></label>';
+
+    /* ---- 真实 IP 识别（CDN / 反代适配，v1.8.1） ---- */
+    $link = fw_link_info();
+    $modeMap = [
+        'cloudflare' => ['Cloudflare CDN', 'badge-ok'],
+        'cf-proxy'   => ['Cloudflare → 本机反代', 'badge-ok'],
+        'xff'        => ['经代理（XFF）', 'badge-warn'],
+        'direct'     => ['直连', 'badge-ok'],
+    ];
+    [$modeName, $modeBadge] = $modeMap[$link['mode']] ?? [$link['mode'], ''];
+    echo '<div class="field"><span class="field-l">真实 IP 识别（当前请求链路诊断）</span>' .
+        '<div class="admin-list" style="margin:6px 0 4px">' .
+        '<div class="admin-row"><div class="u-info"><b>' . e($modeName) . '</b>' .
+        '<span class="muted">REMOTE_ADDR（TCP 对端）=' . e($link['remote'] !== '' ? $link['remote'] : '—') .
+        ($link['cfip'] !== '' ? '；CF-Connecting-IP=' . e($link['cfip']) : '') .
+        ($link['xff'] !== '' ? '；X-Forwarded-For=' . e(cut_str($link['xff'], 80)) : '') . '</span></div>' .
+        '<span class="badge ' . $modeBadge . '">识别 IP：' . e($link['resolved'] !== '' ? $link['resolved'] : '未知') . '</span></div>' .
+        '</div></div>';
+    echo '<label class="check"><input type="checkbox" name="fw_trust_cf" value="1"' . ((int)cfg('fw_trust_cf', 1) === 1 ? ' checked' : '') . '> Cloudflare CDN 适配（推荐开启：自动识别 Cloudflare 官方网段，从 CF-Connecting-IP 取真实访客 IP）</label>' .
+        '<span class="hint">开启后，仅当请求的 TCP 对端确属 Cloudflare 官方网段（v4 + IPv6 共 22 条，内置）才信任 CF-Connecting-IP 头，直连伪造无效——限流、封禁、访问统计、IP 归属地全部基于真实 IP，避免「同节点访客被集体限流 / 自动封禁误封 Cloudflare 节点导致整站 403」。未使用 Cloudflare 时此开关无任何影响。</span>' .
+        '<label class="check" style="margin-top:8px"><input type="checkbox" name="fw_trust_xff" value="1"' . ((int)cfg('fw_trust_xff', 0) === 1 ? ' checked' : '') . '> 站点在反向代理 / 其他 CDN 之后（信任 X-Forwarded-For）</label>' .
+        '<span class="hint">宝塔反代、其他不带真实 IP 头的 CDN 等场景开启（从 X-Forwarded-For 首段取 IP）；套在 Cloudflare 之前时会自动优先用更可信的 CF-Connecting-IP。直接暴露的服务器请勿开启，否则可被伪造头绕过限流。</span>' .
+        '<label class="field" style="margin-top:8px"><span class="field-l">Cloudflare 网段覆盖（可选，留空 = 使用程序内置 CF 官方网段）</span>' .
+        '<textarea class="input" name="fw_cf_ranges" rows="2" placeholder="如 Cloudflare 官方调整网段，可在此填入：104.16.0.0/13, 2606:4700::/32">' . e((string)cfg('fw_cf_ranges', '')) . '</textarea>' .
+        '<span class="hint">逗号 / 空白分隔，支持 IPv4 与 IPv6 CIDR；仅当 CF 官方发布新网段而程序未跟进时才需要填写。</span></label>';
+    echo '<details style="margin-top:6px"><summary class="muted">Cloudflare 接入推荐配置（点开查看）</summary>' .
+        '<div class="hint" style="margin-top:8px;line-height:1.9">' .
+        '① <b>SSL/TLS 模式</b>：Cloudflare 面板设为「完全（严格）」，源站配有效证书，全链路 HTTPS；<br>' .
+        '② <b>缓存</b>：论坛页面带登录态，请勿添加「缓存 HTML」的规则（默认只缓存 css/js/图片，保持默认即可）；<br>' .
+        '③ <b>Rocket Loader / Email 混淆</b>：建议关闭（可能干扰发帖表单与邮件显示）；<br>' .
+        '④ <b>速率限制 / WAF</b>：可按需在 CF 面板加一层，但建议阈值放宽，程序内置防火墙已按真实 IP 限流；<br>' .
+        '⑤ <b>「我正在被攻击」模式</b>：开启后人机验证可能拦截发帖与登录，仅在遭遇攻击时短期使用；<br>' .
+        '⑥ 本程序无需任何 CF 侧配置即可取到真实 IP——装上本版本即自动生效，后台上方诊断卡可随时核验。</div></details>';
+    echo '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存防护设置</button></div></form></div>';
+
+    /* ---- 危险 IP 库 ---- */
+    $synced = (int)$intel['synced'];
+    $stale = $synced > 0 && $synced < time() - max(1, (int)cfg('fw_intel_hours', 24)) * 3600;
+    echo '<div class="card form-card"><h2 class="card-title">危险 IP 库（威胁情报）</h2>' .
+        '<div class="mon-grid">' .
+        '<div class="mon-cell' . ((int)$intel['total'] > 0 ? '' : ' cell-bad') . '"><b>' . (int)$intel['total'] . '</b><span>已入库条数</span></div>' .
+        '<div class="mon-cell"><b>' . ($synced > 0 ? e(fmt_dt($synced)) : '未同步') . '</b><span>上次同步' . ($stale ? '（已过期，建议同步）' : '') . '</span></div>' .
+        '<div class="mon-cell"><b>每 ' . (int)cfg('fw_intel_hours', 24) . ' 小时</b><span>自动同步间隔（打开本页时惰性触发）</span></div>' .
+        '</div>';
+    // 各源状态
+    $sources = is_array($intel['sources'] ?? null) ? $intel['sources'] : [];
+    if ($sources) {
+        echo '<div class="admin-list">';
+        foreach ($sources as $s) {
+            $ok = !empty($s['ok']) && (int)($s['count'] ?? 0) >= 0 && (string)($s['err'] ?? '') === '';
+            echo '<div class="admin-row"><div class="u-info"><b>' . e((string)($s['name'] ?? '源')) . '</b>' .
+                '<span class="muted">' . (!empty($s['ok']) ? ((string)($s['err'] ?? '') !== '' ? e($s['err']) : '成功 · ' . (int)($s['count'] ?? 0) . ' 条') : '失败：' . e((string)($s['err'] ?? '未知'))) . '</span></div>' .
+                '<span class="badge' . (!empty($s['ok']) ? ' badge-ok' : ' badge-warn') . '">' . (!empty($s['ok']) ? '正常' : '异常') . '</span></div>';
+        }
+        echo '</div>';
+    }
+    echo '<form method="post" action="' . e(u('a=admin_fw_intel_save')) . '">' . csrf_field() . '<div class="grid2">';
+    echo '<label class="field"><span class="field-l">危险 IP 库拦截</span><select name="fw_intel_on" class="input">' .
+        '<option value="1"' . ((int)cfg('fw_intel_on', 1) === 1 ? ' selected' : '') . '>开启</option><option value="0"' . ((int)cfg('fw_intel_on', 1) !== 1 ? ' selected' : '') . '>关闭</option></select></label>';
+    echo '<label class="field"><span class="field-l">自动同步间隔（小时）</span><input class="input" type="number" name="fw_intel_hours" min="1" max="168" value="' . (int)cfg('fw_intel_hours', 24) . '"></label>';
+    foreach (['et' => 1, 'feodo' => 1, 'blackbook' => 0] as $sk => $def) {
+        echo '<label class="check"><input type="checkbox" name="fw_src_' . $sk . '" value="1"' . ((int)cfg('fw_src_' . $sk, $def) === 1 ? ' checked' : '') . '> ' . e(FW_INTEL_SOURCES[$sk]['name']) . '</label>';
+    }
+    echo '</div>' .
+        '<label class="field"><span class="field-l">自定义威胁情报源（每行一个 URL，最多 5 条，返回 IP/CIDR 纯文本列表）</span>' .
+        '<textarea class="input" name="fw_intel_custom" rows="2" placeholder="https://...">' . e((string)cfg('fw_intel_custom', '')) . '</textarea></label>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存库设置</button></div></form>';
+    echo '<form method="post" action="' . e(u('a=admin_fw_intel_sync')) . '" class="inline" data-confirm="立即从公开威胁情报源同步危险 IP 库？">' . csrf_field() .
+        '<button class="btn btn-ghost" type="submit">立即同步</button></form> ';
+    echo '<details style="margin-top:10px"><summary class="muted">手动导入黑名单（粘贴或上传 txt）</summary>' .
+        '<form method="post" action="' . e(u('a=admin_fw_intel_import')) . '" enctype="multipart/form-data" style="margin-top:8px">' . csrf_field() .
+        '<label class="field"><span class="field-l">黑名单文本（每行一个 IP / CIDR / IP 区间，# 开头为注释，最多 5 万行）</span>' .
+        '<textarea class="input" name="list" rows="4" placeholder="1.2.3.4&#10;5.6.7.0/24&#10;8.8.8.8-8.8.8.16"></textarea></label>' .
+        '<label class="field"><span class="field-l">或上传 .txt 文件（≤ 2MB）</span><input class="input" type="file" name="file" accept=".txt,.csv,text/plain"></label>' .
+        '<div class="form-foot"><span class="muted">导入与现有库合并，不清空</span><button class="btn btn-ghost" type="submit">导入</button></div></form></details>';
+    echo '<p class="hint">内置种子：库为空时会启用少量公开的常见恶意网段种子兜底；完整库依赖同步（主机需能访问外网，cURL 或 file_get_contents 任一可用即可）。</p></div>';
+
+    /* ---- 访问统计 ---- */
+    $ips = is_array($st['ips'] ?? null) ? $st['ips'] : [];
+    $sort = (string)($_GET['ssort'] ?? 'time') === 'req' ? 'req' : 'time';
+    uasort($ips, function ($a, $b) use ($sort) {
+        if ($sort === 'req') {
+            return (int)($b['c'] ?? 0) <=> (int)($a['c'] ?? 0) ?: (int)($b['l'] ?? 0) <=> (int)($a['l'] ?? 0);
+        }
+        return (int)($b['l'] ?? 0) <=> (int)($a['l'] ?? 0) ?: (int)($b['c'] ?? 0) <=> (int)($a['c'] ?? 0);
+    });
+    $ipPage = max(1, get_int('ippage', 1));
+    $ipPer = 50;
+    $ipTotal = count($ips);
+    $ipRows = array_slice($ips, ($ipPage - 1) * $ipPer, $ipPer, true);
+    echo '<div class="card form-card"><div class="list-head"><h2 class="card-title">访问统计（每个 IP 的请求次数与归属地）</h2>' .
+        '<span class="muted">共 ' . $ipTotal . ' 个活跃 IP · ' .
+        '<a class="fw-link' . ($sort === 'time' ? ' on' : '') . '" href="' . e(u('p=admin&tab=security&ssort=time')) . '">最近活跃</a> · ' .
+        '<a class="fw-link' . ($sort === 'req' ? ' on' : '') . '" href="' . e(u('p=admin&tab=security&ssort=req')) . '">请求最多</a></span></div>';
+    echo '<div class="table-wrap"><table class="log-table"><thead><tr>' .
+        '<th>IP</th><th>请求数</th><th>404</th><th>最近活动</th><th>UA / 归属地</th><th>状态</th><th>操作</th>' .
+        '</tr></thead><tbody>';
+    if (!$ipRows) {
+        echo '<tr><td colspan="7">' . empty_state('暂无访问数据（随访问自动统计）') . '</td></tr>';
+    }
+    foreach ($ipRows as $ip => $r) {
+        $banned = fw_is_banned((string)$ip);
+        $wl = !empty($r['wl']) || fw_whitelisted((string)$ip);
+        $geo = fw_geo_get((string)$ip);
+        $state = $banned ? '<span class="badge badge-warn">封禁中</span>'
+            : ($wl ? '<span class="badge badge-accent">白名单</span>'
+                : '<span class="badge badge-ok">正常</span>');
+        $banLeft = $banned ? ((int)($banned['until'] ?? 0) > 0 ? '至 ' . date('m-d H:i', (int)$banned['until']) : '永久') : '';
+        echo '<tr>' .
+            '<td class="nowrap"><b>' . e((string)$ip) . '</b></td>' .
+            '<td>' . (int)($r['c'] ?? 0) . '</td>' .
+            '<td>' . ((int)($r['f'] ?? 0) > 0 ? '<span class="muted" style="color:var(--warn)">' . (int)$r['f'] . '</span>' : '0') . '</td>' .
+            '<td class="nowrap muted">' . ((int)($r['l'] ?? 0) > 0 ? e(fmt_time((int)$r['l'])) : '-') . '</td>' .
+            '<td class="log-detail">' . e((string)($r['ua'] ?? '')) . '<br><span class="muted" data-fw-geo-for="' . e((string)$ip) . '">' . ($geo ? e(fw_geo_label($geo)) : '归属地未查询') . '</span></td>' .
+            '<td class="nowrap">' . $state . ($banned ? '<br><span class="muted">' . e($banLeft) . '</span>' : '') . '</td>' .
+            '<td class="nowrap">';
+        if ($banned) {
+            echo '<form method="post" action="' . e(u('a=admin_fw_unban')) . '" class="inline">' . csrf_field() .
+                '<input type="hidden" name="ip" value="' . e((string)$ip) . '">' .
+                '<button class="btn btn-ghost btn-sm" type="submit">解封</button></form>';
+        } else {
+            echo '<form method="post" action="' . e(u('a=admin_fw_ban')) . '" class="inline" data-confirm="封禁 IP ' . e((string)$ip) . ' 24 小时？">' . csrf_field() .
+                '<input type="hidden" name="ip" value="' . e((string)$ip) . '"><input type="hidden" name="dur" value="1440"><input type="hidden" name="reason" value="后台手动封禁">' .
+                '<button class="btn btn-ghost btn-sm danger" type="submit">封禁24h</button></form>';
+        }
+        echo '</td></tr>';
+    }
+    echo '</tbody></table></div>';
+    echo '<button class="btn btn-ghost btn-sm" type="button" data-fw-geo>查询本页归属地（免key接口，未查询到的才会请求）</button> ';
+    echo paginate($ipTotal, $ipPer, $ipPage, 'p=admin&tab=security&ssort=' . $sort);
+    echo '<p class="hint">统计随访问自动聚合（每 60 秒落盘一次）；7 天不活跃的 IP 自动移除统计。归属地通过 ip-api.com 免费接口批量查询并缓存 30 天。</p></div>';
+
+    /* ---- 封禁管理 ---- */
+    echo '<div class="card form-card"><h2 class="card-title">手动封禁</h2>' .
+        '<form method="post" action="' . e(u('a=admin_fw_ban')) . '" class="inline-form">' . csrf_field() .
+        '<label class="field"><span class="field-l">IP 或网段</span><input class="input" name="ip" required placeholder="如 1.2.3.4 或 5.6.7.0/24" style="max-width:220px"></label>' .
+        '<label class="field"><span class="field-l">时长</span><select name="dur" class="input" style="max-width:150px">';
+    foreach ([30 => '30 分钟', 60 => '1 小时', 360 => '6 小时', 1440 => '24 小时', 10080 => '7 天', 43200 => '30 天', 0 => '永久'] as $m => $lbl) {
+        echo '<option value="' . $m . '"' . ($m === 1440 ? ' selected' : '') . '>' . e($lbl) . '</option>';
+    }
+    echo '</select></label>' .
+        '<label class="field"><span class="field-l">理由（记录用）</span><input class="input" name="reason" maxlength="100" placeholder="如：恶意刷帖" style="max-width:260px"></label>' .
+        '<button class="btn btn-danger" type="submit">立即封禁</button></form>';
+    echo '<div class="admin-list" style="margin-top:10px">';
+    if (!$bans) {
+        echo empty_state('当前没有封禁记录');
+    }
+    foreach ($bans as $key => $b) {
+        $until = (int)($b['until'] ?? 0);
+        $expired = $until > 0 && $until < time();
+        echo '<div class="admin-row"><div class="u-info"><b>' . e((string)$key) . '</b>' .
+            '<span class="muted">' . e((string)($b['kind'] ?? 'manual') === 'auto' ? '自动' : '手动') . ' · ' . e((string)($b['by'] ?? '')) . ' · ' . e(fmt_dt((int)($b['time'] ?? 0))) . ' · ' . e((string)($b['reason'] ?? '')) . '</span></div>' .
+            '<span class="row-ops">' .
+            ($expired ? '<span class="badge">已过期</span>' : '<span class="badge badge-warn">' . ($until > 0 ? e(fmt_dt($until)) . ' 解除' : '永久') . '</span>') .
+            '<form method="post" action="' . e(u('a=admin_fw_unban')) . '" class="inline">' . csrf_field() .
+            '<input type="hidden" name="ip" value="' . e((string)$key) . '">' .
+            '<button class="btn btn-ghost btn-sm" type="submit">移除</button></form></span></div>';
+    }
+    echo '</div></div>';
+
+    /* ---- 自定义规则 ---- */
+    $rulesAll = fw_rules_all();
+    echo '<div class="card form-card"><h2 class="card-title">自定义封禁规则（内置策略机器人之外的补充）</h2>' .
+        '<form method="post" action="' . e(u('a=admin_fw_rule_add')) . '" class="inline-form">' . csrf_field() .
+        '<label class="field"><span class="field-l">规则名</span><input class="input" name="name" required maxlength="30" placeholder="如：拦截恶意爬虫" style="max-width:180px"></label>' .
+        '<label class="field"><span class="field-l">匹配对象</span><select name="type" class="input" style="max-width:130px"><option value="ua">User-Agent</option><option value="uri">请求路径</option><option value="query">查询参数</option></select></label>' .
+        '<label class="field"><span class="field-l">匹配方式</span><select name="mode" class="input" style="max-width:120px"><option value="text">包含文本</option><option value="regex">正则</option></select></label>' .
+        '<label class="field"><span class="field-l">匹配内容</span><input class="input" name="pattern" required maxlength="120" placeholder="如 scrapy 或 (bot|spider)" style="max-width:220px"></label>' .
+        '<label class="field"><span class="field-l">命中动作</span><select name="action" class="input" style="max-width:150px"><option value="score">加分（计入风险分）</option><option value="ban">直接封禁</option></select></label>' .
+        '<label class="field"><span class="field-l">分值 / 封禁时长(h)</span><input class="input" type="number" name="val" min="1" max="720" value="50" style="max-width:110px"></label>' .
+        '<button class="btn btn-primary" type="submit">添加规则</button></form>';
+    echo '<div class="admin-list" style="margin-top:10px">';
+    if (!$rulesAll) {
+        echo empty_state('还没有自定义规则（内置四条策略已默认启用，见上方「限流与自动策略」）');
+    }
+    foreach ($rulesAll as $r) {
+        echo '<div class="admin-row"><div class="u-info"><b>' . e((string)($r['name'] ?? '')) . '</b>' .
+            '<span class="muted">' . e(strtoupper((string)($r['type'] ?? ''))) . ' · ' . (($r['mode'] ?? '') === 'regex' ? '正则' : '包含') . '「' . e((string)($r['pattern'] ?? '')) . '」 · ' .
+            (($r['action'] ?? '') === 'ban' ? '直接封禁 ' . (int)($r['ban_hours'] ?? 24) . 'h' : '+' . (int)($r['score'] ?? 0) . ' 分') . '</span></div>' .
+            '<span class="row-ops">' .
+            '<form method="post" action="' . e(u('a=admin_fw_rule_toggle')) . '" class="inline">' . csrf_field() .
+            '<input type="hidden" name="id" value="' . e((string)($r['id'] ?? '')) . '">' .
+            '<button class="btn btn-ghost btn-sm" type="submit">' . (!empty($r['on']) ? '停用' : '启用') . '</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_fw_rule_del')) . '" class="inline" data-confirm="删除该规则？">' . csrf_field() .
+            '<input type="hidden" name="id" value="' . e((string)($r['id'] ?? '')) . '">' .
+            '<button class="btn btn-ghost btn-sm danger" type="submit">删除</button></form></span></div>';
+    }
+    echo '</div></div>';
+
+    /* ---- 防火墙事件日志 ---- */
+    $files = fw_event_files();
+    $date = (string)($_GET['fwdate'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        $date = $files ? substr($files[0], 3, 10) : date('Y-m-d');
+    }
+    $qip = trim((string)($_GET['fwq'] ?? ''));
+    $fwPage = max(1, get_int('fwpage', 1));
+    $fwTotal = 0;
+    $rows = fw_events_read($date, 50, $fwPage, $qip, $fwTotal);
+    echo '<div class="card form-card"><div class="list-head"><h2 class="card-title">防火墙日志（拦截 / 封禁 / 评分事件）</h2>' .
+        '<span class="muted">每天至多 2000 条，保留 ' . (int)cfg('fw_log_keep', 14) . ' 天</span></div>' .
+        '<form method="get" action="' . e(u('')) . '" class="inline-form">' .
+        '<input type="hidden" name="p" value="admin"><input type="hidden" name="tab" value="security">' .
+        '<select name="fwdate" class="input input-sm">';
+    $opts = [$date => true, date('Y-m-d') => true];
+    foreach ($files as $f) {
+        $opts[substr($f, 3, 10)] = true;
+    }
+    foreach (array_keys($opts) as $d) {
+        echo '<option value="' . e($d) . '"' . ($d === $date ? ' selected' : '') . '>' . e($d) . '</option>';
+    }
+    echo '</select>' .
+        '<input class="input input-sm" name="fwq" value="' . e($qip) . '" placeholder="按 IP 筛选">' .
+        '<button class="btn btn-ghost btn-sm" type="submit">筛选</button> ' .
+        '<a class="btn btn-ghost btn-sm" href="' . e(u('p=admin&tab=security')) . '">重置</a></form>';
+    echo '<form method="post" action="' . e(u('a=admin_fw_log_clear')) . '" class="inline" data-confirm="清空 ' . e($date) . ' 的防火墙日志？">' . csrf_field() .
+        '<input type="hidden" name="date" value="' . e($date) . '">' .
+        '<button class="btn btn-ghost btn-sm danger" type="submit">清空该日日志</button></form>';
+    echo '<div class="table-wrap"><table class="log-table"><thead><tr><th>时间</th><th>IP</th><th>事件</th><th>规则 / 原因</th><th>请求</th><th>UA</th></tr></thead><tbody>';
+    if (!$rows) {
+        echo '<tr><td colspan="6">' . empty_state('该日期暂无防火墙事件') . '</td></tr>';
+    }
+    $actNames = [
+        'block' => '拦截·封禁名单', 'intel_block' => '拦截·危险IP库', 'ratelimit' => '限流·429',
+        'score' => '策略·风险分', 'auto_ban' => '策略·自动封禁',
+    ];
+    foreach ($rows as $r) {
+        $act = (string)($r['act'] ?? '');
+        $cls = $act === 'auto_ban' ? ' badge-warn' : ($act === 'score' ? ' badge-accent' : '');
+        echo '<tr>' .
+            '<td class="nowrap">' . date('H:i:s', (int)($r['t'] ?? 0)) . '</td>' .
+            '<td class="nowrap"><b>' . e((string)($r['ip'] ?? '')) . '</b></td>' .
+            '<td class="nowrap"><span class="badge' . $cls . '">' . e($actNames[$act] ?? $act) . '</span></td>' .
+            '<td class="log-detail">' . e((string)($r['rule'] ?? '')) . (isset($r['detail']) && $r['detail'] !== '' ? '<br><span class="muted">' . e((string)$r['detail']) . '</span>' : '') .
+                ((int)($r['score'] ?? 0) > 0 ? ' <span class="muted">+' . (int)$r['score'] . '</span>' : '') . '</td>' .
+            '<td class="log-detail">' . e((string)($r['m'] ?? '')) . ' ' . e((string)($r['uri'] ?? '')) . '</td>' .
+            '<td class="log-detail muted">' . e((string)($r['ua'] ?? '')) . '</td>' .
+            '</tr>';
+    }
+    echo '</tbody></table></div>';
+    echo paginate($fwTotal, 50, $fwPage, 'p=admin&tab=security&fwdate=' . urlencode($date) . '&fwq=' . urlencode($qip));
+    echo '</div>';
 }

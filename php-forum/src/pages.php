@@ -455,6 +455,10 @@ function page_announcements(): void
 function page_404(): void
 {
     http_response_code(404);
+    // 防火墙：高频 404 记为扫描行为（10 分钟窗口内超限自动加分 / 封禁）
+    if (function_exists('fw_bump_404')) {
+        fw_bump_404();
+    }
     layout_header('页面不存在', 0);
     echo '<div class="card notice-card"><b>404 · 页面不存在</b><p>内容可能已被删除，或链接有误。</p>' .
         '<a class="btn btn-primary btn-sm" href="' . e(u('p=home')) . '">返回首页</a></div>';

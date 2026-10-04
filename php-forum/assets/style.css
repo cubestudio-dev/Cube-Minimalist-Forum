@@ -546,3 +546,12 @@ textarea.input { resize: vertical; min-height: 80px; }
 @media (max-width: 560px) {
   .res-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- 安全防护（防火墙） ---------- */
+.check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 2px 18px; margin: 6px 0 10px; }
+.check-grid .check { margin: 4px 0; }
+.fw-link { color: var(--muted); }
+.fw-link.on { color: var(--accent); font-weight: 600; }
+.fw-link:hover { color: var(--accent); }
+.swatch-cur { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.swatch-cur i { width: 16px; height: 16px; border-radius: 5px; display: inline-block; border: 1px solid var(--border); }
