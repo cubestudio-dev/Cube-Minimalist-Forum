@@ -28,6 +28,9 @@ function layout_header(string $title = '', int $boardId = 0): void
 <meta name="live-interval" content="<?= $liveInt ?>">
 <meta name="monitor-interval" content="<?= max(0, min(300, (int)cfg('monitor_interval', 5))) ?>">
 <title><?= e($title !== '' ? $title . ' · ' . $siteName : $siteName) ?></title>
+<link rel="icon" href="<?= e(ua('assets/favicon.svg')) ?>" type="image/svg+xml">
+<link rel="icon" href="<?= e(ua('assets/favicon.ico')) ?>" sizes="32x32">
+<link rel="apple-touch-icon" href="<?= e(ua('assets/apple-touch-icon.png')) ?>">
 <link rel="stylesheet" href="<?= e(ua('assets/style.css?v=' . app_version())) ?>">
 <script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;</script>
 <script>(function(){try{var d=localStorage.getItem('mf-theme')||window.THEME_DEFAULT||'system';if(d==='system'){d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',d);}catch(e){}})();</script>
@@ -73,7 +76,7 @@ function layout_header(string $title = '', int $boardId = 0): void
           </a>
         <?php endforeach; ?>
       </div>
-      <div class="side-block side-online"><span class="live-dot" aria-hidden="true"></span><b id="onlineNum"><?= (int)$online ?></b>&nbsp;人在线</div>
+      <div class="side-block side-online"><a class="online-link" href="<?= e(u('p=online')) ?>" title="查看在线名单"><span class="live-dot" aria-hidden="true"></span><b id="onlineNum"><?= (int)$online ?></b>&nbsp;人在线<span class="online-more" aria-hidden="true">›</span></a></div>
     </aside>
     <div class="side-mask" id="sideMask" hidden></div>
     <main class="main" id="main">
