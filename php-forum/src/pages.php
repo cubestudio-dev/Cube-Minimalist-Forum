@@ -236,7 +236,7 @@ function page_new(): void
     }
     $pre = get_int('id', 0);
     layout_header('发布帖子', 0);
-    echo page_head('发布帖子', '标题最多 30 字，正文最多 1000 字，支持 Markdown，纯文字（无图片 / 附件）');
+    echo page_head('发布帖子', '标题最多 30 字，正文最多 1000 字，支持 Markdown（图片可用 https 外链，无附件）');
     echo '<div class="card form-card"><form method="post" action="' . e(u('a=thread_new')) . '">' .
         csrf_field() . hidden_back() .
         '<label class="field"><span class="field-l">板块</span><select name="board" class="input" required>';
@@ -247,7 +247,7 @@ function page_new(): void
         '<label class="field"><span class="field-l">标题 <em class="cnt"><i id="t-count">0</i>/30</em></span>' .
         '<input class="input" name="title" id="title-input" maxlength="30" required data-counter="#t-count" placeholder="一句话说清主题"></label>' .
         '<label class="field"><span class="field-l">正文 <em class="cnt"><i id="c-count">0</i>/1000</em></span>' .
-        '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1000" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用"></textarea></label>' .
+        '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1000" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮=="></textarea></label>' .
         '<div class="form-foot"><span class="muted">两次发帖间隔不低于 ' . (int)cfg('post_interval', 30) . ' 秒</span>' .
         '<button class="btn btn-primary" type="submit">发布</button></div></form></div>';
     layout_footer();

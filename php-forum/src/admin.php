@@ -338,8 +338,8 @@ function admin_tab_anns(): void
         '<form method="post" action="' . e(u('a=admin_ann_save')) . '">' . csrf_field() .
         '<input type="hidden" name="id" value="' . ($edit ? $editId : 0) . '">' .
         '<label class="field"><span class="field-l">标题</span><input class="input" name="title" required maxlength="60" value="' . e((string)($edit['title'] ?? '')) . '"></label>' .
-        '<label class="field"><span class="field-l">内容</span><textarea class="input" name="content" rows="6" required maxlength="2000">' . e((string)($edit['content'] ?? '')) . '</textarea></label>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . ($edit ? '保存修改' : '发布') . '</button></div></form></div>';
+        '<label class="field"><span class="field-l">内容</span><textarea class="input" name="content" rows="8" required maxlength="2000" placeholder="支持 Markdown：# 标题、**加粗**、- 列表、> 引用、| 表格 |、==高亮==、![图](https://...)">' . e((string)($edit['content'] ?? '')) . '</textarea></label>' .
+        '<div class="form-foot"><span class="muted">支持 Markdown：标题 / 加粗 / 斜体 / 删除线 / 高亮 / 列表 / 任务列表 / 表格 / 引用 / 代码块 / 链接 / 图片（https 外链）</span><button class="btn btn-primary" type="submit">' . ($edit ? '保存修改' : '发布') . '</button></div></form></div>';
 
     $anns = ann_all();
     echo '<div class="card form-card"><h2 class="card-title">公告（' . count($anns) . '）</h2><div class="admin-list">';
