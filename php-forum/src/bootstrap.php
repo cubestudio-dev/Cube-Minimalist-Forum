@@ -13,12 +13,16 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.7.0');
+    define('MF_VERSION', '1.8.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
 }
-ini_set('error_log', DATA_DIR . '/error.log');
+/* 运行错误日志移入 data/logs/（与 .htaccess 保护范围一致，避免被 Web 直接读取泄露路径） */
+if (!is_dir(DATA_DIR . '/logs')) {
+    @mkdir(DATA_DIR . '/logs', 0775, true);
+}
+ini_set('error_log', DATA_DIR . '/logs/error.log');
 date_default_timezone_set('Asia/Shanghai');
 
 /* 类库装载（顺序敏感） */
@@ -28,6 +32,7 @@ require_once __DIR__ . '/markdown.php';
 require_once __DIR__ . '/mailer.php';
 require_once __DIR__ . '/ai.php';
 require_once __DIR__ . '/logs.php';
+require_once __DIR__ . '/firewall.php';
 require_once __DIR__ . '/update.php';
 require_once __DIR__ . '/sysmon.php';
 require_once __DIR__ . '/auth.php';
@@ -47,7 +52,11 @@ if (is_dir($sdir) && is_writable($sdir)) {
     session_save_path($sdir);
 }
 session_name('MFSESS');
-session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax']);
+/* HTTPS 环境自动给会话 Cookie 加上 Secure（防降级窃听）；HTTP 站点保持兼容 */
+$mfHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (string)($_SERVER['SERVER_PORT'] ?? '') === '443'
+    || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => $mfHttps]);
 @session_start();
 
 /* 配置 */
@@ -58,6 +67,9 @@ if (!is_array($GLOBALS['CFG'])) {
 
 /* 绑定域名守卫：后台配置了授权域名时，其他域名（恶意解析 / 镜像站 / IP 直连）一律 301 跳转到授权域名 */
 bind_domain_guard();
+
+/* 防火墙入口：安全响应头 → 白名单 → 封禁名单 → 危险 IP 库 → 限流 → 自动策略（详见 src/firewall.php） */
+fw_guard();
 
 /* 环境自检：数据目录不可写时置全局警告（页面顶部对管理员可见，写入类操作会给出明确错误） */
 if (!Store::writable()) {
@@ -126,7 +138,7 @@ function bind_domain_guard(): void
     exit;
 }
 
-/** 解析授权域名配置：支持逗号 / 中文逗号 / 分号 / 空白分隔，逐个去协议头、去端口与路径、转小写、去重 */
+/** 解析授权域名配置：支持逗号 / 中文逗号 / 分号 / 空白分隔，逐个去协议头、去端口与路径、转小写、去重（旧版接口，供外部调用） */
 function bind_domain_list(string $raw): array
 {
     $out = [];

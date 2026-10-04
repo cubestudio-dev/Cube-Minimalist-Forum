@@ -366,4 +366,54 @@
       });
     }
   }
+
+  /* ---------- 安全防护：批量查询 IP 归属地 ---------- */
+  var geoBtn = document.querySelector('[data-fw-geo]');
+  if (geoBtn) {
+    geoBtn.addEventListener('click', function () {
+      var cells = [].slice.call(document.querySelectorAll('[data-fw-geo-for]'));
+      var ips = [];
+      cells.forEach(function (c) {
+        var ip = c.getAttribute('data-fw-geo-for');
+        if (ip && ips.indexOf(ip) === -1) ips.push(ip);
+      });
+      ips = ips.slice(0, 60);
+      if (!ips.length) return;
+      geoBtn.disabled = true;
+      var old = geoBtn.textContent;
+      geoBtn.textContent = '查询中…';
+      var fd = new FormData();
+      fd.append('csrf', csrf());
+      fd.append('ips', JSON.stringify(ips));
+      fetch(apiUrl('a=admin_fw_geo_batch'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'fetch' },
+        body: fd
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        geoBtn.disabled = false;
+        geoBtn.textContent = old;
+        if (!res.ok) return;
+        cells.forEach(function (c) {
+          var ip = c.getAttribute('data-fw-geo-for');
+          if (res.geo && res.geo[ip]) c.textContent = res.geo[ip];
+        });
+      }).catch(function () {
+        geoBtn.disabled = false;
+        geoBtn.textContent = old;
+      });
+    });
+  }
+
+  /* ---------- 主题页：点色板时同步取色器显示，避免旧值误导 ---------- */
+  var palette = document.querySelector('.palette');
+  var colorInput = palette ? document.querySelector('[name="theme_color_custom"]') : null;
+  if (palette && colorInput) {
+    palette.addEventListener('change', function (ev) {
+      var t = ev.target;
+      if (t && t.name === 'theme_color' && /^#[0-9a-fA-F]{6}$/.test(t.value)) {
+        colorInput.value = t.value;
+      }
+    });
+  }
 })();

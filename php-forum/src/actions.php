@@ -100,6 +100,17 @@ function route_action(string $a): void
         case 'admin_update':        admin_tab_guard(); act_admin_update(); return;
         case 'admin_logs_settings': admin_tab_guard(); act_admin_logs_settings(); return;
         case 'admin_logs_clear':    admin_tab_guard(); act_admin_logs_clear(); return;
+        case 'admin_fw_save':         admin_tab_guard(); act_admin_fw_save(); return;
+        case 'admin_fw_intel_save':   admin_tab_guard(); act_admin_fw_intel_save(); return;
+        case 'admin_fw_intel_sync':   admin_tab_guard(); act_admin_fw_intel_sync(); return;
+        case 'admin_fw_intel_import': admin_tab_guard(); act_admin_fw_intel_import(); return;
+        case 'admin_fw_ban':          admin_tab_guard(); act_admin_fw_ban(); return;
+        case 'admin_fw_unban':        admin_tab_guard(); act_admin_fw_unban(); return;
+        case 'admin_fw_rule_add':     admin_tab_guard(); act_admin_fw_rule_add(); return;
+        case 'admin_fw_rule_del':     admin_tab_guard(); act_admin_fw_rule_del(); return;
+        case 'admin_fw_rule_toggle':  admin_tab_guard(); act_admin_fw_rule_toggle(); return;
+        case 'admin_fw_log_clear':    admin_tab_guard(); act_admin_fw_log_clear(); return;
+        case 'admin_fw_geo_batch':    admin_tab_guard(); act_admin_fw_geo_batch(); return;
         default:
             redirect(u('p=home'));
     }
@@ -1005,16 +1016,26 @@ function act_admin_ann_del(): void
     act_ok('公告已删除', u('p=admin&tab=anns'));
 }
 
-function act_admin_save_theme(): void
+/** 主题色决策：色板单选 vs 自定义取色器（v1.8.0 修复「换不了颜色」，独立成函数便于测试） */
+function theme_pick_color(string $cur, string $radio, string $custom): string
 {
-    $color = post_str('theme_color', 9);
-    $custom = post_str('theme_color_custom', 9);
-    if (preg_match('/^#[0-9a-fA-F]{6}$/', $custom)) {
+    $color = $radio;
+    // 取色器仅在“用户真的改了它”（与当前已保存色不同）时生效；
+    // 否则取色器总是携带旧值，会覆盖色板选择，表现为「主题色怎么换都不生效」
+    if (preg_match('/^#[0-9a-fA-F]{6}$/', $custom) && strcasecmp($custom, $cur) !== 0) {
         $color = $custom;
     }
     if (!preg_match('/^#[0-9a-fA-F]{3,8}$/', $color)) {
-        $color = '#0f766e';
+        // 色板与取色器都没给出有效新颜色：保持当前色不变（例如只改深色模式/页脚时不应重置颜色）
+        $color = preg_match('/^#[0-9a-fA-F]{3,8}$/', $cur) ? $cur : '#0f766e';
     }
+    return $color;
+}
+
+function act_admin_save_theme(): void
+{
+    $cur = (string)cfg('theme_color', '#0f766e');
+    $color = theme_pick_color($cur, post_str('theme_color', 9), post_str('theme_color_custom', 9));
     $dark = (string)($_POST['dark_default'] ?? 'system');
     if (!in_array($dark, ['system', 'light', 'dark'], true)) {
         $dark = 'system';
@@ -1206,4 +1227,268 @@ function act_admin_logs_clear(): void
         flash('ok', '没有需要清理的日志文件');
     }
     redirect(u('p=admin&tab=logs'));
+}
+
+/* ================= 管理员：防火墙（安全防护） ================= */
+
+/** 保存防护设置：总开关 / 限流 / 自动策略 / 白名单 / 反代识别 */
+function act_admin_fw_save(): void
+{
+    $kv = [
+        'fw_on'              => !empty($_POST['fw_on']) ? 1 : 0,
+        'fw_rl_on'           => !empty($_POST['fw_rl_on']) ? 1 : 0,
+        'fw_rl_pm'           => max(5, min(10000, (int)($_POST['fw_rl_pm'] ?? 60))),
+        'fw_rl_ban_min'      => max(0, min(1440, (int)($_POST['fw_rl_ban_min'] ?? 0))),
+        'fw_score_on'        => !empty($_POST['fw_score_on']) ? 1 : 0,
+        'fw_score_threshold' => max(20, min(10000, (int)($_POST['fw_score_threshold'] ?? 100))),
+        'fw_auto_ban_hours'  => max(1, min(720, (int)($_POST['fw_auto_ban_hours'] ?? 24))),
+        'fw_r_empty_ua'      => !empty($_POST['fw_r_empty_ua']) ? 1 : 0,
+        'fw_r_script_ua'     => !empty($_POST['fw_r_script_ua']) ? 1 : 0,
+        'fw_r_scan_path'     => !empty($_POST['fw_r_scan_path']) ? 1 : 0,
+        'fw_r_inject'        => !empty($_POST['fw_r_inject']) ? 1 : 0,
+        'fw_spider_allow'    => !empty($_POST['fw_spider_allow']) ? 1 : 0,
+        'fw_trust_xff'       => !empty($_POST['fw_trust_xff']) ? 1 : 0,
+    ];
+    // 白名单清洗：仅保留合法 IP / CIDR
+    $wl = implode(',', fw_ip_list(post_str('fw_whitelist', 500)));
+    $kv['fw_whitelist'] = $wl;
+    cfg_update($kv);
+    log_action('fw_save', '防护设置：总开关' . ($kv['fw_on'] ? '开' : '关') . '，限流 ' . ($kv['fw_rl_on'] ? $kv['fw_rl_pm'] . ' 次/分钟' : '关')
+        . '，策略阈值 ' . $kv['fw_score_threshold'] . ' 分/' . $kv['fw_auto_ban_hours'] . 'h，白名单 ' . ($wl !== '' ? count(explode(',', $wl)) . ' 条' : '空')
+        . '，XFF ' . ($kv['fw_trust_xff'] ? '开' : '关'));
+    act_ok('防护设置已保存', u('p=admin&tab=security'));
+}
+
+/** 保存危险 IP 库设置：开关 / 自动同步间隔 / 内置源开关 / 自定义源 */
+function act_admin_fw_intel_save(): void
+{
+    $kv = [
+        'fw_intel_on'    => !empty($_POST['fw_intel_on']) ? 1 : 0,
+        'fw_intel_hours' => max(1, min(168, (int)($_POST['fw_intel_hours'] ?? 24))),
+        'fw_src_et'        => !empty($_POST['fw_src_et']) ? 1 : 0,
+        'fw_src_feodo'     => !empty($_POST['fw_src_feodo']) ? 1 : 0,
+        'fw_src_blackbook' => !empty($_POST['fw_src_blackbook']) ? 1 : 0,
+    ];
+    // 自定义源：每行一个 URL，最多 5 条，仅接受 http(s)
+    $custom = [];
+    foreach (array_slice(explode("\n", str_replace("\r", '', post_str('fw_intel_custom', 600))), 0, 5) as $u) {
+        $u = trim($u);
+        if ($u !== '' && preg_match('#^https?://[^\s\'"<>]+$#i', $u)) {
+            $custom[] = $u;
+        }
+    }
+    $kv['fw_intel_custom'] = implode("\n", $custom);
+    cfg_update($kv);
+    log_action('fw_save', '危险 IP 库设置：拦截' . ($kv['fw_intel_on'] ? '开' : '关') . '，同步间隔 ' . $kv['fw_intel_hours'] . 'h，自定义源 ' . count($custom) . ' 条');
+    act_ok('危险 IP 库设置已保存', u('p=admin&tab=security'));
+}
+
+/** 立即同步危险 IP 库 */
+function act_admin_fw_intel_sync(): void
+{
+    $r = fw_intel_sync(true);
+    $ok = 0;
+    $fail = [];
+    foreach ((array)($r['sources'] ?? []) as $s) {
+        if (!empty($s['ok'])) {
+            $ok++;
+        } else {
+            $fail[] = (string)($s['name'] ?? '源') . '：' . (string)($s['err'] ?? '失败');
+        }
+    }
+    $msg = '同步完成：' . (int)$r['total'] . ' 条（IP ' . count($r['ips']) . ' · 网段 ' . count($r['nets']) . '），' . $ok . ' 个源成功'
+        . ($fail ? '；失败：' . implode('；', $fail) : '');
+    flash(strpos($msg, '失败') === false ? 'ok' : 'err', $msg);
+    redirect(u('p=admin&tab=security'));
+}
+
+/** 导入黑名单文本 / 上传 txt */
+function act_admin_fw_intel_import(): void
+{
+    $me = require_admin();
+    $text = post_str('list', 200000);
+    if (isset($_FILES['file']) && is_array($_FILES['file']) && (int)($_FILES['file']['error'] ?? 4) === UPLOAD_ERR_OK) {
+        $f = $_FILES['file'];
+        if ((int)($f['size'] ?? 0) <= 2 * 1048576 && @is_uploaded_file((string)$f['tmp_name'])
+            && preg_match('/\.(txt|csv|list)$/i', (string)($f['name'] ?? ''))) {
+            $up = (string)@file_get_contents((string)$f['tmp_name']);
+            if ($up !== '') {
+                $text = cut_str($text . "\n" . $up, 200000);
+            }
+        } else {
+            flash('err', '上传文件无效（仅支持 ≤2MB 的 .txt / .csv / .list）');
+            redirect(u('p=admin&tab=security'));
+        }
+    }
+    $text = trim($text);
+    if ($text === '') {
+        flash('err', '请粘贴黑名单文本或上传 txt 文件');
+        redirect(u('p=admin&tab=security'));
+    }
+    $n = fw_intel_import($text, (string)$me['name']);
+    log_action('fw_intel_import', '手动导入黑名单：' . $n . ' 条有效记录', (int)$me['id']);
+    if ($n > 0) {
+        flash('ok', '导入成功：新增 ' . $n . ' 条（IP / 网段），已合并进危险 IP 库');
+    } else {
+        flash('err', '没有解析到有效的 IP / 网段（每行一个，支持 CIDR 与区间）');
+    }
+    redirect(u('p=admin&tab=security'));
+}
+
+/** 手动封禁（单 IP 或 CIDR） */
+function act_admin_fw_ban(): void
+{
+    $me = require_admin();
+    $ip = trim(post_str('ip', 45));
+    if (fw_cidr_range($ip) === null) {
+        act_err('IP 或网段格式不正确：' . $ip);
+    }
+    if (strcasecmp($ip, fw_ip()) === 0 || fw_whitelisted($ip)) {
+        act_err('不能封禁你当前的 IP 或白名单内的 IP（如确需封禁请先调整白名单）');
+    }
+    $dur = (int)($_POST['dur'] ?? 1440);
+    $dur = $dur < 0 ? 1440 : min(43200, $dur);
+    $reason = cut_str(post_str('reason', 100), 100);
+    $hours = $dur > 0 ? (int)ceil($dur / 60) : 0;
+    if (fw_ban($ip, $hours, $reason !== '' ? $reason : '手动封禁', 'manual', (string)$me['name'])) {
+        log_action('fw_ban', '封禁 ' . $ip . ($hours > 0 ? '（' . $hours . ' 小时）' : '（永久）') . '：' . $reason, (int)$me['id']);
+        act_ok('已封禁 ' . $ip . ($hours > 0 ? '，时长 ' . $hours . ' 小时' : '（永久）'), u('p=admin&tab=security'));
+    }
+    act_err('封禁失败：数据目录不可写？');
+}
+
+/** 解除封禁 */
+function act_admin_fw_unban(): void
+{
+    $me = require_admin();
+    $ip = trim(post_str('ip', 45));
+    if (fw_unban($ip)) {
+        log_action('fw_unban', '解除封禁：' . $ip, (int)$me['id']);
+        act_ok('已解除封禁：' . $ip, u('p=admin&tab=security'));
+    }
+    act_err('未找到该封禁记录：' . $ip);
+}
+
+/** 新增自定义规则 */
+function act_admin_fw_rule_add(): void
+{
+    $name = cut_str(post_str('name', 30), 30);
+    $type = (string)($_POST['type'] ?? 'ua');
+    $mode = (string)($_POST['mode'] ?? 'text');
+    $pattern = cut_str(post_str('pattern', 120), 120);
+    $action = (string)($_POST['action'] ?? 'score') === 'ban' ? 'ban' : 'score';
+    $val = max(1, min(720, (int)($_POST['val'] ?? 50)));
+    if ($name === '' || $pattern === '') {
+        act_err('规则名与匹配内容不能为空');
+    }
+    if (!in_array($type, ['ua', 'uri', 'query'], true)) {
+        $type = 'ua';
+    }
+    if (!in_array($mode, ['text', 'regex'], true)) {
+        $mode = 'text';
+    }
+    if ($mode === 'regex' && @preg_match('#' . str_replace('#', '\#', $pattern) . '#i', '') === false) {
+        act_err('正则表达式无效，请检查语法');
+    }
+    $rules = fw_rules_all();
+    $rules[] = [
+        'id'        => bin2hex(random_bytes(4)),
+        'name'      => $name,
+        'type'      => $type,
+        'mode'      => $mode,
+        'pattern'   => $pattern,
+        'action'    => $action,
+        'score'     => $action === 'score' ? $val : 0,
+        'ban_hours' => $action === 'ban' ? $val : 0,
+        'on'        => 1,
+        'time'      => time(),
+    ];
+    fw_rules_save($rules);
+    log_action('fw_rule_add', '新增规则「' . $name . '」（' . $type . ' · ' . $mode . ' · ' . $action . '）');
+    act_ok('规则已添加并启用', u('p=admin&tab=security'));
+}
+
+/** 删除自定义规则 */
+function act_admin_fw_rule_del(): void
+{
+    $id = trim((string)($_POST['id'] ?? ''));
+    $rules = fw_rules_all();
+    $kept = [];
+    $found = '';
+    foreach ($rules as $r) {
+        if ((string)($r['id'] ?? '') === $id) {
+            $found = (string)($r['name'] ?? $id);
+            continue;
+        }
+        $kept[] = $r;
+    }
+    if ($found !== '') {
+        fw_rules_save($kept);
+        log_action('fw_rule_del', '删除规则「' . $found . '」');
+        act_ok('规则已删除', u('p=admin&tab=security'));
+    }
+    act_err('规则不存在');
+}
+
+/** 启停自定义规则 */
+function act_admin_fw_rule_toggle(): void
+{
+    $id = trim((string)($_POST['id'] ?? ''));
+    $rules = fw_rules_all();
+    $msg = '';
+    foreach ($rules as &$r) {
+        if ((string)($r['id'] ?? '') === $id) {
+            $r['on'] = empty($r['on']) ? 1 : 0;
+            $msg = (string)$r['name'] . ($r['on'] ? ' 已启用' : ' 已停用');
+            break;
+        }
+    }
+    unset($r);
+    if ($msg !== '') {
+        fw_rules_save($rules);
+        act_ok($msg, u('p=admin&tab=security'));
+    }
+    act_err('规则不存在');
+}
+
+/** 清空某日防火墙日志 */
+function act_admin_fw_log_clear(): void
+{
+    $date = (string)($_POST['date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        flash('err', '日期无效');
+        redirect(u('p=admin&tab=security'));
+    }
+    $f = Store::path('logs/fw-' . $date . '.php');
+    $ok = is_file($f) ? @unlink($f) : true;
+    log_action('fw_log_clear', '清空防火墙日志：' . $date . ($ok ? '' : '（删除失败，请检查权限）'));
+    if ($ok) {
+        flash('ok', '已清空 ' . $date . ' 的防火墙日志');
+    } else {
+        flash('err', '删除失败：文件被占用或目录不可写');
+    }
+    redirect(u('p=admin&tab=security&fwdate=' . urlencode($date)));
+}
+
+/** 批量查询 IP 归属地（AJAX，POST ips=JSON 数组） */
+function act_admin_fw_geo_batch(): void
+{
+    require_admin();
+    $raw = (string)($_POST['ips'] ?? '[]');
+    $arr = json_decode($raw, true);
+    if (!is_array($arr)) {
+        $arr = [];
+    }
+    $arr = array_slice(array_filter(array_map('strval', $arr), function ($x) {
+        return filter_var($x, FILTER_VALIDATE_IP) !== false;
+    }), 0, 60);
+    if (!$arr) {
+        json_response(['ok' => false, 'msg' => '没有有效的 IP']);
+    }
+    $geo = fw_geo_lookup($arr);
+    $out = [];
+    foreach ($geo as $ip => $r) {
+        $out[$ip] = fw_geo_label($r);
+    }
+    json_response(['ok' => true, 'geo' => $out]);
 }
