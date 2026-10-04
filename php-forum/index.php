@@ -54,6 +54,7 @@ switch ($p === '' ? 'home' : $p) {
     case 'register':      page_register(); break;
     case 'forgot':        page_forgot(); break;
     case 'user':          page_user(); break;
+    case 'online':        page_online(); break;
     case 'settings':      page_settings(); break;
     case 'notifications': page_announcements(); break;
     case 'announcements': page_announcements(); break;
