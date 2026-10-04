@@ -898,10 +898,62 @@ function online_tick(): int
             unset($o[$k]);
         }
     }
-    $o[$sid] = ['t' => $now, 'u' => $uid];
+    // in = 本会话首次出现时间（进入网站时刻）：沿用已有记录，旧格式 / 新会话则取当前
+    $prevIn = is_array($o[$sid] ?? null) ? (int)($o[$sid]['in'] ?? 0) : 0;
+    $o[$sid] = ['t' => $now, 'u' => $uid, 'in' => $prevIn > 0 ? $prevIn : $now];
     Store::write('online.php', $o);
     Store::unlock($lk);
     return online_count();
+}
+
+/**
+ * 在线详情（v1.10.0）：当前在线的注册用户与游客明细
+ * - 注册用户按 uid 去重（最早进入时间 in / 最近活跃 t）；游客按会话逐个列出
+ * @return array ['window'=>秒数, 'users'=>[['uid','name','in','t']], 'guests'=>[['in','t']]]
+ */
+function online_details(): array
+{
+    $w = max(30, (int)cfg('online_window', 300));
+    $cut = time() - $w;
+    $users = [];   // uid => ['uid','in','t']
+    $guests = [];  // [['in','t']]
+    foreach (Store::read('online.php', []) as $rec) {
+        if (is_array($rec)) {
+            $t = (int)($rec['t'] ?? 0);
+            if ($t < $cut) {
+                continue;
+            }
+            $in = (int)($rec['in'] ?? 0);
+            if ($in <= 0 || $in > $t) {
+                $in = $t; // 旧记录无 in 字段：以最近活跃时间近似
+            }
+            $u = (int)($rec['u'] ?? 0);
+            if ($u > 0) {
+                if (!isset($users[$u])) {
+                    $users[$u] = ['uid' => $u, 'in' => $in, 't' => $t];
+                } else {
+                    // 同账号多会话：进入时间取最早，活跃时间取最近
+                    $users[$u]['in'] = min((int)$users[$u]['in'], $in);
+                    $users[$u]['t'] = max((int)$users[$u]['t'], $t);
+                }
+            } else {
+                $guests[] = ['in' => $in, 't' => $t];
+            }
+        } elseif (is_numeric($rec) && (int)$rec >= $cut) { // 旧格式（v1.1 及之前）
+            $guests[] = ['in' => (int)$rec, 't' => (int)$rec];
+        }
+    }
+    foreach ($users as &$x) {
+        $x['name'] = uname((int)$x['uid']);
+    }
+    unset($x);
+    usort($users, function ($a, $b) {
+        return (int)$b['t'] <=> (int)$a['t']; // 最近活跃在前
+    });
+    usort($guests, function ($a, $b) {
+        return (int)$a['in'] <=> (int)$b['in']; // 先来的在前
+    });
+    return ['window' => $w, 'users' => $users, 'guests' => $guests];
 }
 
 /* ================= 会话文件清理 =================
