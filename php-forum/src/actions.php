@@ -112,6 +112,9 @@ function route_action(string $a): void
         case 'admin_fw_rule_toggle':  admin_tab_guard(); act_admin_fw_rule_toggle(); return;
         case 'admin_fw_log_clear':    admin_tab_guard(); act_admin_fw_log_clear(); return;
         case 'admin_fw_geo_batch':    admin_tab_guard(); act_admin_fw_geo_batch(); return;
+        case 'admin_logs_export':     admin_tab_guard(); act_admin_logs_export(); return;
+        case 'admin_save_attack':     admin_tab_guard(); act_admin_save_attack(); return;
+        case 'admin_test_attack':     admin_tab_guard(); act_admin_test_attack(); return;
         default:
             redirect(u('p=home'));
     }
@@ -1230,6 +1233,33 @@ function act_admin_logs_clear(): void
     redirect(u('p=admin&tab=logs'));
 }
 
+/** 一键导出全部日志为 TXT（操作日志 + 防火墙事件 + 错误日志尾部），流式下载 */
+function act_admin_logs_export(): void
+{
+    $u = admin_tab_guard();
+    log_action('admin_logs_export', '导出全部日志为 TXT（操作日志 + 防火墙事件 + 错误日志尾部）', (int)($u['id'] ?? 0), (string)($u['name'] ?? ''));
+    log_export_txt(); // 内部直接流式输出并 exit，不占用内存
+}
+
+/** 保存攻击告警设置（阈值 / 冷却 / 开关；独立接口，不影响其他防护设置） */
+function act_admin_save_attack(): void
+{
+    $on = !empty($_POST['fw_atk_alert_on']) ? 1 : 0;
+    $n = max(5, min(10000, (int)($_POST['fw_atk_alert_n'] ?? 20)));
+    $cool = max(5, min(1440, (int)($_POST['fw_atk_alert_cool'] ?? 30)));
+    cfg_update(['fw_atk_alert_on' => $on, 'fw_atk_alert_n' => $n, 'fw_atk_alert_cool' => $cool]);
+    log_action('admin_save_attack', '攻击告警：' . ($on ? '开启' : '关闭') . '，阈值 ' . $n . ' 次/' . FW_ATK_WIN_MIN . ' 分钟，冷却 ' . $cool . ' 分钟');
+    act_ok('攻击告警设置已保存', u('p=admin&tab=security'));
+}
+
+/** 测试攻击告警邮件（AJAX，不占用真实告警冷却） */
+function act_admin_test_attack(): void
+{
+    [$ok, $err] = fw_attack_test_mail();
+    log_action('admin_test_attack', '测试攻击告警邮件：' . ($ok ? '已发送' : '失败：' . cut_str($err, 100)));
+    json_response(['ok' => $ok, 'msg' => $ok ? '测试邮件已发送，请查收管理员邮箱' : ('发送失败：' . $err)]);
+}
+
 /* ================= 管理员：防火墙（安全防护） ================= */
 
 /** 保存防火墙总开关（总览页独立小表单：只动总开关本身，绝不触碰限流 / 策略 / 白名单 / CF 适配等其他设置） */
@@ -1258,6 +1288,11 @@ function act_admin_fw_save(): void
         'fw_r_scan_path'     => !empty($_POST['fw_r_scan_path']) ? 1 : 0,
         'fw_r_inject'        => !empty($_POST['fw_r_inject']) ? 1 : 0,
         'fw_spider_allow'    => !empty($_POST['fw_spider_allow']) ? 1 : 0,
+        'fw_r_fake_spider'   => !empty($_POST['fw_r_fake_spider']) ? 1 : 0,
+        'fw_r_bot_ua'        => !empty($_POST['fw_r_bot_ua']) ? 1 : 0,
+        'fw_r_probe'         => !empty($_POST['fw_r_probe']) ? 1 : 0,
+        'fw_r_spoof_cf'      => !empty($_POST['fw_r_spoof_cf']) ? 1 : 0,
+        'fw_r_long_req'      => !empty($_POST['fw_r_long_req']) ? 1 : 0,
         'fw_trust_cf'        => !empty($_POST['fw_trust_cf']) ? 1 : 0,
         'fw_trust_xff'       => !empty($_POST['fw_trust_xff']) ? 1 : 0,
     ];

@@ -61,6 +61,10 @@ const LOG_ACTIONS = [
     'admin_update'         => '后台·上传更新包',
     'admin_logs_settings'  => '后台·日志设置',
     'admin_logs_clear'     => '后台·清理日志',
+    'admin_logs_export'    => '后台·导出日志TXT',
+    'admin_save_attack'    => '后台·攻击告警设置',
+    'admin_test_attack'    => '后台·测试攻击告警',
+    'attack_alert'         => '系统·攻击告警邮件',
     'fw_save'              => '防火墙·保存设置',
     'fw_ban'               => '防火墙·手动封禁',
     'fw_unban'             => '防火墙·解除封禁',
@@ -239,4 +243,157 @@ function log_read(string $date, int $per, int $page, string $qUser, string $qAct
     $total = count($out);
     $off = max(0, $page - 1) * max(1, $per);
     return array_slice($out, $off, max(1, $per));
+}
+
+/* ================= 一键导出全部日志（TXT） ================= */
+
+/** 单条操作日志 → TXT 行 */
+function log_txt_line(array $j): string
+{
+    $name = (string)($j['name'] ?? '游客');
+    $uid = (int)($j['uid'] ?? 0);
+    return '[' . date('Y-m-d H:i:s', (int)($j['t'] ?? 0)) . '] [' . log_label((string)($j['action'] ?? '')) . ']'
+        . ' 用户：' . $name . ($uid > 0 ? '(#' . $uid . ')' : '')
+        . ' | IP：' . (string)($j['ip'] ?? '')
+        . ((string)($j['detail'] ?? '') !== '' ? ' | ' . (string)$j['detail'] : '');
+}
+
+/** 单条防火墙事件 → TXT 行 */
+function fw_txt_line(array $j): string
+{
+    return '[' . date('Y-m-d H:i:s', (int)($j['t'] ?? 0)) . '] [' . (string)($j['act'] ?? '') . ']'
+        . ' IP：' . (string)($j['ip'] ?? '')
+        . ((string)($j['rule'] ?? '') !== '' ? ' | ' . (string)$j['rule'] : '')
+        . ((string)($j['detail'] ?? '') !== '' ? ' | ' . (string)$j['detail'] : '')
+        . ((int)($j['score'] ?? 0) > 0 ? ' | 风险分 +' . (int)$j['score'] : '')
+        . ' | ' . (string)($j['m'] ?? '') . ' ' . (string)($j['uri'] ?? '')
+        . ((string)($j['ua'] ?? '') !== '' ? ' | UA：' . (string)$j['ua'] : '');
+}
+
+/**
+ * 逐行读取守卫日志文件，回调格式化后写入输出流（流式，不把整个文件读进内存）
+ * @param resource|null $out 输出流（如 php://output）；为 null 时仅统计不写出
+ * @return int 成功格式化的行数
+ */
+function log_txt_stream(string $path, callable $fn, $out = null): int
+{
+    $n = 0;
+    $fp = @fopen($path, 'rb');
+    if (!$fp) {
+        return 0;
+    }
+    $first = true;
+    while (($ln = fgets($fp, 65536)) !== false) {
+        $ln = trim($ln);
+        if ($first) {
+            $first = false;
+            if (strpos($ln, DATA_GUARD) === 0) {
+                $ln = trim(substr($ln, strlen(DATA_GUARD)));
+            }
+        }
+        if ($ln === '') {
+            continue;
+        }
+        $j = json_decode($ln, true);
+        if (!is_array($j)) {
+            continue;
+        }
+        $line = $fn($j);
+        if (is_string($line) && $line !== '') {
+            $n++;
+            if ($out !== null) {
+                fwrite($out, $line . "\r\n");
+            }
+        }
+    }
+    fclose($fp);
+    return $n;
+}
+
+/**
+ * 一键导出全部日志为 TXT，直接流式下载（内部 exit）
+ * 内容：① 操作日志（log-*.php，全部）② 防火墙事件日志（fw-*.php，全部）③ 运行错误日志 error.log（尾部最多 200 行）
+ * 流式逐行输出，即使日志总量达 20MB 上限也不会撑爆内存；文件名 forum-logs-日期时间.txt
+ */
+function log_export_txt(): void
+{
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(300);
+    }
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    if (!headers_sent()) {
+        header('Content-Type: text/plain; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="forum-logs-' . date('Ymd-His') . '.txt"');
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: no-store');
+        header('Pragma: no-cache');
+    }
+    $out = fopen('php://output', 'wb');
+    $bar = str_repeat('=', 64);
+    $site = cut_str(str_replace(["\r", "\n"], ' ', (string)cfg('site_name', '论坛')), 40);
+    // UTF-8 BOM：Windows 记事本等可直接识别编码
+    fwrite($out, "\xEF\xBB\xBF");
+    fwrite($out, $bar . "\r\n");
+    fwrite($out, $site . ' · 全站日志导出（TXT）' . "\r\n");
+    fwrite($out, '程序版本：v' . MF_VERSION . '    导出时间：' . date('Y-m-d H:i:s') . "\r\n");
+    fwrite($out, '包含：① 操作日志  ② 防火墙事件日志  ③ 运行错误日志（尾部）' . "\r\n");
+    fwrite($out, $bar . "\r\n\r\n");
+
+    $total = 0;
+
+    /* ① 操作日志（旧→新，按时间顺序阅读） */
+    $files = array_reverse(log_files());
+    fwrite($out, '【一、操作日志】共 ' . count($files) . " 个日志文件\r\n\r\n");
+    foreach ($files as $f) {
+        fwrite($out, '---- ' . $f . " ----\r\n");
+        $n = log_txt_stream(DATA_DIR . '/logs/' . $f, 'log_txt_line', $out);
+        $total += $n;
+        fwrite($out, "\r\n");
+    }
+
+    /* ② 防火墙事件日志 */
+    $fwFiles = array_reverse(fw_event_files());
+    fwrite($out, $bar . "\r\n");
+    fwrite($out, '【二、防火墙事件日志】共 ' . count($fwFiles) . " 个日志文件\r\n\r\n");
+    foreach ($fwFiles as $f) {
+        fwrite($out, '---- ' . $f . " ----\r\n");
+        $n = log_txt_stream(DATA_DIR . '/logs/' . $f, 'fw_txt_line', $out);
+        $total += $n;
+        fwrite($out, "\r\n");
+    }
+
+    /* ③ 运行错误日志（尾部） */
+    $errLog = DATA_DIR . '/logs/error.log';
+    fwrite($out, $bar . "\r\n");
+    fwrite($out, "【三、运行错误日志 error.log（尾部最多 200 行）】\r\n\r\n");
+    if (is_file($errLog) && (int)@filesize($errLog) > 0) {
+        $size = (int)@filesize($errLog);
+        $fp = @fopen($errLog, 'rb');
+        if ($fp) {
+            if ($size > 262144) {
+                @fseek($fp, -262144, SEEK_END);
+                fgets($fp); // 丢弃不完整的首行
+            }
+            $lines = [];
+            while (($ln = fgets($fp, 65536)) !== false) {
+                $lines[] = rtrim($ln, "\r\n");
+            }
+            fclose($fp);
+            $lines = array_filter(array_map('trim', $lines));
+            $lines = array_slice(array_values($lines), -200);
+            foreach ($lines as $ln) {
+                fwrite($out, $ln . "\r\n");
+                $total++;
+            }
+        }
+    } else {
+        fwrite($out, "（无运行错误记录）\r\n");
+    }
+
+    fwrite($out, "\r\n" . $bar . "\r\n");
+    fwrite($out, '导出完成：共 ' . $total . ' 条记录 · ' . date('Y-m-d H:i:s') . "\r\n");
+    fclose($out);
+    exit;
 }

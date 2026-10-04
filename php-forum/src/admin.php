@@ -632,7 +632,9 @@ function admin_tab_logs(): void
         '<button class="btn btn-primary" type="submit">保存设置</button></form>' .
         '<form method="post" action="' . e(u('a=admin_logs_clear')) . '" class="inline" data-confirm="确认清理过期日志？">' . csrf_field() .
         '<button class="btn btn-ghost btn-sm" type="submit">立即清理过期日志</button></form>' .
-        '<p class="hint">日志按天存放于 data/logs/（守卫保护，无法被直接访问）；超过保留天数的文件会在每天首次写日志时自动清理；日志总量上限 20MB，超出时从最旧删起。</p></div>';
+        '<form method="post" action="' . e(u('a=admin_logs_export')) . '" class="inline" data-confirm="将导出全部操作日志、防火墙事件与运行错误为 TXT 文件（日志较多时可能需要数十秒），继续？">' . csrf_field() .
+        '<button class="btn btn-primary btn-sm" type="submit">⬇ 一键导出全部日志（TXT）</button></form>' .
+        '<p class="hint">日志按天存放于 data/logs/（守卫保护，无法被直接访问）；超过保留天数的文件会在每天首次写日志时自动清理；日志总量上限 20MB，超出时从最旧删起。导出内容包含：全部操作日志、全部防火墙事件日志、运行错误日志（尾部 200 行），流式生成不占内存，TXT 可直接用记事本 / Excel 打开。</p></div>';
 
     $files = log_files();
     $date = (string)($_GET['date'] ?? '');
@@ -756,6 +758,33 @@ function admin_tab_security(): void
         '<button class="btn btn-primary" type="submit">保存总开关</button></form>' .
         '<p class="hint">此表单<b>只切换总开关</b>，不会改动下方「限流与自动策略 / 白名单 / 真实 IP 识别」等任何其他设置。五道防线依次执行：白名单 → 封禁名单 → 危险 IP 库 → 限流 → 自动策略。已登录的管理员不受拦截；危险 IP 库数据来自公开威胁情报源，误判时可把对方 IP 加入白名单。</p></div>';
 
+    /* ---- 攻击告警（多次拦截 → 自动邮件通知管理员，v1.9.0） ---- */
+    $atkOn = (int)cfg('fw_atk_alert_on', 1) === 1;
+    $atkN = max(5, (int)cfg('fw_atk_alert_n', 20));
+    $atkCool = max(5, (int)cfg('fw_atk_alert_cool', 30));
+    $al = is_array($st['atk_alert'] ?? null) ? $st['atk_alert'] : [];
+    if (!empty($al['last'])) {
+        $atkLast = '上次触发：' . e(fmt_dt((int)$al['last'])) . '（' . (int)($al['peak'] ?? 0) . ' 次拦截）'
+            . (isset($al['sent']) ? '，已发送 ' . (int)$al['sent'] . ' 位管理员'
+                . ((string)($al['err'] ?? '') !== '' ? '；上次失败原因：' . e(cut_str((string)$al['err'], 80)) : '') : '') . '。';
+    } else {
+        $atkLast = '尚未触发过。';
+    }
+    echo '<div class="card form-card"><h2 class="card-title">攻击告警（自动邮件）</h2>' .
+        '<form method="post" action="' . e(u('a=admin_save_attack')) . '">' . csrf_field() .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">攻击告警邮件</span><select name="fw_atk_alert_on" class="input">' .
+        '<option value="1"' . ($atkOn ? ' selected' : '') . '>开启（推荐）</option>' .
+        '<option value="0"' . (!$atkOn ? ' selected' : '') . '>关闭</option></select></label>' .
+        '<label class="field"><span class="field-l">触发阈值（' . FW_ATK_WIN_MIN . ' 分钟内被拦截次数）</span><input class="input" type="number" name="fw_atk_alert_n" min="5" max="10000" value="' . $atkN . '"></label>' .
+        '<label class="field"><span class="field-l">告警冷却（分钟）</span><input class="input" type="number" name="fw_atk_alert_cool" min="5" max="1440" value="' . $atkCool . '"></label>' .
+        '</div>' .
+        '<div class="form-foot"><button class="btn btn-ghost" type="button" data-admin-test="attack">发送测试告警邮件</button>' .
+        '<button class="btn btn-primary" type="submit">保存攻击告警设置</button></div>' .
+        '<span class="test-msg muted"></span></form>' .
+        '<p class="hint">开启后，' . FW_ATK_WIN_MIN . ' 分钟窗口内防火墙拦截（限流 429 / 封禁名单 / 危险 IP 库 / 自动策略自动封禁均计入）累计达到阈值，即自动向全部管理员邮箱发送告警：含今日拦截与请求统计、事件最多的来源 IP Top5、最近事件摘要与处置建议；冷却期内不重复发送，实际发信在响应完成后进行（绝不拖慢站点）。' . $atkLast .
+        '邮件经后台「邮件」页配置的 SMTP 发送，收件人为全部管理员账号的邮箱。</p></div>';
+
     /* ---- 防护设置（限流 / 策略 / 白名单 / 代理） ---- */
     echo '<div class="card form-card"><h2 class="card-title">限流与自动策略</h2>' .
         '<form method="post" action="' . e(u('a=admin_fw_save')) . '">' . csrf_field() .
@@ -777,7 +806,12 @@ function admin_tab_security(): void
         'fw_r_script_ua' => ['脚本 / 攻击工具 UA（+50 分）', 1],
         'fw_r_scan_path' => ['敏感路径探测 wp-admin/.env 等（+80 分）', 1],
         'fw_r_inject'    => ['SQL 注入 / XSS / 目录穿越特征（+90 分）', 1],
-        'fw_spider_allow' => ['放行搜索引擎蜘蛛 UA（不误伤收录）', 1],
+        'fw_r_fake_spider' => ['伪造搜索引擎蜘蛛：自称 Googlebot / Baiduspider 等但 PTR 反解验证不通过（+80 分）', 1],
+        'fw_r_bot_ua'      => ['未知爬虫 UA：自称 bot / spider / 采集器但非搜索引擎，如 SEO 采集器（+25 分）', 1],
+        'fw_r_probe'       => ['敏感文件探测：install.php / 源码目录 / 数据目录 / 配置与打包文件（+50 分）', 1],
+        'fw_r_spoof_cf'    => ['伪造 CF-Connecting-IP 头（带该头但连接并非来自 Cloudflare，+50 分）', 1],
+        'fw_r_long_req'    => ['超长请求：URL / UA 异常过长，多为扫描器特征（+30 分）', 1],
+        'fw_spider_allow' => ['放行搜索引擎蜘蛛 UA（不误伤收录；真蜘蛛 IP 另有 PTR 验证，伪造必被识破）', 1],
     ];
     foreach ($rules as $k => $v) {
         $val = (int)cfg($k, $v[1]) === 1;

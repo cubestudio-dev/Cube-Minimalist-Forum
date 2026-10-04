@@ -12,6 +12,9 @@
  * v1.8.1：Cloudflare CDN 适配 —— 自动识别 CF 官方网段（v4+v6），从 CF-Connecting-IP 取真实
  *          访客 IP（防伪造：仅当 TCP 对端确为 CF 边缘时才信任该头），限流 / 封禁 / 统计 / 归属地
  *          全部基于真实 IP，避免「限流误伤全站 / 封禁误封 CF 节点」；后台可一键查看当前链路。
+ * v1.9.0：恶意爬虫与异常检测扩展（未知爬虫 UA / 伪造搜索引擎蜘蛛（PTR 反解验证） /
+ *          敏感文件探测 / 伪造 CF 头 / 超长请求）；新增「攻击告警」——滑动窗口内拦截次数
+ *          达阈值自动给全部管理员邮箱发告警（响应完成后发送，不拖慢站点；带冷却防轰炸）。
  *
  * 存储（data/ 下，JSON + 守卫前缀，与论坛其余数据同机制）：
  *   - fw_bans.php    封禁名单（键为 IP 或 CIDR）
@@ -46,6 +49,33 @@ const FW_RE_INJECT = '/(union(?:%20|%2[bdj]|[\s\/\*+])+select|select(?:%20|%2[bd
 
 /** 404 扫描判定：10 分钟窗口内 404 达到该次数即记为「扫描行为」（加分项） */
 const FW_404_LIMIT = 8;
+
+/** 未知爬虫 UA：自称 bot / spider / crawler / 采集器等，但不在搜索引擎白名单（独立开关 fw_r_bot_ua，轻分值） */
+const FW_RE_BOT_UA = '/(bot\b|bot\/|bot;|bot\)|spider|crawler|scrap(?:e|er|ing)|slurp|archiver|semrush|ahrefs|mj12|petalbot|bytespider|serpstat|headless|phantomjs|selenium|puppeteer|playwright)/i';
+
+/** 应用自身敏感文件探测：安装 / 更新残留、源码目录、数据目录、配置与打包文件（URI 匹配） */
+const FW_RE_PROBE = '#(/install\.php|/update\.php|/src/[a-z_]+\.php|/data/(config|users|threads|replies|fw_|logs|backup)|/\.user\.ini|/web\.config|/php\.ini|/composer\.(json|lock)|/package(-lock)?\.json|/phpunit|\.sql(\.zip|\.gz|\.bz2)?$|\.(zip|rar|7z|tar|gz)$)#i';
+
+/** 主流搜索引擎蜘蛛 → 官方 PTR 域名后缀（用于「声称是蜘蛛却验证不过」的伪造检测；无条目的声称不参与验证） */
+const FW_SPIDER_PTR = [
+    'googlebot'           => ['googlebot.com', 'google.com'],
+    'bingbot'             => ['search.msn.com', 'bing.com'],
+    'baiduspider'         => ['baidu.com', 'baidu.jp'],
+    'sogou'               => ['sogou.com'],
+    '360spider'           => ['so.com', '360.cn'],
+    'yandexbot'           => ['yandex.com', 'yandex.ru', 'yandex.net'],
+    'duckduckbot'         => ['duckduckgo.com'],
+    'slurp'               => ['yahoo.com', 'inktomisearch.com', 'yahoo.net'],
+    'facebookexternalhit' => ['facebook.com', 'fbsv.net'],
+    'twitterbot'          => ['twttr.net', 'twitter.com'],
+    'applebot'            => ['apple.com'],
+];
+
+/** 攻击告警判定窗口（分钟）：窗口内被拦截次数达到阈值即发邮件 */
+const FW_ATK_WIN_MIN = 10;
+
+/** 蜘蛛 PTR 验证：每分钟至多做这么多次 DNS 查询（超出预算的声称直接跳过不判伪，防被恶意拖慢） */
+const FW_SPIDER_VERIFY_BUDGET = 10;
 
 /* ================= 基础：IP 与工具 ================= */
 
@@ -305,8 +335,8 @@ function fw_state(): array
         if (!is_array($st)) {
             $st = [];
         }
-        $st += ['ips' => [], 'rl' => [], 'days' => [], 'ev' => []];
-        foreach (['ips', 'rl', 'days', 'ev'] as $k) {
+        $st += ['ips' => [], 'rl' => [], 'days' => [], 'ev' => [], 'atk' => [], 'atk_alert' => [], 'spv' => [], 'spv_m' => []];
+        foreach (['ips', 'rl', 'days', 'ev', 'atk', 'atk_alert', 'spv', 'spv_m'] as $k) {
             if (!is_array($st[$k])) {
                 $st[$k] = [];
             }
@@ -350,6 +380,18 @@ function fw_state_save(array $st): void
     if (count($st['ev']) > 4000) {
         $st['ev'] = array_slice($st['ev'], 0, 4000, true);
     }
+    // 蜘蛛 PTR 验证缓存：过期剔除 + 最多 500 条
+    foreach (($st['spv'] ?? []) as $k => $v) {
+        if (!is_array($v) || time() - (int)($v['ts'] ?? 0) > 30 * 86400) {
+            unset($st['spv'][$k]);
+        }
+    }
+    if (count($st['spv']) > 500) {
+        uasort($st['spv'], function ($a, $b) {
+            return (int)($b['ts'] ?? 0) <=> (int)($a['ts'] ?? 0);
+        });
+        $st['spv'] = array_slice($st['spv'], 0, 500, true);
+    }
     $lk = Store::lock('fw_state', 3);
     // 锁内重读合并：另一请求可能刚写过（丢弃它未保存的？不——以本次快照+本请求增量为准，
     // 本函数由调用方在“读快照→修改→保存”的临界序列末尾调用，锁内最后重读一次做浅合并
@@ -387,6 +429,9 @@ function fw_bump(string $ip, string $key = 'c'): void
         }
     } elseif ($key === 'f') {
         $st['ips'][$ip]['f']++;
+    }
+    if ($key === 'blocked') {
+        $st = fw_attack_track($st, $ip); // 攻击窗口统计 + 阈值判定（达到时在响应完成后自动发告警邮件）
     }
     fw_state_save($st);
 }
@@ -817,6 +862,218 @@ function fw_rl_add(string $ip): array
     return [(int)$r['c'], $pm];
 }
 
+/**
+ * 验证「声称是主流搜索引擎蜘蛛」的 IP：PTR 反解 → 官方域名后缀匹配 → 正向解析回原 IP（防自设 PTR 冒充）。
+ * 结果按 IP 缓存 30 天（fw_state.spv）；DNS 查询受每分钟预算限制（超预算返回 null = 无法判定，不误判）。
+ * @return bool true=验证通过 / false=验证失败（伪造）/ null=无法验证（无 PTR、函数缺失、预算耗尽等）
+ */
+function fw_spider_verify(string $ip, string $ua): ?bool
+{
+    if (!function_exists('gethostbyaddr') || !function_exists('gethostbyname')) {
+        return null;
+    }
+    // 找出声称的蜘蛛类型（无官方 PTR 映射的不验证）
+    $map = null;
+    foreach (FW_SPIDER_PTR as $name => $domains) {
+        if (stripos($ua, $name) !== false) {
+            $map = $domains;
+            break;
+        }
+    }
+    if ($map === null) {
+        return null;
+    }
+    $st = fw_state();
+    $v = is_array($st['spv'][$ip] ?? null) ? $st['spv'][$ip] : null;
+    if ($v !== null && time() - (int)($v['ts'] ?? 0) < 30 * 86400) {
+        return !empty($v['ok']);
+    }
+    // DNS 预算：每分钟至多 FW_SPIDER_VERIFY_BUDGET 次，防止恶意批量伪造拖慢站点
+    $m = intdiv(time(), 60);
+    $b = is_array($st['spv_m'] ?? null) ? $st['spv_m'] : [];
+    if ((int)($b['m'] ?? -1) !== $m) {
+        $b = ['m' => $m, 'c' => 0];
+    }
+    if ((int)$b['c'] >= FW_SPIDER_VERIFY_BUDGET) {
+        return null;
+    }
+    $b['c']++;
+    $st['spv_m'] = $b;
+    fw_state_save($st);
+
+    $ok = false;
+    $host = @gethostbyaddr($ip);
+    if (is_string($host) && $host !== '' && strcasecmp($host, $ip) !== 0) {
+        $h = str_lower($host);
+        foreach ($map as $d) {
+            $d = str_lower($d);
+            if ($h === $d || substr($h, -strlen($d) - 1) === '.' . $d) {
+                // 正向确认：PTR 域名必须解析回原 IP（防攻击者自设 PTR 冒充）
+                $fwd = @gethostbyname($host);
+                $ok = ($fwd !== $host && strcasecmp($fwd, $ip) === 0);
+                break;
+            }
+        }
+    }
+    $st = fw_state(); // 保存过预算计数，重读后再写入缓存
+    $st['spv'][$ip] = ['ok' => $ok ? 1 : 0, 'ts' => time()];
+    fw_state_save($st);
+    return $ok;
+}
+
+/* ================= 攻击告警（多次拦截 → 自动邮件通知管理员） ================= */
+
+/**
+ * 攻击窗口统计 + 阈值判定（在 fw_bump 的 blocked 计数后调用）。
+ * 窗口：FW_ATK_WIN_MIN 分钟滑动窗口（按分钟分桶存 fw_state.atk）；
+ * 达到阈值且不在冷却期：立即占位冷却标记（并发请求不重复发信），实际发信注册到
+ * register_shutdown_function（响应完成后再发，绝不拖慢/阻塞当前请求）。
+ * @return array 更新后的状态（由调用方统一落盘，本函数不自行写盘以免覆盖计数）
+ */
+function fw_attack_track(array $st, string $ip): array
+{
+    if ((int)cfg('fw_atk_alert_on', 1) !== 1) {
+        return $st;
+    }
+    $now = time();
+    $m = intdiv($now, 60);
+    $atk = is_array($st['atk'] ?? null) ? $st['atk'] : [];
+    $atk[$m] = (int)($atk[$m] ?? 0) + 1;
+    foreach (array_keys($atk) as $mm) {
+        if ((int)$mm < $m - FW_ATK_WIN_MIN) { // 只保留窗口 + 1 桶余量
+            unset($atk[$mm]);
+        }
+    }
+    $st['atk'] = $atk;
+    $th = max(5, (int)cfg('fw_atk_alert_n', 20));
+    $sum = 0;
+    for ($i = 0; $i < FW_ATK_WIN_MIN; $i++) {
+        $sum += (int)($atk[$m - $i] ?? 0);
+    }
+    if ($sum < $th) {
+        return $st;
+    }
+    $cool = max(5, (int)cfg('fw_atk_alert_cool', 30)) * 60;
+    $al = is_array($st['atk_alert'] ?? null) ? $st['atk_alert'] : [];
+    if (!empty($al['last']) && $now - (int)$al['last'] < $cool) {
+        return $st; // 冷却期内不重复发信
+    }
+    $st['atk_alert'] = ['last' => $now, 'peak' => $sum, 'ip' => $ip];
+    if (empty($GLOBALS['FW_ATK_MAIL_QUEUED'])) {
+        $GLOBALS['FW_ATK_MAIL_QUEUED'] = true;
+        register_shutdown_function(function () use ($ip, $sum) {
+            fw_attack_mail($ip, $sum);
+        });
+    }
+    return $st;
+}
+
+/** 关机阶段：给全部管理员发送攻击告警邮件（含今日拦截统计 / 事件最多来源 IP Top5 / 最近事件摘要） */
+function fw_attack_mail(string $triggerIp, int $peak): void
+{
+    try {
+        $site = cut_str(str_replace(["\r", "\n"], ' ', (string)cfg('site_name', '论坛')), 40);
+        $th = max(5, (int)cfg('fw_atk_alert_n', 20));
+        // 从今天的防火墙日志尾部聚合事件最多的来源 IP 与最近事件
+        $top = [];
+        $recent = [];
+        $f = DATA_DIR . '/logs/fw-' . date('Y-m-d') . '.php';
+        if (is_file($f)) {
+            $raw = (string)@file_get_contents($f);
+            if (strpos($raw, DATA_GUARD) === 0) {
+                $raw = substr($raw, strlen(DATA_GUARD));
+            }
+            $lines = array_filter(array_map('trim', explode("\n", $raw)));
+            foreach (array_slice($lines, -600) as $ln) { // 只看最近的 600 条
+                $j = json_decode($ln, true);
+                if (!is_array($j) || empty($j['ip'])) {
+                    continue;
+                }
+                $ip2 = (string)$j['ip'];
+                $top[$ip2] = ($top[$ip2] ?? 0) + 1;
+                if (count($recent) < 8) {
+                    $recent[] = $j;
+                }
+            }
+            arsort($top);
+            $top = array_slice($top, 0, 5, true);
+        }
+        $st = fw_state();
+        $today = is_array($st['days'][date('Y-m-d')] ?? null) ? $st['days'][date('Y-m-d')] : [];
+        $bans = count(fw_bans_all());
+        $lines = [
+            "【攻击告警】{$site}",
+            '',
+            "检测到持续攻击行为：最近 " . FW_ATK_WIN_MIN . " 分钟内防火墙拦截已达 {$peak} 次（阈值 {$th} 次）。",
+            '',
+            '概况：',
+            '· 今日拦截 ' . (int)($today['blocked'] ?? 0) . ' 次 / 今日请求 ' . (int)($today['req'] ?? 0) . ' 次',
+            '· 今日新增封禁 ' . (int)($today['bans'] ?? 0) . ' 次 · 当前封禁名单 ' . $bans . ' 条',
+            '',
+        ];
+        if ($top) {
+            $lines[] = '事件最多的来源 IP（今日防火墙日志统计）：';
+            foreach ($top as $ip2 => $c) {
+                $lines[] = '· ' . $ip2 . '（' . $c . ' 条事件）';
+            }
+            $lines[] = '';
+        }
+        if ($recent) {
+            $lines[] = '最近事件（最多 8 条，新→旧）：';
+            foreach ($recent as $j) {
+                $lines[] = '· ' . date('H:i:s', (int)($j['t'] ?? 0)) . ' ' . (string)($j['ip'] ?? '')
+                    . ' [' . (string)($j['act'] ?? '') . '] ' . (string)($j['rule'] ?? '')
+                    . ' ' . (string)($j['m'] ?? '') . ' ' . (string)($j['uri'] ?? '');
+            }
+            $lines[] = '';
+        }
+        $lines[] = '建议：到后台「安全防护」查看防火墙日志与访问统计，确认攻击特征并封禁 / 调整策略；';
+        $lines[] = '若为 CC 攻击，可在 Cloudflare 面板临时开启「我正在被攻击」模式（程序已按真实 IP 限流，不会误伤全站）。';
+        $lines[] = '本次触发来源 IP：' . $triggerIp . '；冷却 ' . max(5, (int)cfg('fw_atk_alert_cool', 30)) . ' 分钟内不重复发送。';
+        $lines[] = '时间：' . date('Y-m-d H:i:s');
+        [$sent, $admins, $err] = mail_admins(
+            "【攻击告警】{$site} 最近" . FW_ATK_WIN_MIN . "分钟被拦截 {$peak} 次",
+            implode("\r\n", $lines)
+        );
+        // 记录发送结果（供后台攻击告警卡片展示）
+        $st2 = fw_state();
+        $al = is_array($st2['atk_alert'] ?? null) ? $st2['atk_alert'] : [];
+        $al['sent'] = $sent;
+        $al['admins'] = $admins;
+        $al['err'] = $sent > 0 ? '' : cut_str($err, 120);
+        $st2['atk_alert'] = $al;
+        fw_state_save($st2);
+        if ($sent > 0) {
+            log_action('attack_alert', "最近 " . FW_ATK_WIN_MIN . " 分钟拦截 {$peak} 次（阈值 {$th}），攻击告警邮件已发送 {$sent}/{$admins} 位管理员", 0, '系统');
+        } else {
+            log_action('attack_alert', "拦截 {$peak} 次达到告警阈值，但邮件发送失败" . ($err !== '' ? '：' . cut_str($err, 100) : '（请检查后台 SMTP 配置与管理员邮箱）'), 0, '系统');
+        }
+    } catch (Throwable $t) {
+        // 告警失败绝不影响业务
+    }
+}
+
+/** 测试攻击告警邮件（后台按钮；不影响真实告警冷却计时）@return [bool, string] */
+function fw_attack_test_mail(): array
+{
+    $site = cut_str(str_replace(["\r", "\n"], ' ', (string)cfg('site_name', '论坛')), 40);
+    $th = max(5, (int)cfg('fw_atk_alert_n', 20));
+    $lines = [
+        "【攻击告警·测试】{$site}",
+        '',
+        '这是一封测试邮件。当站点遭遇持续攻击时，会向全部管理员邮箱发送本格式的告警邮件。',
+        '',
+        '触发条件：' . FW_ATK_WIN_MIN . ' 分钟窗口内防火墙拦截次数达到阈值（限流 429 / 封禁名单 / 危险 IP 库 / 自动策略自动封禁均计入）。',
+        '邮件内容包含：今日拦截与请求统计、事件最多的来源 IP Top5、最近事件摘要与处置建议。',
+        '',
+        '当前配置：阈值 ' . $th . ' 次 / ' . FW_ATK_WIN_MIN . ' 分钟，冷却 ' . max(5, (int)cfg('fw_atk_alert_cool', 30)) . ' 分钟。',
+        '',
+        '时间：' . date('Y-m-d H:i:s'),
+    ];
+    [$sent, $admins, $err] = mail_admins("【攻击告警·测试】{$site} 告警通道正常", implode("\r\n", $lines));
+    return $sent > 0 ? [true, ''] : [false, $err !== '' ? $err : '无管理员邮箱或未配置 SMTP'];
+}
+
 /* ================= 自动策略引擎 ================= */
 
 /** 自定义规则列表 */
@@ -877,6 +1134,7 @@ function fw_score_add(string $ip, int $score, string $why, bool $deny = true): v
         if ($ok) {
             log_action('fw_auto_ban', 'IP ' . $ip . ' 触发自动封禁 ' . $hours . ' 小时：' . $why . '（风险分 ' . $now . '）', 0, '系统');
             fw_event('auto_ban', $ip, $why, '自动封禁 ' . $hours . ' 小时', $now);
+            fw_bump($ip, 'blocked'); // 自动封禁计入拦截统计（供攻击告警窗口与今日拦截数使用）
             if ($deny) {
                 fw_deny_page(403, '检测到异常访问行为，您的 IP 已被自动限制访问', '原因：' . $why);
             }
@@ -910,6 +1168,40 @@ function fw_score_tick(string $ip): void
         $score += 90;
         $hits[] = '注入 / 攻击特征';
     }
+    // 伪造搜索引擎蜘蛛：声称是主流蜘蛛，但 PTR 反解验证不通过（每 IP 只验证一次，结果缓存 30 天；
+    // 真蜘蛛 IP 必有官方 PTR，验证通过不扣分；无法验证（无 PTR / DNS 预算耗尽）不误判）
+    if ((int)cfg('fw_r_fake_spider', 1) === 1 && trim($ua) !== '' && preg_match(FW_RE_SPIDER, $ua)) {
+        if (fw_spider_verify($ip, $ua) === false) {
+            $score += 80;
+            $hits[] = '伪造搜索引擎蜘蛛（PTR 验证失败）';
+        }
+    }
+    // 未知爬虫 UA：自称 bot / spider / crawler / 采集器等，但不在搜索引擎白名单（SEO 采集器 / 监控器等）
+    if ((int)cfg('fw_r_bot_ua', 1) === 1 && trim($ua) !== ''
+        && ((int)cfg('fw_spider_allow', 1) !== 1 || !preg_match(FW_RE_SPIDER, $ua))
+        && preg_match(FW_RE_BOT_UA, $ua)) {
+        $score += 25;
+        $hits[] = '未知爬虫 UA';
+    }
+    // 敏感文件 / 安装残留探测：install.php、更新脚本、源码目录、数据目录、配置与打包文件等
+    if ((int)cfg('fw_r_probe', 1) === 1 && preg_match(FW_RE_PROBE, $uri)) {
+        $score += 50;
+        $hits[] = '敏感文件探测';
+    }
+    // 伪造 Cloudflare 头：带 CF-Connecting-IP 但 TCP 对端不是 CF 边缘（未开反代模式时该头不应出现）
+    $remote = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    if ((int)cfg('fw_r_spoof_cf', 1) === 1 && (int)cfg('fw_trust_xff', 0) !== 1
+        && trim((string)($_SERVER['HTTP_CF_CONNECTING_IP'] ?? '')) !== ''
+        && !fw_is_cf_edge($remote)) {
+        $score += 50;
+        $hits[] = '伪造 CF-Connecting-IP 头';
+    }
+    // 超长请求：URL / 查询串 / UA 明显超出正常浏览器与论坛业务范围，多为扫描器特征
+    if ((int)cfg('fw_r_long_req', 1) === 1
+        && (strlen($uri) > 2048 || strlen($query) > 2048 || strlen($ua) > 512)) {
+        $score += 30;
+        $hits[] = '超长请求（URL/UA 异常）';
+    }
     // 自定义规则
     $rules = fw_rules_all();
     foreach ($rules as $r) {
@@ -923,6 +1215,7 @@ function fw_score_tick(string $ip): void
                 if (fw_ban($ip, $hours, '规则「' . $name . '」命中', 'auto')) {
                     log_action('fw_auto_ban', 'IP ' . $ip . ' 命中规则「' . $name . '」→ 封禁 ' . $hours . ' 小时', 0, '系统');
                     fw_event('auto_ban', $ip, $name, '规则直接封禁 ' . $hours . ' 小时', 0);
+                    fw_bump($ip, 'blocked'); // 自动封禁计入拦截统计（供攻击告警窗口与今日拦截数使用）
                     fw_deny_page(403, '访问行为触发了本站安全规则，您的 IP 已被限制访问', '规则：' . $name);
                 }
                 return;

@@ -126,3 +126,31 @@ function mail_send(string $to, string $subject, string $body, array $ov = []): a
     fclose($fp);
     return $ok ? [true, ''] : [false, '邮件被拒：' . trim($resp)];
 }
+
+/**
+ * 给全部管理员邮箱发信（存储告警 / 攻击告警等系统通知共用）
+ * @return array [int 成功份数, int 管理员总数, string 最后失败原因]
+ */
+function mail_admins(string $subject, string $body): array
+{
+    $sent = 0;
+    $total = 0;
+    $lastErr = 'SMTP 未配置或无管理员邮箱';
+    foreach (user_all() as $au) {
+        if (empty($au['admin'])) {
+            continue;
+        }
+        $total++;
+        $to = (string)($au['email'] ?? '');
+        if (!valid_email($to)) {
+            continue;
+        }
+        [$ok, $err] = mail_send($to, $subject, $body);
+        if ($ok) {
+            $sent++;
+        } else {
+            $lastErr = $err;
+        }
+    }
+    return [$sent, $total, $lastErr];
+}
