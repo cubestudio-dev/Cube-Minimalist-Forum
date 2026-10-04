@@ -1001,39 +1001,39 @@ function fw_attack_mail(string $triggerIp, int $peak): void
         $st = fw_state();
         $today = is_array($st['days'][date('Y-m-d')] ?? null) ? $st['days'][date('Y-m-d')] : [];
         $bans = count(fw_bans_all());
-        $lines = [
-            "【攻击告警】{$site}",
-            '',
-            "检测到持续攻击行为：最近 " . FW_ATK_WIN_MIN . " 分钟内防火墙拦截已达 {$peak} 次（阈值 {$th} 次）。",
-            '',
-            '概况：',
-            '· 今日拦截 ' . (int)($today['blocked'] ?? 0) . ' 次 / 今日请求 ' . (int)($today['req'] ?? 0) . ' 次',
-            '· 今日新增封禁 ' . (int)($today['bans'] ?? 0) . ' 次 · 当前封禁名单 ' . $bans . ' 条',
-            '',
-        ];
+        $rows = '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">今日拦截</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . (int)($today['blocked'] ?? 0) . '</b> 次</td></tr>'
+            . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">今日请求</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . (int)($today['req'] ?? 0) . '</b> 次</td></tr>'
+            . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">今日新增封禁</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . (int)($today['bans'] ?? 0) . '</b> 次</td></tr>'
+            . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">当前封禁名单</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . $bans . '</b> 条</td></tr>';
+        $inner = '<p style="margin:0 0 14px">检测到持续攻击行为：最近 <b>' . FW_ATK_WIN_MIN . ' 分钟</b>内防火墙拦截已达 <b style="color:#b91c1c">' . $peak . '</b> 次（阈值 ' . $th . ' 次）。</p>'
+            . '<p style="margin:0 0 8px"><b>概况</b></p>'
+            . '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 16px">' . $rows . '</table>';
         if ($top) {
-            $lines[] = '事件最多的来源 IP（今日防火墙日志统计）：';
+            $inner .= '<p style="margin:0 0 8px"><b>事件最多的来源 IP</b>（今日防火墙日志统计）</p>'
+                . '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 16px">';
             foreach ($top as $ip2 => $c) {
-                $lines[] = '· ' . $ip2 . '（' . $c . ' 条事件）';
+                $inner .= '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea;font-family:ui-monospace,Menlo,Consolas,monospace">' . htmlspecialchars($ip2, ENT_QUOTES, 'UTF-8') . '</td><td style="padding:6px 12px;border:1px solid #e5e5ea">' . $c . ' 条事件</td></tr>';
             }
-            $lines[] = '';
+            $inner .= '</table>';
         }
         if ($recent) {
-            $lines[] = '最近事件（最多 8 条，新→旧）：';
+            $inner .= '<p style="margin:0 0 8px"><b>最近事件</b>（最多 8 条，新→旧）</p>'
+                . '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px;margin:0 0 16px">';
             foreach ($recent as $j) {
-                $lines[] = '· ' . date('H:i:s', (int)($j['t'] ?? 0)) . ' ' . (string)($j['ip'] ?? '')
-                    . ' [' . (string)($j['act'] ?? '') . '] ' . (string)($j['rule'] ?? '')
-                    . ' ' . (string)($j['m'] ?? '') . ' ' . (string)($j['uri'] ?? '');
+                $inner .= '<tr><td style="padding:5px 10px;border:1px solid #e5e5ea;white-space:nowrap">' . date('H:i:s', (int)($j['t'] ?? 0)) . '</td>'
+                    . '<td style="padding:5px 10px;border:1px solid #e5e5ea;font-family:ui-monospace,Menlo,Consolas,monospace">' . htmlspecialchars((string)($j['ip'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>'
+                    . '<td style="padding:5px 10px;border:1px solid #e5e5ea">' . htmlspecialchars((string)($j['act'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>'
+                    . '<td style="padding:5px 10px;border:1px solid #e5e5ea">' . htmlspecialchars((string)($j['rule'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>'
+                    . '<td style="padding:5px 10px;border:1px solid #e5e5ea;word-break:break-all">' . htmlspecialchars((string)($j['m'] ?? '') . ' ' . (string)($j['uri'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td></tr>';
             }
-            $lines[] = '';
+            $inner .= '</table>';
         }
-        $lines[] = '建议：到后台「安全防护」查看防火墙日志与访问统计，确认攻击特征并封禁 / 调整策略；';
-        $lines[] = '若为 CC 攻击，可在 Cloudflare 面板临时开启「我正在被攻击」模式（程序已按真实 IP 限流，不会误伤全站）。';
-        $lines[] = '本次触发来源 IP：' . $triggerIp . '；冷却 ' . max(5, (int)cfg('fw_atk_alert_cool', 30)) . ' 分钟内不重复发送。';
-        $lines[] = '时间：' . date('Y-m-d H:i:s');
+        $inner .= '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;color:#1e40af">'
+            . '<b>处置建议：</b>到后台「安全防护」查看防火墙日志与访问统计，确认攻击特征并封禁 / 调整策略；若为 CC 攻击，可在 Cloudflare 面板临时开启「我正在被攻击」模式（程序已按真实 IP 限流，不会误伤全站）。</div>';
+        $inner .= '<p style="margin:14px 0 0;font-size:12px;color:#71717a">本次触发来源 IP：' . htmlspecialchars($triggerIp, ENT_QUOTES, 'UTF-8') . '；冷却 ' . max(5, (int)cfg('fw_atk_alert_cool', 30)) . ' 分钟内不重复发送。</p>';
         [$sent, $admins, $err] = mail_admins(
             "【攻击告警】{$site} 最近" . FW_ATK_WIN_MIN . "分钟被拦截 {$peak} 次",
-            implode("\r\n", $lines)
+            mail_template('攻击告警', $inner)
         );
         // 记录发送结果（供后台攻击告警卡片展示）
         $st2 = fw_state();
@@ -1058,19 +1058,13 @@ function fw_attack_test_mail(): array
 {
     $site = cut_str(str_replace(["\r", "\n"], ' ', (string)cfg('site_name', '论坛')), 40);
     $th = max(5, (int)cfg('fw_atk_alert_n', 20));
-    $lines = [
-        "【攻击告警·测试】{$site}",
-        '',
-        '这是一封测试邮件。当站点遭遇持续攻击时，会向全部管理员邮箱发送本格式的告警邮件。',
-        '',
-        '触发条件：' . FW_ATK_WIN_MIN . ' 分钟窗口内防火墙拦截次数达到阈值（限流 429 / 封禁名单 / 危险 IP 库 / 自动策略自动封禁均计入）。',
-        '邮件内容包含：今日拦截与请求统计、事件最多的来源 IP Top5、最近事件摘要与处置建议。',
-        '',
-        '当前配置：阈值 ' . $th . ' 次 / ' . FW_ATK_WIN_MIN . ' 分钟，冷却 ' . max(5, (int)cfg('fw_atk_alert_cool', 30)) . ' 分钟。',
-        '',
-        '时间：' . date('Y-m-d H:i:s'),
-    ];
-    [$sent, $admins, $err] = mail_admins("【攻击告警·测试】{$site} 告警通道正常", implode("\r\n", $lines));
+    $inner = '<p style="margin:0 0 12px">这是一封 <b>攻击告警测试邮件</b>。当站点遭遇持续攻击时，会向全部管理员邮箱发送本格式的告警邮件。</p>'
+        . '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 14px">'
+        . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea;width:110px">触发条件</td><td style="padding:6px 12px;border:1px solid #e5e5ea">' . FW_ATK_WIN_MIN . ' 分钟窗口内防火墙拦截次数达到阈值（限流 429 / 封禁名单 / 危险 IP 库 / 自动策略自动封禁均计入）</td></tr>'
+        . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">邮件内容</td><td style="padding:6px 12px;border:1px solid #e5e5ea">今日拦截与请求统计、事件最多的来源 IP Top5、最近事件摘要与处置建议</td></tr>'
+        . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">当前配置</td><td style="padding:6px 12px;border:1px solid #e5e5ea">阈值 <b>' . $th . '</b> 次 / ' . FW_ATK_WIN_MIN . ' 分钟，冷却 ' . max(5, (int)cfg('fw_atk_alert_cool', 30)) . ' 分钟</td></tr>'
+        . '</table>';
+    [$sent, $admins, $err] = mail_admins("【攻击告警·测试】{$site} 告警通道正常", mail_template('攻击告警 · 通道测试', $inner));
     return $sent > 0 ? [true, ''] : [false, $err !== '' ? $err : '无管理员邮箱或未配置 SMTP'];
 }
 
