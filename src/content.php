@@ -673,6 +673,49 @@ function ai_process_queue(bool $manual = false): array
     }
 }
 
+/**
+ * 发帖 / 回复 AI 预检（严全面模式·消息审核）：内容发布后立即交给 AI 主动审一遍（后台可开关，默认开）。
+ *  - 判定违规 → 立即隐藏 + 生成系统举报记录（status=ai_bad，走既有申诉 / 复核体系）+ 通知作者；
+ *  - AI 调用失败 → 宁纵勿枉：不隐藏，仅记日志等待举报或人工巡查；
+ *  - 通过 → 记 ai_ok 日志（标注「预检」来源）。
+ * @return string ''=无需提示；否则返回给发帖人的提示语（违规被隐藏）
+ */
+function ai_precheck_after_post(string $type, int $tid, int $rid, string $content, int $authorId, string $title = ''): string
+{
+    if ((int)cfg('ai_precheck', 1) !== 1 || !ai_ready()) {
+        return '';
+    }
+    $verdict = '';
+    $note = '';
+    $used = '';
+    $ok = ai_moderate($content, $verdict, $note, [], $used);
+    $no = $type === 'thread' ? '帖子 #' . $tid : '帖子 #' . $tid . ' 中的回复 #' . $rid;
+    if (!$ok) {
+        log_action('ai_failed', '预检未完成（' . $no . '）：' . cut_str($note, 140) . '；内容正常展示，等待举报或人工复核', 0, 'AI 预检');
+        return '';
+    }
+    if ($verdict !== 'violation') {
+        log_action('ai_ok', '预检通过（' . $no . '）' . ($used !== '' ? '，审核方：' . $used : ''), 0, 'AI 预检');
+        return '';
+    }
+    /* 违规：立即隐藏 + 系统举报记录（可申诉）+ 通知作者 */
+    if ($type === 'thread') {
+        thread_save($tid, ['hidden' => true]);
+    } else {
+        reply_save($tid, $rid, ['hidden' => true]);
+    }
+    $repId = report_add($type === 'thread' ? 'thread' : 'reply', $tid, $rid, 'AI 预检自动审核' . ($note !== '' ? '：' . cut_str($note, 100) : ''), 0);
+    report_update($repId, ['status' => 'ai_bad', 'note' => cut_str($note, 200), 'handled' => time()]);
+    log_action('ai_bad', '预检判定违规（' . $no . '）：' . cut_str($note, 80) . '，已自动隐藏' . ($used !== '' ? '，审核方：' . $used : ''), 0, 'AI 预检');
+    notify_add(
+        $authorId, 'ai_bad', '您发布的内容未通过 AI 预检',
+        '您的' . ($type === 'thread' ? '帖子《' . cut_str($title, 20) . '》' : '回复') . '经 AI 预检判定存在违规（' . cut_str($note, 80) . '），已自动隐藏。如您认为审核有误，可在本条通知下方点击「申诉」，申诉后将由管理员人工复核。',
+        'p=thread&id=' . $tid, $repId, true
+    );
+    return '内容已提交，但 AI 预检判定违规已自动隐藏：' . cut_str($note, 60) . '（可在通知中申诉）';
+}
+
+
 /* ================= 通知 ================= */
 function notify_file(int $uid): string
 {

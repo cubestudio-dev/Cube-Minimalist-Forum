@@ -525,4 +525,21 @@
     bar.appendChild(pop);
     ta.parentNode.insertBefore(bar, ta);
   });
+
+  /* ---------- 管理员 · AI 自主管理（严全面）：立即巡逻一次 ----------
+     AJAX 触发 ai_patrol_go（即使无风险事件也强制巡），完成后刷新页面展示最新巡逻报告。 */
+  $$('[data-admin-patrol]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      var old = btn.textContent;
+      btn.textContent = '巡逻中…';
+      postForm(apiUrl('a=admin_patrol_now'), {}, function (res) {
+        btn.disabled = false;
+        btn.textContent = old;
+        toast(res.msg || (res.ok ? '巡逻完成' : '巡逻失败'));
+        setTimeout(function () { window.location.reload(); }, 900);
+      });
+    });
+  });
 })();

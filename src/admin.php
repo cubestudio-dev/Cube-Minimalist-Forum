@@ -182,12 +182,67 @@ function admin_tab_ai(): void
         '<div class="prompt-box' . ($strict === 'standard' ? ' on' : '') . '"><b>标准' . ($strict === 'standard' ? '（当前）' : '') . '</b><pre>' . e(AI_STRICT_LEVELS['standard']) . '</pre></div>' .
         '<div class="prompt-box' . ($strict === 'strict' ? ' on' : '') . '"><b>严格' . ($strict === 'strict' ? '（当前）' : '') . '</b><pre>' . e(AI_STRICT_LEVELS['strict']) . '</pre></div>' .
         '</details>' .
+        '<div class="ai-autopilot-box">' .
+        '<b class="ai-sub">严全面模式（AI 全自主值守）</b>' .
+        '<label class="check"><input type="checkbox" name="ai_precheck" value="1"' . (!empty(cfg('ai_precheck', 1)) ? ' checked' : '') . '> <b>发帖 AI 预检</b> —— 每条新帖子 / 回复发布后立即交给 AI 主动审核：判定违规将<b>自动隐藏</b>并通知作者（可申诉）；AI 调用失败时不拦截（宁纵勿枉）。适合无人值守时自动把关内容</label>' .
+        '<label class="check"><input type="checkbox" name="ai_autopilot" value="1"' . (!empty(cfg('ai_autopilot')) ? ' checked' : '') . '> <b>AI 自主管理</b> —— 授权 AI 无人值守时自主巡逻论坛：分析风险 IP 与关键日志，<b>自主封禁恶意 IP / 解除误封 / 邮件警报管理员</b>。所有动作强制白名单校验：只能封本次材料中出现过的风险 IP、保护名单免疫、单轮封禁≤上限、管理员手动封禁不可解，全部留痕可撤销。巡逻节奏：常驻巡逻器（php daemon.php）在线时按间隔主动巡，否则由访客访问惰性触发（有风险事件才调用 AI，零浪费）</label>' .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">巡逻间隔（分钟）</span><input class="input" name="ai_patrol_interval" type="number" min="2" max="360" value="' . ai_patrol_interval() . '"><span class="hint">每次巡逻至少间隔（2-360，默认 15）；间隔越短响应越快，无事件时零消耗</span></label>' .
+        '<label class="field"><span class="field-l">单轮封禁上限（个）</span><input class="input" name="ai_patrol_ban_limit" type="number" min="1" max="10" value="' . ai_patrol_ban_limit() . '"><span class="hint">AI 一轮巡逻最多封禁的 IP 数（1-10，默认 3，红线防滥杀）</span></label>' .
+        '</div>' .
+        '<label class="check"><input type="checkbox" name="ai_patrol_alert" value="1"' . (!empty(cfg('ai_patrol_alert', 1)) ? ' checked' : '') . '> <b>允许 AI 发邮件警报</b> —— 巡逻发现严重态势（持续攻击、封禁激增、审核服务异常）时给管理员发邮件（30 分钟节流，轻微事件不打扰）</label>' .
+        '</div>' .
         '<div class="form-foot">' .
         '<button class="btn btn-primary" type="button" data-admin-save="ai">保存 AI 设置</button>' .
         '<button class="btn btn-ghost" type="button" data-admin-test="ai">测试主力模型</button>' .
         '</div>' .
         '<span class="test-msg muted"></span></form>' .
         '<p class="hint">AI 每次只处理举报队列中的一条（先进先出，随页面访问自动触发）；自动切换后仍全部失败时，内容保持隐藏并通知管理员人工处理（后台「AI 待审队列」）。</p></div>';
+
+    /* ---- 卡片 3：巡逻状态与最近报告 ---- */
+    $ps = ai_patrol_state();
+    $alive = ai_daemon_alive();
+    $prep = is_array($ps['report'] ?? null) ? $ps['report'] : null;
+    $lastT = (int)($ps['last'] ?? 0);
+    if ($alive) {
+        $modeBadge = '<span class="badge badge-ok">🟢 常驻巡逻器在线</span>';
+        $modeHint = 'daemon.php 正在值守，按巡逻间隔主动巡逻，无需访客触发';
+    } elseif (!empty(cfg('ai_autopilot')) && ai_ready()) {
+        $modeBadge = '<span class="badge badge-warn">🟡 访客触发模式</span>';
+        $modeHint = '可选增强：在能常驻进程的主机运行 php daemon.php 可开启 7×24 常驻巡逻（响应更快）；当前由访客访问惰性触发巡逻，效果一致';
+    } else {
+        $modeBadge = '<span class="badge">⚪ 未启用</span>';
+        $modeHint = '在上方勾选「AI 自主管理」并保存后开始巡逻';
+    }
+    echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">AI 自主管理 · 巡逻状态与最近报告</h2>' .
+        '<div class="ai-patrol-head">' . $modeBadge .
+        '<span class="hint">上次巡逻：' . ($lastT > 0 ? e(date('m-d H:i', $lastT)) . '（' . e(fmt_time($lastT)) . '）' : '尚未巡逻')
+        . ' · 间隔 ' . ai_patrol_interval() . ' 分钟 · 单轮封禁上限 ' . ai_patrol_ban_limit() . '</span>' .
+        '<button class="btn btn-ghost btn-sm" type="button" data-admin-patrol="now">立即巡逻一次</button></div>' .
+        '<p class="hint">' . e($modeHint) . '</p>';
+    if ($prep === null) {
+        echo empty_state('巡逻器还没有产出报告，点击「立即巡逻一次」查看 AI 对当前态势的判断');
+    } else {
+        echo '<div class="ai-patrol-report">' .
+            '<div class="report-head"><b>' . ($prep['ok'] ? '态势总结' : '巡逻异常') . '</b>' .
+            '<span class="muted">' . e(date('Y-m-d H:i:s', (int)($prep['time'] ?? 0))) . ' · ' . e((string)($prep['used'] ?? '')) . '</span></div>' .
+            '<p class="assess">' . e((string)($prep['assess'] ?? '')) . '</p>';
+        $rows = (array)($prep['rows'] ?? []);
+        if ($rows) {
+            $actName = ['ban' => '封禁', 'unban' => '解封', 'alert' => '邮件警报'];
+            echo '<table class="patrol-rows"><thead><tr><th>动作</th><th>对象</th><th>结果</th></tr></thead><tbody>';
+            foreach ($rows as $r) {
+                $a = (string)($r[0] ?? '');
+                echo '<tr><td>' . e($actName[$a] ?? $a) . '</td><td>' . e((string)($r[1] ?? '')) . '</td><td>' .
+                    '<span class="badge ' . (!empty($r[3]) ? 'badge-ok">已执行' : 'badge-warn">已拦截') . '</span> ' . e((string)($r[2] ?? '')) . '</td></tr>';
+            }
+            echo '</tbody></table>';
+        } elseif (!empty($prep['ok'])) {
+            echo '<p class="hint">本轮无需执行任何动作（AI 判定态势平稳）</p>';
+        }
+        echo '</div>';
+    }
+    echo '<p class="hint">AI 封禁的 IP 可在后台「防火墙」中随时手动解封；巡逻决策与动作全部留痕于系统日志（AI·自主巡逻 / AI·自主封禁 等）。</p></div>';
 }
 
 /* ---------------- 板块 ---------------- */

@@ -74,6 +74,7 @@ function route_action(string $a): void
         case 'admin_test_mail':  admin_tab_guard(); act_admin_test_mail(); return;
         case 'admin_save_ai':    admin_tab_guard(); act_admin_save_ai(); return;
         case 'admin_test_ai':    admin_tab_guard(); act_admin_test_ai(); return;
+        case 'admin_patrol_now': admin_tab_guard(); act_admin_patrol_now(); return;
         case 'admin_model_new':   admin_tab_guard(); act_admin_model_new(); return;
         case 'admin_model_save':  admin_tab_guard(); act_admin_model_save(); return;
         case 'admin_model_del':   admin_tab_guard(); act_admin_model_del(); return;
@@ -450,6 +451,12 @@ function act_thread_new(): void
     $tid = thread_create($board, $title, $content, (int)$u['id']);
     user_bump((int)$u['id'], 'threads', 1);
     log_action('thread_new', '发布《' . $title . '》（帖子 #' . $tid . '，板块：' . board_name($board) . '）');
+    /* 严全面·消息审核：发布后立即交给 AI 预检（后台可开关），违规自动隐藏并可申诉 */
+    $preMsg = ai_precheck_after_post('thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
+    if ($preMsg !== '') {
+        flash('err', $preMsg);
+        redirect(u('p=thread&id=' . $tid));
+    }
     flash('ok', '发布成功');
     redirect(u('p=thread&id=' . $tid));
 }
@@ -482,6 +489,12 @@ function act_reply_new(): void
         redirect(u('p=home'));
     }
     log_action('reply_new', '在《' . (string)($t['title'] ?? '') . '》（帖子 #' . $tid . '）中回复 #' . $rid);
+    /* 严全面·消息审核：发布后立即交给 AI 预检（后台可开关），违规自动隐藏并可申诉 */
+    $preMsg = ai_precheck_after_post('reply', $tid, $rid, $content, (int)$u['id']);
+    if ($preMsg !== '') {
+        flash('err', $preMsg);
+        redirect(u('p=thread&id=' . $tid) . '#r' . $rid);
+    }
     flash('ok', '回复成功');
     redirect(u('p=thread&id=' . $tid) . '#r' . $rid);
 }
@@ -689,10 +702,19 @@ function act_admin_save_ai(): void
         'ai_fail_limit' => max(1, min(20, (int)($_POST['ai_fail_limit'] ?? 3))),
         'ai_fullpower' => isset($_POST['ai_fullpower']) ? 1 : 0,
         'ai_strict' => ai_strict_norm(post_str('ai_strict', 10)),
+        /* 严全面模式：消息预检 + AI 自主管理 */
+        'ai_precheck' => isset($_POST['ai_precheck']) ? 1 : 0,
+        'ai_autopilot' => isset($_POST['ai_autopilot']) ? 1 : 0,
+        'ai_patrol_interval' => max(2, min(360, (int)($_POST['ai_patrol_interval'] ?? 15))),
+        'ai_patrol_ban_limit' => max(1, min(10, (int)($_POST['ai_patrol_ban_limit'] ?? 3))),
+        'ai_patrol_alert' => isset($_POST['ai_patrol_alert']) ? 1 : 0,
     ]);
     $lvName = ['loose' => '宽松', 'standard' => '标准', 'strict' => '严格'][cfg('ai_strict', 'standard')];
     log_action('admin_save_ai', '审核策略：单模型重试 ' . (int)cfg('ai_retries', 3) . ' 次；自动切换阈值 '
-        . ai_fail_limit() . ' 次；全火力全开：' . (!empty(cfg('ai_fullpower')) ? '开' : '关') . '；审核严格程度：' . $lvName);
+        . ai_fail_limit() . ' 次；全火力全开：' . (!empty(cfg('ai_fullpower')) ? '开' : '关') . '；审核严格程度：' . $lvName
+        . '；发帖预检：' . (!empty(cfg('ai_precheck')) ? '开' : '关')
+        . '；AI 自主管理：' . (!empty(cfg('ai_autopilot')) ? '开' : '关')
+        . '（巡逻间隔 ' . ai_patrol_interval() . ' 分钟，单轮封禁上限 ' . ai_patrol_ban_limit() . '，邮件警报：' . (!empty(cfg('ai_patrol_alert')) ? '开' : '关') . '）');
     act_ok('AI 设置已保存', u('p=admin&tab=ai'));
 }
 
@@ -729,6 +751,20 @@ function act_admin_test_ai(): void
     $ok = ai_test_model($m, $msg, ['retries' => 1, 'strict' => (string)cfg('ai_strict', 'standard')]);
     if ($ok) {
         log_action('admin_test_ai', 'AI 测试通过：' . ai_model_label($m) . '（' . $m['model'] . '）');
+    }
+    json_response(['ok' => $ok, 'msg' => $msg]);
+}
+
+/* ---------------- 管理员：AI 自主管理（严全面） ---------------- */
+
+/** 手动巡逻一次（管理员点击按钮触发；即使无风险事件也强制巡，便于查看 AI 对当前态势的判断） */
+function act_admin_patrol_now(): void
+{
+    $mat = ai_patrol_material();
+    $msg = '';
+    $ok = ai_patrol_go($mat, $msg);
+    if ($ok) {
+        log_action('admin_patrol', '管理员手动巡逻：' . cut_str($msg, 140), 0, '管理员');
     }
     json_response(['ok' => $ok, 'msg' => $msg]);
 }

@@ -648,3 +648,14 @@ a.online-row:hover { background: var(--hover); }
   .ai-model-head { align-items: flex-start; }
   .ai-model-name { min-width: 100%; }
 }
+
+/* ================= AI 自主管理（严全面模式） ================= */
+.ai-autopilot-box { border: 1px dashed var(--border); border-radius: var(--radius-s); padding: 10px 12px; margin: 10px 0 4px; background: color-mix(in srgb, var(--accent) 3%, transparent); }
+.ai-sub { display: block; font-size: 13.5px; font-weight: 700; margin: 0 0 4px; }
+.ai-patrol-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 4px; }
+.ai-patrol-report { border: 1px solid var(--border); border-radius: var(--radius-s); padding: 10px 12px; margin: 6px 0; }
+.ai-patrol-report .report-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+.ai-patrol-report .assess { margin: 4px 0 8px; white-space: pre-wrap; }
+.patrol-rows { width: 100%; border-collapse: collapse; font-size: 13px; }
+.patrol-rows th, .patrol-rows td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); word-break: break-all; }
+.patrol-rows th { color: var(--muted); font-weight: 600; }
