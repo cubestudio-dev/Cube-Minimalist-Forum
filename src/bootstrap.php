@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.13.0');
+    define('MF_VERSION', '1.14.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -54,11 +54,14 @@ if (is_dir($sdir) && is_writable($sdir)) {
 }
 session_name('MFSESS');
 /* HTTPS 环境自动给会话 Cookie 加上 Secure（防降级窃听）；HTTP 站点保持兼容 */
-$mfHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-    || (string)($_SERVER['SERVER_PORT'] ?? '') === '443'
-    || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+$mfHttps = app_is_https();
+/* 会话文件服务端存活期提为 30 天：PHP 默认 gc_maxlifetime=1440 秒（24 分钟），
+   勾选「保持登录」的用户在宿主机 GC 运行后会话文件就被误删，导致凭空掉线。
+   （未勾选保持登录的用户不受影响：会话 Cookie 本身仍是浏览器关闭即失效） */
+@ini_set('session.gc_maxlifetime', (string)(30 * 86400));
 session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => $mfHttps]);
 @session_start();
+unset($mfHttps);
 
 /* 配置 */
 $GLOBALS['CFG'] = Store::read('config.php', []);
@@ -76,6 +79,23 @@ fw_guard();
 if (!Store::writable()) {
     $GLOBALS['ENV_WARN'] = 'data/ 目录不可写：发帖、注册、设置保存等写入类功能将无法使用。'
         . '请到后台「监控 → 环境自检」点「一键修复目录权限」尝试自动修复；若无效，请通过 FTP 将 data/ 目录（含子目录）权限设为 755 或 775（Windows 主机请给 IIS 用户授权）。';
+}
+
+/** 当前请求是否为 HTTPS（含反代透传场景；auth.php 会话续期也用它保持 Secure 一致性） */
+function app_is_https(): bool
+{
+    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (string)($_SERVER['SERVER_PORT'] ?? '') === '443'
+        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+}
+
+/**
+ * 功能总开关（v1.14.0）：后台「功能」页可勾选启停
+ * 默认全开 —— 旧站升级零迁移、新装零配置；关闭的开关前后台双端拦截
+ */
+function feat_on(string $k, bool $def = true): bool
+{
+    return (int)cfg('feat_' . $k, $def ? 1 : 0) === 1;
 }
 
 /** 读取配置：cfg('site_name', 默认) 或 cfg() 取全部 */

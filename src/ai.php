@@ -177,6 +177,11 @@ function ai_endpoint(string $url): string
 
 function http_post_json(string $url, array $payload, array $headers, int $timeout, string &$err = ''): ?string
 {
+    /* 协议白名单：仅允许 http(s)，杜绝 file:// 等协议被 curl 支持带来的意外读取（与防火墙 fw_http_* 同标准） */
+    if (!preg_match('#^https?://#i', trim($url))) {
+        $err = 'API 地址必须以 http:// 或 https:// 开头';
+        return null;
+    }
     $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
     if ($body === false) {
         $err = '请求编码失败';

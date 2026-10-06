@@ -659,3 +659,21 @@ a.online-row:hover { background: var(--hover); }
 .patrol-rows { width: 100%; border-collapse: collapse; font-size: 13px; }
 .patrol-rows th, .patrol-rows td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); word-break: break-all; }
 .patrol-rows th { color: var(--muted); font-weight: 600; }
+
+/* ================= v1.14.0：功能开关 / 签名 / 搜索 / 图标 ================= */
+.feat-row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius-s); margin-bottom: 8px; cursor: pointer; transition: background .15s; }
+.feat-row:hover { background: var(--hover); }
+.feat-row .feat-check { width: 17px; height: 17px; accent-color: var(--accent); flex: none; cursor: pointer; }
+.feat-row .feat-txt { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.feat-row .feat-txt .muted { font-size: 12.5px; }
+.feat-row .badge { flex: none; }
+.user-sig { margin: 8px 0 2px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 4%, transparent); border-radius: 0 var(--radius-s) var(--radius-s) 0; }
+.user-sig.profile-sig { margin: 6px 0 0; }
+.search-snippet { margin: -6px 0 10px; padding: 0 4px; font-size: 12.5px; line-height: 1.6; }
+.search-snippet + .tcard, .thread-list .tcard + .search-snippet { margin-top: -8px; }
+.side-search .input-sm { width: 100%; }
+.side-search input[type="search"] { margin-bottom: 2px; }
+.icon-current { display: flex; align-items: center; gap: 12px; margin: 8px 0 12px; flex-wrap: wrap; }
+.icon-current .icon-preview { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--hover); overflow: hidden; }
+.icon-current .icon-preview img { width: 48px; height: 48px; object-fit: contain; }
+[data-theme="dark"] .icon-current .icon-preview { background: #1c1c1f; }

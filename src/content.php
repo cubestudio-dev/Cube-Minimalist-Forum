@@ -112,7 +112,7 @@ function thread_index(): array
     return is_array($x) ? $x : [];
 }
 
-const INDEX_KEYS = ['board', 'author', 'title', 'created', 'replies', 'likes', 'pinned', 'locked', 'hidden', 'appealed', 'last_reply', 'last_reply_by'];
+const INDEX_KEYS = ['board', 'author', 'title', 'created', 'replies', 'likes', 'pinned', 'locked', 'hidden', 'appealed', 'last_reply', 'last_reply_by', 'views'];
 
 /** 在 threads 锁内同步索引字段 */
 function sync_thread_index(int $tid, array $fields): void
@@ -403,6 +403,140 @@ function like_toggle(string $type, int $tid, int $rid, int $uid): array
     unset($r);
     Store::unlock($lk);
     return [false, 0];
+}
+
+/* ================= 浏览量 / 编辑（v1.14.0） ================= */
+
+/** 浏览量 +1（每会话每帖至多计一次；爬虫/命令行 UA 不计数，与在线统计同标准；写入失败静默） */
+function thread_view_bump(int $tid): void
+{
+    $ua = strtolower((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+    if ($ua === '' || session_status() !== PHP_SESSION_ACTIVE
+        || preg_match('/bot|crawl|spider|slurp|curl|wget|python|java|okhttp|httpclient|headless|monitor|pingdom|uptime/i', $ua)) {
+        return;
+    }
+    if (!isset($_SESSION['views']) || !is_array($_SESSION['views'])) {
+        $_SESSION['views'] = [];
+    }
+    if (isset($_SESSION['views'][$tid])) {
+        return;
+    }
+    if (count($_SESSION['views']) > 500) { // 防会话数据无限膨胀
+        $_SESSION['views'] = array_slice($_SESSION['views'], -250, null, true);
+    }
+    $_SESSION['views'][$tid] = 1;
+    $lk = Store::lock('threads');
+    $t = thread_get($tid);
+    if ($t) {
+        $t['views'] = (int)($t['views'] ?? 0) + 1;
+        Store::write('threads/t' . $tid . '.php', $t);
+        sync_thread_index($tid, ['views' => (int)$t['views']]);
+    }
+    Store::unlock($lk);
+}
+
+/** 可编辑时间窗（秒）：作者可在发帖 / 回复后 15 分钟内编辑自己的内容 */
+const MF_EDIT_WINDOW = 900;
+
+/** 帖子是否可由 $u 编辑：管理员不限时；作者需未锁定、未隐藏、无回复且在 15 分钟内 */
+function thread_editable(array $t, ?array $u): bool
+{
+    if (!$u || !feat_on('edit')) {
+        return false;
+    }
+    if (!empty($u['admin'])) {
+        return true;
+    }
+    if ((int)($t['author'] ?? 0) !== (int)$u['id']) {
+        return false;
+    }
+    if (!empty($t['locked']) || !empty($t['hidden']) || (int)($t['replies'] ?? 0) > 0) {
+        return false;
+    }
+    return (time() - (int)($t['created'] ?? 0)) <= MF_EDIT_WINDOW;
+}
+
+/** 回复是否可由 $u 编辑：管理员不限时；作者需未隐藏、所在帖未锁定且在 15 分钟内 */
+function reply_editable(array $r, ?array $u, array $t): bool
+{
+    if (!$u || !feat_on('edit')) {
+        return false;
+    }
+    if (!empty($u['admin'])) {
+        return true;
+    }
+    if ((int)($r['author'] ?? 0) !== (int)$u['id']) {
+        return false;
+    }
+    if (!empty($r['hidden']) || !empty($t['locked'])) {
+        return false;
+    }
+    return (time() - (int)($r['created'] ?? 0)) <= MF_EDIT_WINDOW;
+}
+
+/* ================= 站内搜索（v1.14.0） ================= */
+
+/** 关键词包含判断（大小写不敏感；无 mbstring 时回退 lowercase 比对，中日韩字符不受影响） */
+function txt_contains(string $hay, string $needle): bool
+{
+    if ($needle === '') {
+        return false;
+    }
+    if (function_exists('mb_stripos')) {
+        return mb_stripos($hay, $needle, 0, 'UTF-8') !== false;
+    }
+    return stripos(str_lower($hay), str_lower($needle)) !== false;
+}
+
+/**
+ * 站内搜索：最近 $scan 帖（按发布时间倒序）的标题 + 正文；最多返回 50 条
+ * @return array [['t'=>索引行, 'snippet'=>摘要], ...]
+ */
+function search_threads(string $q, int $scan = 500): array
+{
+    $q = trim($q);
+    if ($q === '') {
+        return [];
+    }
+    $all = threads_visible(thread_index());
+    usort($all, function ($a, $b) {
+        return (int)($b['created'] ?? 0) <=> (int)($a['created'] ?? 0);
+    });
+    $all = array_slice($all, 0, max(1, $scan));
+    $out = [];
+    foreach ($all as $t) {
+        $tid = (int)($t['id'] ?? 0);
+        $title = (string)($t['title'] ?? '');
+        $hit = txt_contains($title, $q);
+        $snippet = '';
+        $content = '';
+        if (!$hit) {
+            $c = thread_get($tid);
+            if (!$c) {
+                continue;
+            }
+            $content = (string)($c['content'] ?? '');
+            if (!txt_contains($content, $q)) {
+                continue;
+            }
+        }
+        if ($snippet === '') {
+            // 摘要：标题命中时也读正文取开头一段，帮助判断是否为目标帖
+            if (!isset($c) || !is_array($c)) {
+                $c = thread_get($tid);
+            }
+            if ($c) {
+                $flat = trim((string)preg_replace('/\s+/u', ' ', (string)($c['content'] ?? '')));
+                $snippet = cut_str($flat, 120) . (u_strlen($flat) > 120 ? '…' : '');
+            }
+        }
+        unset($c);
+        $out[] = ['t' => $t, 'snippet' => $snippet];
+        if (count($out) >= 50) {
+            break;
+        }
+    }
+    return $out;
 }
 
 /* ================= 举报 / 审核队列 ================= */

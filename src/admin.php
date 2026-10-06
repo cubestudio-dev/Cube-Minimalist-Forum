@@ -16,7 +16,7 @@ function page_admin(): void
     echo page_head('后台管理', '所有修改即时生效');
 
     $tabs = [
-        'basic' => '基本', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
+        'basic' => '基本', 'feat' => '功能', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
         'anns' => '公告', 'theme' => '主题', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
@@ -28,6 +28,7 @@ function page_admin(): void
     echo '<div class="admin-body">';
 
     switch ($tab) {
+        case 'feat': admin_tab_feat(); break;
         case 'mail': admin_tab_mail(); break;
         case 'ai': admin_tab_ai(); break;
         case 'boards': admin_tab_boards(); break;
@@ -68,6 +69,34 @@ function admin_tab_basic(): void
         '<span class="hint">前台自动刷新在线人数、未读通知，并提示新帖 / 新回复；设为 0 关闭。页面切到后台时自动暂停，不产生无效流量</span></label>' .
         '</div>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存基本设置</button></div></form></div>';
+}
+
+/* ---------------- 功能总开关（v1.14.0） ---------------- */
+function admin_tab_feat(): void
+{
+    $items = [
+        'register'     => ['开放注册', '关闭后新用户无法注册，已有账号不受影响'],
+        'guest_browse' => ['游客可浏览', '关闭后未登录访客只能看到登录 / 注册 / 找回密码页（私密论坛模式）'],
+        'post'         => ['发帖', '关闭后所有人（含管理员）都不能发新帖'],
+        'reply'        => ['回复', '关闭后所有人（含管理员）都不能回复'],
+        'edit'         => ['内容编辑', '作者可在发布后 15 分钟内编辑自己的内容，管理员不限时'],
+        'like'         => ['点赞', ''],
+        'report'       => ['举报', '隐藏前台举报入口；AI 审核队列与防火墙不受影响'],
+        'search'       => ['站内搜索', ''],
+        'emoji'        => ['表情选择器', '仅隐藏输入框上方的表情按钮，Markdown 表情短代码仍可正常渲染'],
+        'online'       => ['在线名单', '关闭后侧栏在线人数不再可点击查看名单页'],
+        'signature'    => ['用户签名', '用户可在个人设置填写签名，展示在帖子 / 回复下方与个人主页'],
+    ];
+    echo '<div class="card form-card"><h2 class="card-title">功能总开关</h2><p class="muted">勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。</p>' .
+        '<form method="post" action="' . e(u('a=admin_save_feat')) . '">' . csrf_field();
+    foreach ($items as $k => [$name, $desc]) {
+        $on = feat_on($k);
+        echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
+            '<span class="feat-txt"><b>' . e($name) . '</b>' . ($desc !== '' ? '<span class="muted">' . e($desc) . '</span>' : '') . '</span>' .
+            '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . ($on ? '开启' : '关闭') . '</span></label>';
+    }
+    echo '<div class="form-foot"><span class="muted">数据安全不受影响：关闭任何开关都不会删除数据，重新勾选即恢复</span>' .
+        '<button class="btn btn-primary" type="submit">保存功能开关</button></div></form></div>';
 }
 
 /* ---------------- 邮件 ---------------- */
@@ -500,9 +529,24 @@ function admin_tab_anns(): void
 function admin_tab_theme(): void
 {
     $cur = (string)cfg('theme_color', '#0f766e');
-    $palette = ['#0f766e', '#047857', '#b45309', '#be123c', '#57534e', '#1c1917'];
+    $palette = ['#0f766e', '#047857', '#b45309', '#be123c', '#9f1239', '#57534e', '#1c1917'];
     $dark = (string)cfg('dark_default', 'system');
-    echo '<div class="card form-card"><form method="post" action="' . e(u('a=admin_save_theme')) . '">' . csrf_field() .
+    /* 网站图标（v1.14.0）：上传后立即生效，存储于 data/upload/（data/ 目录禁止 Web 直访，仅经 p=icon 受控输出） */
+    $icon = (string)cfg('site_icon', '');
+    $hasIcon = $icon !== '' && strpos($icon, '/') === false && is_file(DATA_DIR . '/upload/' . $icon);
+    echo '<div class="card form-card"><h2 class="card-title">网站图标（favicon）</h2>';
+    echo '<div class="icon-current"><span class="icon-preview"><img src="' . e($hasIcon ? u('p=icon&v=' . (int)@filemtime(DATA_DIR . '/upload/' . $icon)) : ua('assets/favicon.svg')) . '" alt="当前网站图标" width="48" height="48"></span>' .
+        '<span class="muted">' . ($hasIcon ? '当前为自定义图标：' . e($icon) : '当前为默认图标') . '</span>';
+    if ($hasIcon) {
+        echo '<form method="post" action="' . e(u('a=admin_icon_del')) . '" class="inline" data-confirm="确认恢复默认图标？">' . csrf_field() .
+            '<button class="btn btn-ghost btn-sm" type="submit">恢复默认</button></form>';
+    }
+    echo '</div>';
+    echo '<form method="post" action="' . e(u('a=admin_icon_upload')) . '" enctype="multipart/form-data">' . csrf_field() .
+        '<label class="field"><span class="field-l">上传新图标</span><input class="input" type="file" name="icon" accept=".png,.jpg,.jpeg,.webp,.gif,.ico,.svg" required>' .
+        '<span class="hint">支持 PNG / JPG / WEBP / GIF / ICO / SVG；不超过 200KB，建议 256×256 以上；上传后浏览器可能需要强制刷新才能看到新图标</span></label>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">上传图标</button></div></form></div>';
+    echo '<div class="card form-card"><h2 class="card-title">颜色与页脚</h2><form method="post" action="' . e(u('a=admin_save_theme')) . '">' . csrf_field() .
         '<div class="field"><span class="field-l">主题色</span><div class="palette">';
     foreach ($palette as $p) {
         echo '<label class="swatch" style="background:' . e($p) . '"><input type="radio" name="theme_color" value="' . e($p) . '"' . (strcasecmp($cur, $p) === 0 ? ' checked' : '') . ' aria-label="' . e($p) . '"></label>';

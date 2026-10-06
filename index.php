@@ -45,6 +45,13 @@ $p = isset($_GET['p']) && is_string($_GET['p']) ? preg_replace('/[^a-z_]/', '', 
 require_once __DIR__ . '/src/pages.php';
 require_once __DIR__ . '/src/admin.php';
 
+/* 私密论坛模式（v1.14.0）：后台关闭「游客可浏览」时，未登录仅允许 登录 / 注册 / 找回密码 与图标资源 */
+if (!feat_on('guest_browse') && !current_user()
+    && !in_array($p === '' ? 'home' : $p, ['login', 'register', 'forgot', 'icon'], true)) {
+    flash('err', '本论坛仅限注册用户浏览，请先登录');
+    redirect(u('p=login'));
+}
+
 switch ($p === '' ? 'home' : $p) {
     case 'home':          page_home(); break;
     case 'board':         page_board(); break;
@@ -56,6 +63,9 @@ switch ($p === '' ? 'home' : $p) {
     case 'user':          page_user(); break;
     case 'online':        page_online(); break;
     case 'settings':      page_settings(); break;
+    case 'search':        page_search(); break;
+    case 'edit':          page_edit(); break;
+    case 'icon':          page_icon(); break;
     case 'notifications': page_announcements(); break;
     case 'announcements': page_announcements(); break;
     case 'admin':         page_admin(); break;

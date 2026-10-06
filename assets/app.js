@@ -428,7 +428,9 @@
 
   /* ---------- 表情选择器（v1.10.0）----------
      自动注入到所有 Markdown 输入框（发帖 / 回复 / 后台公告，即 textarea[name=content]）；
-     点击按钮弹出表情面板，点选后以 :name: 短代码插入光标处，服务端 Markdown 渲染为表情。 */
+     点击按钮弹出表情面板，点选后以 :name: 短代码插入光标处，服务端 Markdown 渲染为表情。
+     v1.14.0：后台「功能 → 表情选择器」关闭时（window.MF_EMOJI===false）不再注入。 */
+  if (window.MF_EMOJI !== false) {
   var EMOJIS = [
     ['smile', '😄'], ['laughing', '😆'], ['joy', '😂'], ['rofl', '🤣'], ['smiley', '😃'], ['grin', '😁'],
     ['wink', '😉'], ['blush', '😊'], ['innocent', '😇'], ['upside_down', '🙃'], ['relieved', '😌'],
@@ -525,6 +527,7 @@
     bar.appendChild(pop);
     ta.parentNode.insertBefore(bar, ta);
   });
+  } /* end MF_EMOJI */
 
   /* ---------- 管理员 · AI 自主管理（严全面）：立即巡逻一次 ----------
      AJAX 触发 ai_patrol_go（即使无风险事件也强制巡），完成后刷新页面展示最新巡逻报告。 */

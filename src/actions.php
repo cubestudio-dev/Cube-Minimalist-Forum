@@ -60,6 +60,8 @@ function route_action(string $a): void
         case 'forgot':           act_forgot(); return;
         case 'change_pass':      act_change_pass(); return;
         case 'profile_save':     act_profile_save(); return;
+        case 'thread_edit':      act_thread_edit(); return;
+        case 'reply_edit':       act_reply_edit(); return;
         case 'thread_new':       act_thread_new(); return;
         case 'reply_new':        act_reply_new(); return;
         case 'thread_delete':    act_thread_delete(); return;
@@ -70,6 +72,9 @@ function route_action(string $a): void
         case 'notify_read':      act_notify_read(); return;
         case 'notify_read_all':  act_notify_read_all(); return;
         case 'admin_save_basic': admin_tab_guard(); act_admin_save_basic(); return;
+        case 'admin_save_feat':  admin_tab_guard(); act_admin_save_feat(); return;
+        case 'admin_icon_upload': admin_tab_guard(); act_admin_icon_upload(); return;
+        case 'admin_icon_del':    admin_tab_guard(); act_admin_icon_del(); return;
         case 'admin_save_mail':  admin_tab_guard(); act_admin_save_mail(); return;
         case 'admin_test_mail':  admin_tab_guard(); act_admin_test_mail(); return;
         case 'admin_save_ai':    admin_tab_guard(); act_admin_save_ai(); return;
@@ -177,6 +182,14 @@ function admin_tab_guard(): array
     return require_admin();
 }
 
+/** 功能总开关拦截：关闭时 act_err（AJAX 返回 JSON / 普通请求 flash+回跳），不会继续执行 */
+function feat_guard(string $k, string $msg): void
+{
+    if (!feat_on($k)) {
+        act_err($msg);
+    }
+}
+
 /* ================= 通用 ================= */
 
 /** 发帖/回复间隔检查与占用（在 users 锁内完成检查+写入，防并发双发） */
@@ -265,6 +278,7 @@ function act_send_code(): void
 
 function act_register(): void
 {
+    feat_guard('register', '本站已关闭新用户注册');
     $name = post_str('name', 20);
     $email = strtolower(post_str('email', 60));
     $pass = (string)($_POST['pass'] ?? '');
@@ -406,6 +420,8 @@ function act_profile_save(): void
     $u = require_login();
     $name = post_str('name', 20);
     $bio = post_str('bio', 200);
+    // 用户签名（v1.14.0）：单行纯文本，展示在帖子与回复下方；开关关闭时保留旧值不修改
+    $sig = feat_on('signature') ? trim(str_replace(["\r", "\n", "\0"], ' ', post_str('sig', 60))) : (string)($u['sig'] ?? '');
     if (!valid_name($name)) {
         flash('err', '用户名需 2-20 位，仅限中文、字母、数字、下划线');
         redirect(u('p=settings'));
@@ -415,7 +431,7 @@ function act_profile_save(): void
         flash('err', '新用户名已被占用');
         redirect(u('p=settings'));
     }
-    user_update((int)$u['id'], ['name' => $name, 'bio' => $bio]);
+    user_update((int)$u['id'], ['name' => $name, 'bio' => $bio, 'sig' => $sig]);
     log_action('profile_save', '资料更新：用户名 ' . (string)$u['name'] . ' → ' . $name);
     flash('ok', '资料已更新');
     redirect(u('p=settings'));
@@ -426,6 +442,7 @@ function act_profile_save(): void
 function act_thread_new(): void
 {
     $u = require_login('p=new');
+    feat_guard('post', '发帖功能已关闭');
     if (mute_left($u) > 0) {
         flash('err', '您已被禁言，剩余 ' . ceil(mute_left($u) / 60) . ' 分钟');
         redirect(u('p=home'));
@@ -465,6 +482,7 @@ function act_reply_new(): void
 {
     $tid = (int)($_POST['tid'] ?? 0);
     $u = require_login('p=thread&id=' . $tid);
+    feat_guard('reply', '回复功能已关闭');
     if (mute_left($u) > 0) {
         flash('err', '您已被禁言，剩余 ' . ceil(mute_left($u) / 60) . ' 分钟');
         redirect(u('p=thread&id=' . $tid));
@@ -547,9 +565,51 @@ function act_reply_delete(): void
     redirect(u('p=thread&id=' . $tid));
 }
 
+/* ---------------- 编辑自己的内容（v1.14.0） ---------------- */
+
+function act_thread_edit(): void
+{
+    $u = require_login();
+    feat_guard('edit', '编辑功能已关闭');
+    $tid = (int)($_POST['tid'] ?? 0);
+    $t = thread_get($tid);
+    if (!$t || !thread_editable($t, $u)) {
+        act_err('无法编辑该帖子（可能已超过可编辑时间、已有回复、被锁定或功能已关闭）');
+    }
+    $title = post_str('title', 30);
+    $content = post_str('content', 1000);
+    if ($title === '' || $content === '') {
+        act_err('标题与正文不能为空');
+    }
+    thread_save($tid, ['title' => $title, 'content' => $content, 'edited' => time(), 'edited_by' => (int)$u['id']]);
+    log_action('thread_edit', (($u['admin'] ?? false) && (int)$t['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str((string)$t['title'], 20) . '》（帖子 #' . $tid . '）', (int)$u['id'], (string)$u['name']);
+    act_ok('帖子已更新', u('p=thread&id=' . $tid));
+}
+
+function act_reply_edit(): void
+{
+    $u = require_login();
+    feat_guard('edit', '编辑功能已关闭');
+    $tid = (int)($_POST['tid'] ?? 0);
+    $rid = (int)($_POST['rid'] ?? 0);
+    $t = thread_get($tid);
+    $r = $t ? reply_get($tid, $rid) : null;
+    if (!$t || !$r || !reply_editable($r, $u, $t)) {
+        act_err('无法编辑该回复（可能已超过可编辑时间、被锁定或功能已关闭）');
+    }
+    $content = post_str('content', 1000);
+    if ($content === '') {
+        act_err('回复内容不能为空');
+    }
+    reply_save($tid, $rid, ['content' => $content, 'edited' => time(), 'edited_by' => (int)$u['id']]);
+    log_action('reply_edit', (($u['admin'] ?? false) && (int)$r['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '帖子 #' . $tid . ' 的回复 #' . $rid, (int)$u['id'], (string)$u['name']);
+    act_ok('回复已更新', u('p=thread&id=' . $tid) . '#r' . $rid);
+}
+
 function act_like(): void
 {
     $u = require_login();
+    feat_guard('like', '点赞功能已关闭');
     // type/tid/rid 位于动作链接的查询串中，同时兼容表单隐藏域提交
     $type = (($_POST['type'] ?? $_GET['type'] ?? '') === 'r') ? 'r' : 't';
     $tid = (int)($_POST['tid'] ?? $_GET['tid'] ?? 0);
@@ -565,6 +625,7 @@ function act_like(): void
 function act_report(): void
 {
     $u = require_login();
+    feat_guard('report', '举报功能已关闭');
     $type = ($_POST['type'] ?? '') === 'r' ? 'reply' : 'thread';
     $tid = (int)($_POST['tid'] ?? 0);
     $rid = (int)($_POST['rid'] ?? 0);
@@ -660,6 +721,95 @@ function act_admin_save_basic(): void
     ]);
     log_action('admin_save_basic', '基本设置已保存' . ($bd !== '' ? '（绑定域名：' . $bd . '）' : ''));
     act_ok('基本设置已保存', u('p=admin&tab=basic'));
+}
+
+/** 后台「功能」页：总开关保存（v1.14.0） */
+function act_admin_save_feat(): void
+{
+    $keys = ['register', 'guest_browse', 'post', 'reply', 'edit', 'like', 'report', 'search', 'emoji', 'online', 'signature'];
+    $kv = [];
+    $off = [];
+    foreach ($keys as $k) {
+        $v = isset($_POST['feat_' . $k]) ? 1 : 0;
+        $kv['feat_' . $k] = $v;
+        if ($v === 0) {
+            $off[] = $k;
+        }
+    }
+    cfg_update($kv);
+    log_action('admin_save_feat', '功能开关更新：关闭 ' . ($off ? implode('、', $off) : '无（全部开启）'));
+    act_ok('功能开关已保存', u('p=admin&tab=feat'));
+}
+
+/** 网站图标上传（v1.14.0）：严格类型校验 + 内容嗅探；SVG 另做脚本注入拒绝，输出时叠加 CSP sandbox */
+function act_admin_icon_upload(): void
+{
+    if (empty($_FILES['icon']) || !is_array($_FILES['icon'])) {
+        act_err('请选择图标文件');
+    }
+    $f = $_FILES['icon'];
+    if ((int)($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        act_err('图标上传失败（错误码 ' . (int)($f['error'] ?? -1) . '，可能超过服务器上传限制）');
+    }
+    if ((int)($f['size'] ?? 0) <= 0 || (int)$f['size'] > 200 * 1024) {
+        act_err('图标大小需在 200KB 以内');
+    }
+    $ext = strtolower((string)pathinfo((string)($f['name'] ?? ''), PATHINFO_EXTENSION));
+    if (!in_array($ext, ['png', 'jpg', 'jpeg', 'webp', 'gif', 'ico', 'svg'], true)) {
+        act_err('仅支持 PNG / JPG / WEBP / GIF / ICO / SVG 格式');
+    }
+    $tmp = (string)($f['tmp_name'] ?? '');
+    $data = @is_uploaded_file($tmp) ? (string)@file_get_contents($tmp) : '';
+    if ($data === '') {
+        act_err('读取上传文件失败，请重试');
+    }
+    if ($ext === 'svg') {
+        /* SVG 安全校验：必须是 <svg> 文档，且拒绝脚本 / 事件属性 / 危险标签 / 实体（输出侧另有 CSP sandbox 双保险） */
+        if (!preg_match('/<svg[\s>]/i', $data)
+            || preg_match('/<(script|iframe|object|embed|foreignObject|use)[\s>]|on[a-z]+\s*=|javascript\s*:|<!DOCTYPE|<!ENTITY/i', $data)) {
+            act_err('该 SVG 含脚本或结构不合规，已拒绝（请使用纯图形 SVG 或改用 PNG）');
+        }
+    } elseif ($ext === 'ico') {
+        if (substr($data, 0, 4) !== "\x00\x00\x01\x00") {
+            act_err('不是有效的 ICO 文件（内容与扩展名不符）');
+        }
+    } else {
+        $info = @getimagesize($tmp);
+        $want = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'webp' => 'image/webp', 'gif' => 'image/gif'][$ext] ?? '';
+        if ($info === false || (string)($info['mime'] ?? '') !== $want) {
+            act_err('文件内容与扩展名不符，已拒绝');
+        }
+        $w = (int)($info[0] ?? 0);
+        $h = (int)($info[1] ?? 0);
+        if ($w < 16 || $h < 16 || $w > 1024 || $h > 1024) {
+            act_err('图标尺寸需在 16×16 至 1024×1024 之间');
+        }
+    }
+    Store::ensureDir('upload');
+    $name = 'site-icon-' . bin2hex(random_bytes(4)) . '.' . ($ext === 'jpeg' ? 'jpg' : $ext);
+    if (!@file_put_contents(Store::path('upload/' . $name), $data)) {
+        act_err('保存图标失败：data 目录不可写？');
+    }
+    $old = (string)cfg('site_icon', '');
+    cfg_update(['site_icon' => $name]);
+    if ($old !== '' && $old !== $name) {
+        @unlink(Store::path('upload/' . $old)); // 替换旧图标，不残留
+    }
+    log_action('admin_icon', '网站图标已更新：' . $name . '（' . strlen($data) . ' 字节）');
+    act_ok('网站图标已更新', u('p=admin&tab=theme'));
+}
+
+/** 恢复默认图标 */
+function act_admin_icon_del(): void
+{
+    $old = (string)cfg('site_icon', '');
+    if ($old === '') {
+        act_err('当前已是默认图标');
+    }
+    @unlink(Store::path('upload/' . $old));
+    cfg_update(['site_icon' => '']);
+    log_action('admin_icon', '网站图标已恢复默认');
+    act_ok('已恢复默认图标', u('p=admin&tab=theme'));
 }
 
 function act_admin_save_mail(): void
