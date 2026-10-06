@@ -238,7 +238,7 @@ function page_thread(): void
         echo '<form method="post" action="' . e(u('a=reply_new')) . '">' .
             '<input type="hidden" name="tid" value="' . $tid . '">' .
             csrf_field() . hidden_back() .
-            '<textarea class="input" name="content" rows="4" maxlength="1000" required placeholder="友善回复（支持 Markdown，最多 1000 字）"></textarea>' .
+            '<textarea class="input" name="content" rows="4" maxlength="1000" required placeholder="友善回复（支持 Markdown，最多 1000 字；可用 @用户名 提及他人，对方会收到通知）"></textarea>' .
             '<div class="form-foot"><span class="muted">支持 Markdown</span>' .
             '<button class="btn btn-primary" type="submit">回复</button></div></form>';
     }
@@ -260,7 +260,7 @@ function page_new(): void
     }
     $pre = get_int('id', 0);
     layout_header('发布帖子', 0);
-    echo page_head('发布帖子', '标题最多 30 字，正文最多 1000 字，支持 Markdown（图片可用 https 外链，无附件）');
+    echo page_head('发布帖子', '标题最多 30 字，正文最多 1500 字，支持 Markdown 与 @用户名 提及（图片可用 https 外链，无附件）');
     echo '<div class="card form-card"><form method="post" action="' . e(u('a=thread_new')) . '">' .
         csrf_field() . hidden_back() .
         '<label class="field"><span class="field-l">板块</span><select name="board" class="input" required>';
@@ -270,8 +270,8 @@ function page_new(): void
     echo '</select></label>' .
         '<label class="field"><span class="field-l">标题 <em class="cnt"><i id="t-count">0</i>/30</em></span>' .
         '<input class="input" name="title" id="title-input" maxlength="30" required data-counter="#t-count" placeholder="一句话说清主题"></label>' .
-        '<label class="field"><span class="field-l">正文 <em class="cnt"><i id="c-count">0</i>/1000</em></span>' .
-        '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1000" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮=="></textarea></label>' .
+        '<label class="field"><span class="field-l">正文 <em class="cnt"><i id="c-count">0</i>/1500</em></span>' .
+        '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1500" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮==；@用户名 会通知对方"></textarea></label>' .
         '<div class="form-foot"><span class="muted">两次发帖间隔不低于 ' . (int)cfg('post_interval', 30) . ' 秒</span>' .
         '<button class="btn btn-primary" type="submit">发布</button></div></form></div>';
     layout_footer();
@@ -583,7 +583,7 @@ function page_edit(): void
             csrf_field() .
             '<input type="hidden" name="tid" value="' . $tid . '">' .
             '<label class="field"><span class="field-l">标题</span><input class="input" name="title" maxlength="30" required value="' . e((string)$t['title']) . '"></label>' .
-            '<label class="field"><span class="field-l">正文</span><textarea class="input" name="content" rows="10" maxlength="1000" required>' . e((string)$t['content']) . '</textarea></label>' .
+            '<label class="field"><span class="field-l">正文（最多 1500 字）</span><textarea class="input" name="content" rows="10" maxlength="1500" required>' . e((string)$t['content']) . '</textarea></label>' .
             '<div class="form-foot"><a class="btn btn-ghost" href="' . e(u('p=thread&id=' . $tid)) . '">取消</a>' .
             '<button class="btn btn-primary" type="submit">保存修改</button></div></form></div>';
     } else {

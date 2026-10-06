@@ -120,6 +120,14 @@ function md_inline(string $s): string
         return $e !== null ? $e : $m[0];
     }, $s) ?? $s;
 
+    // 5.6) @ 提及高亮（v1.15.0）：@用户名 → <span class="mention">（与站内用户名同规则；@前不能是用户名字符，避免误伤邮箱）
+    // 此时代码 / 链接 / 图片均已在占位符内，不会被误改；通知逻辑由 content.php mentions_notify() 在发布时处理
+    $s = preg_replace(
+        '/(?<![\x{4e00}-\x{9fa5}A-Za-z0-9_&])@([\x{4e00}-\x{9fa5}A-Za-z0-9_]{2,20})(?![\x{4e00}-\x{9fa5}A-Za-z0-9_])/u',
+        '<span class="mention">@$1</span>',
+        $s
+    ) ?? $s;
+
     // 6) 还原占位符（上限 10 轮，防构造死循环）
     for ($i = 0; $i < 10 && strpos($s, "\x01") !== false; $i++) {
         $s = preg_replace_callback('/\x01(\d+)\x01/', function ($m) use ($ph) {

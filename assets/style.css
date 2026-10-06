@@ -677,3 +677,7 @@ a.online-row:hover { background: var(--hover); }
 .icon-current .icon-preview { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--hover); overflow: hidden; }
 .icon-current .icon-preview img { width: 48px; height: 48px; object-fit: contain; }
 [data-theme="dark"] .icon-current .icon-preview { background: #1c1c1f; }
+
+/* ================= v1.15.0：@ 提及高亮 ================= */
+.mention { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); border-radius: 5px; padding: 1px 4px; font-weight: 600; }
+a .mention, .mention a { text-decoration: none; }

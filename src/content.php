@@ -765,7 +765,8 @@ function ai_process_queue(bool $manual = false): array
         $used = '';
         $ok = ai_moderate($content, $verdict, $note, [], $used); // 审核状态（last/active/fail）由 ai_moderate 内部落盘
         $isThread = ($rep['type'] === 'thread');
-        $no = $isThread ? '帖子 #' . (int)$rep['tid'] : '帖子 #' . (int)$rep['tid'] . ' 中的回复 #' . (int)$rep['rid'];
+        $tTitle = cut_str((string)(thread_get((int)$rep['tid'])['title'] ?? ''), 40);
+        $no = $isThread ? '帖子《' . $tTitle . '》' : '帖子《' . $tTitle . '》中的回复';
 
         if (!$ok) {
             // 全部模型重试仍失败：保持隐藏，通知管理员人工处理
@@ -831,7 +832,7 @@ function ai_precheck_after_post(string $type, int $tid, int $rid, string $conten
     $note = '';
     $used = '';
     $ok = ai_moderate($content, $verdict, $note, [], $used);
-    $no = $type === 'thread' ? '帖子 #' . $tid : '帖子 #' . $tid . ' 中的回复 #' . $rid;
+    $no = $type === 'thread' ? '帖子《' . cut_str((string)(thread_get($tid)['title'] ?? ''), 40) . '》' : '帖子《' . cut_str((string)(thread_get($tid)['title'] ?? ''), 40) . '》中的回复';
     if (!$ok) {
         log_action('ai_failed', '预检未完成（' . $no . '）：' . cut_str($note, 140) . '；内容正常展示，等待举报或人工复核', 0, 'AI 预检');
         return '';
@@ -857,6 +858,59 @@ function ai_precheck_after_post(string $type, int $tid, int $rid, string $conten
     return '内容已提交，但 AI 预检判定违规已自动隐藏：' . cut_str($note, 60) . '（可在通知中申诉）';
 }
 
+
+/* ================= @ 提及系统（v1.15.0） ================= */
+
+/** 提取内容中的 @ 用户名候选（去重；与站内用户名同规则：中文/字母/数字/下划线 2-20 位） */
+function mentions_extract(string $content): array
+{
+    if (!preg_match_all('/(?<![\\x{4e00}-\\x{9fa5}A-Za-z0-9_])@([\\x{4e00}-\\x{9fa5}A-Za-z0-9_]{2,20})/u', $content, $m)) {
+        return [];
+    }
+    return array_values(array_unique($m[1]));
+}
+
+/**
+ * @ 提及通知：内容中出现 @用户名 时，系统自动给对方发送站内通知。
+ * - 仅通知真实存在的用户（含管理员），跳过作者本人；单条内容最多通知 10 人（防骚扰）
+ * - 编辑内容时传入 $skip（旧内容的提及列表），只通知新增提及，避免重复轰炸
+ * - 总开关：后台「功能」页 @ 提及通知（feat_mention，默认开）
+ */
+function mentions_notify(string $content, int $authorUid, int $tid, int $rid = 0, string $threadTitle = '', array $skip = []): void
+{
+    if (!feat_on('mention')) {
+        return;
+    }
+    $names = mentions_extract($content);
+    if (!$names) {
+        return;
+    }
+    $skip = array_flip($skip);
+    $author = uname($authorUid);
+    $t = thread_get($tid);
+    $tTitle = $threadTitle !== '' ? $threadTitle : (string)($t['title'] ?? '');
+    $link = 'p=thread&id=' . $tid . ($rid > 0 ? '#r' . $rid : '');
+    $where = $rid > 0 ? '的回复中' : '的帖子中';
+    $summary = cut_str(trim(preg_replace('/\\s+/u', ' ', $content) ?? $content), 120);
+    $n = 0;
+    foreach ($names as $name) {
+        if ($n >= 10) {
+            break;
+        }
+        if (isset($skip[$name])) {
+            continue;
+        }
+        $target = user_by_name($name);
+        if (!$target || (int)$target['id'] === $authorUid) {
+            continue;
+        }
+        notify_add((int)$target['id'], 'mention', $author . ' 在《' . cut_str($tTitle, 40) . '》' . $where . '提到了您', $summary, $link);
+        $n++;
+    }
+    if ($n > 0) {
+        log_action('mention', $author . ' 在《' . cut_str($tTitle, 40) . '》' . $where . '提及了 ' . $n . ' 位用户', $authorUid, $author);
+    }
+}
 
 /* ================= 通知 ================= */
 function notify_file(int $uid): string

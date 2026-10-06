@@ -26,18 +26,15 @@ if (isset($_GET['a'])) {
     handle_action((string)$a);
 }
 
-/* 页面访问日志（后台可开关，记录所有人含游客；仅记录真实页面导航，AJAX 轮询与业务动作不计） */
+/* 页面访问日志（后台可开关，记录所有人含游客；仅记录真实页面导航，AJAX 轮询与业务动作不计）
+   v1.15.0：写清浏览了什么页面与具体名称（首页 / 帖子《标题》 / 版块《名称》 / 用户「名」的个人主页 / 后台 · 标签页） */
 if ((int)cfg('log_views', 0) === 1 && !isset($_GET['a'])) {
     $vs = $_GET;
     unset($vs['XTransformPort']);
-    $vd = '页面 ' . (string)($vs['p'] ?? 'home');
-    if (isset($vs['id']) && is_numeric($vs['id'])) {
-        $vd .= ' #' . (int)$vs['id'];
+    $vn = view_page_name($vs);
+    if ($vn !== '') {
+        log_action('view', '浏览了 ' . $vn);
     }
-    if (isset($vs['tab']) && is_string($vs['tab'])) {
-        $vd .= ' · ' . $vs['tab'];
-    }
-    log_action('view', $vd);
 }
 
 /* 页面路由 */

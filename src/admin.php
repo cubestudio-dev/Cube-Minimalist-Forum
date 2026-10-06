@@ -15,11 +15,7 @@ function page_admin(): void
     layout_header('后台管理', 0);
     echo page_head('后台管理', '所有修改即时生效');
 
-    $tabs = [
-        'basic' => '基本', 'feat' => '功能', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
-        'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
-        'anns' => '公告', 'theme' => '主题', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
-    ];
+    $tabs = admin_tab_titles();
     echo '<div class="admin-tabs">';
     foreach ($tabs as $k => $v) {
         echo '<a class="atab' . ($tab === $k ? ' on' : '') . '" href="' . e(u('p=admin&tab=' . $k)) . '">' . e($v) . '</a>';
@@ -71,7 +67,18 @@ function admin_tab_basic(): void
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存基本设置</button></div></form></div>';
 }
 
-/* ---------------- 功能总开关（v1.14.0） ---------------- */
+/* ---------------- 功能总开关（v1.14.0，v1.15.0 扩展 @ 提及与 AI 开关） ---------------- */
+
+/** 后台标签 → 中文名（导航与访问日志共用） */
+function admin_tab_titles(): array
+{
+    return [
+        'basic' => '基本', 'feat' => '功能', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
+        'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
+        'anns' => '公告', 'theme' => '主题', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
+    ];
+}
+
 function admin_tab_feat(): void
 {
     $items = [
@@ -86,6 +93,12 @@ function admin_tab_feat(): void
         'emoji'        => ['表情选择器', '仅隐藏输入框上方的表情按钮，Markdown 表情短代码仍可正常渲染'],
         'online'       => ['在线名单', '关闭后侧栏在线人数不再可点击查看名单页'],
         'signature'    => ['用户签名', '用户可在个人设置填写签名，展示在帖子 / 回复下方与个人主页'],
+        'mention'      => ['@ 提及通知', '内容中 @用户名 时，系统自动给对方发送站内通知；被提及名字会高亮展示（v1.15.0）'],
+    ];
+    /* AI 两项直接绑定「AI」页的原生配置键（ai_precheck / ai_autopilot），两处开关同一份，避免双开关不同步 */
+    $aiItems = [
+        'ai_precheck'  => ['AI 审查（发帖预检）', '每条帖子 / 回复发布后立即交给 AI 审核，违规自动隐藏、通知作者可申诉；模型与严格程度在「AI」页配置'],
+        'ai_autopilot' => ['AI 自主管理', 'AI 无人值守巡逻：自主封禁风险 IP / 解除误封 / 邮件警报管理员；间隔与红线在「AI」页配置'],
     ];
     echo '<div class="card form-card"><h2 class="card-title">功能总开关</h2><p class="muted">勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。</p>' .
         '<form method="post" action="' . e(u('a=admin_save_feat')) . '">' . csrf_field();
@@ -93,6 +106,12 @@ function admin_tab_feat(): void
         $on = feat_on($k);
         echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
             '<span class="feat-txt"><b>' . e($name) . '</b>' . ($desc !== '' ? '<span class="muted">' . e($desc) . '</span>' : '') . '</span>' .
+            '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . ($on ? '开启' : '关闭') . '</span></label>';
+    }
+    foreach ($aiItems as $k => [$name, $desc]) {
+        $on = (int)cfg($k, 1) === 1;
+        echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
+            '<span class="feat-txt"><b>' . e($name) . '</b><span class="muted">' . e($desc) . '</span></span>' .
             '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . ($on ? '开启' : '关闭') . '</span></label>';
     }
     echo '<div class="form-foot"><span class="muted">数据安全不受影响：关闭任何开关都不会删除数据，重新勾选即恢复</span>' .

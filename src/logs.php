@@ -20,6 +20,7 @@ const LOG_ACTIONS = [
     'code_send'            => '发送验证码',
     'pass_reset'           => '重置密码',
     'pass_change'          => '修改密码',
+    'mention'              => '@ 提及',
     'profile_save'         => '修改资料',
     'thread_new'           => '发布帖子',
     'reply_new'            => '发表回复',
@@ -441,4 +442,70 @@ function log_export_txt(): void
     fwrite($out, '导出完成：共 ' . $total . ' 条记录 · ' . date('Y-m-d H:i:s') . "\r\n");
     fclose($out);
     exit;
+}
+
+/**
+ * 解析一次页面访问的具体名称（v1.15.0）：把请求参数翻译成「什么样的页面 + 具体名称」。
+ * 例：首页 · 最新回复 / 版块《站务公告》 / 帖子《怎么发图？》 / 用户「山月」的个人主页 / 后台 · AI 页
+ * 资源类请求（p=icon）返回空串表示不记录。
+ */
+function view_page_name(array $vs): string
+{
+    $p = strtolower(trim((string)($vs['p'] ?? 'home')));
+    if ($p === '') {
+        $p = 'home';
+    }
+    $id = isset($vs['id']) && is_numeric($vs['id']) ? (int)$vs['id'] : 0;
+    $tab = isset($vs['tab']) && is_string($vs['tab']) ? trim($vs['tab']) : '';
+    switch ($p) {
+        case 'home':
+            if ($tab === 'new') {
+                return '首页 · 最新帖子';
+            }
+            if ($tab === 'reply') {
+                return '首页 · 最新回复';
+            }
+            return '首页';
+        case 'board':
+            $b = $id > 0 ? board_get($id) : null;
+            return $b ? '版块《' . cut_str((string)$b['name'], 24) . '》' : '版块页（板块不存在）';
+        case 'thread':
+            $t = $id > 0 ? thread_get($id) : null;
+            return $t ? '帖子《' . cut_str((string)$t['title'], 40) . '》' : '帖子页（内容不存在）';
+        case 'new':
+            return '发布新帖页';
+        case 'login':
+            return '登录页';
+        case 'register':
+            return '注册页';
+        case 'forgot':
+            return '找回密码页';
+        case 'user':
+            return $id > 0 ? '用户「' . cut_str(uname($id), 20) . '」的个人主页' : '个人主页';
+        case 'online':
+            return '在线名单页';
+        case 'settings':
+            return '个人设置页';
+        case 'search':
+            $q = trim((string)($vs['q'] ?? ''));
+            return $q !== '' ? '站内搜索（关键词：' . cut_str($q, 20) . '）' : '站内搜索页';
+        case 'edit':
+            return '内容编辑页';
+        case 'notifications':
+        case 'announcements':
+            return '通知中心';
+        case 'icon':
+            return ''; // 图标资源，不记录
+        case 'admin':
+            $titles = function_exists('admin_tab_titles') ? admin_tab_titles() : [];
+            $tn = $titles[$tab] ?? '';
+            if ($tn === '') {
+                $tn = $tab !== '' ? $tab : '基本';
+            }
+            /* 英文标签名（AI）与中文之间补空格，读起来更自然：后台 · AI 页 / 后台 · 基本页 */
+            $space = preg_match('/[A-Za-z0-9]$/', $tn) ? ' ' : '';
+            return '后台 · ' . $tn . $space . '页';
+        default:
+            return '未知页面（' . cut_str($p, 20) . '）';
+    }
 }

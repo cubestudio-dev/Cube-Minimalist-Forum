@@ -222,10 +222,11 @@ function flood_check(array $u): bool
     return true;
 }
 
-/** 管理员删除内容时给作者的系统通知（含编号、举报情况、可申诉提示） */
+/** 管理员删除内容时给作者的系统通知（含具体页面名称、举报情况、可申诉提示；v1.15.0 用标题代替编号） */
 function delete_notify_body(string $kind, int $tid, int $rid): string
 {
-    $no = $kind === 'thread' ? '帖子 #' . $tid : '帖子 #' . $tid . ' 中您的回复 #' . $rid;
+    $tTitle = cut_str((string)(thread_get($tid)['title'] ?? ''), 40);
+    $no = $kind === 'thread' ? '您的帖子《' . $tTitle . '》' : '您在帖子《' . $tTitle . '》中的回复';
     $n = 0;
     $type = $kind === 'thread' ? 'thread' : 'reply';
     foreach (reports_all() as $r) {
@@ -382,7 +383,7 @@ function act_forgot(): void
         redirect(u('p=forgot'));
     }
     user_update((int)$u['id'], ['pass' => password_hash($pass, PASSWORD_DEFAULT), 'remember' => '']);
-    log_action('pass_reset', '邮箱 ' . $email . ' 的密码已重置（用户 #' . (int)$u['id'] . '）', (int)$u['id'], (string)$u['name']);
+    log_action('pass_reset', '邮箱 ' . $email . ' 的密码已重置（用户「' . (string)$u['name'] . '」）', (int)$u['id'], (string)$u['name']);
     clear_old();
     flash('ok', '密码已重置，请使用新密码登录');
     redirect(u('p=login'));
@@ -453,7 +454,7 @@ function act_thread_new(): void
         redirect(u('p=new'));
     }
     $title = post_str('title', 30);
-    $content = post_str('content', 1000);
+    $content = post_str('content', 1500);
     if ($title === '') {
         flash('err', '标题不能为空');
         redirect(u('p=new'));
@@ -467,7 +468,9 @@ function act_thread_new(): void
     }
     $tid = thread_create($board, $title, $content, (int)$u['id']);
     user_bump((int)$u['id'], 'threads', 1);
-    log_action('thread_new', '发布《' . $title . '》（帖子 #' . $tid . '，板块：' . board_name($board) . '）');
+    log_action('thread_new', '发布《' . cut_str($title, 40) . '》（板块：' . board_name($board) . '）');
+    /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
+    mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title);
     /* 严全面·消息审核：发布后立即交给 AI 预检（后台可开关），违规自动隐藏并可申诉 */
     $preMsg = ai_precheck_after_post('thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
     if ($preMsg !== '') {
@@ -506,7 +509,9 @@ function act_reply_new(): void
         flash('err', '该帖子已锁定或不存在，无法回复');
         redirect(u('p=home'));
     }
-    log_action('reply_new', '在《' . (string)($t['title'] ?? '') . '》（帖子 #' . $tid . '）中回复 #' . $rid);
+    log_action('reply_new', '在《' . cut_str((string)($t['title'] ?? ''), 40) . '》中发表回复');
+    /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
+    mentions_notify($content, (int)$u['id'], $tid, (int)$rid);
     /* 严全面·消息审核：发布后立即交给 AI 预检（后台可开关），违规自动隐藏并可申诉 */
     $preMsg = ai_precheck_after_post('reply', $tid, $rid, $content, (int)$u['id']);
     if ($preMsg !== '') {
@@ -537,7 +542,7 @@ function act_thread_delete(): void
         if ($admin && $author !== (int)$u['id']) {
             notify_add($author, 'delete', '您的帖子已被删除', delete_notify_body('thread', $tid, 0), '');
         }
-        log_action('thread_delete', ($admin && $author !== (int)$u['id'] ? '管理员删除' : '作者删除') . '《' . (string)$t['title'] . '》（帖子 #' . $tid . '）');
+        log_action('thread_delete', ($admin && $author !== (int)$u['id'] ? '管理员删除' : '作者删除') . '《' . (string)$t['title'] . '》');
         flash('ok', '帖子已删除');
     } else {
         flash('err', '删除失败');
@@ -560,7 +565,7 @@ function act_reply_delete(): void
         redirect(u('p=thread&id=' . $tid));
     }
     reply_delete($tid, $rid);
-    log_action('reply_delete', (!empty($u['admin']) && (int)$r['author'] !== (int)$u['id'] ? '管理员删除' : '作者删除') . '帖子 #' . $tid . ' 中的回复 #' . $rid);
+    log_action('reply_delete', (!empty($u['admin']) && (int)$r['author'] !== (int)$u['id'] ? '管理员删除' : '作者删除') . '《' . cut_str((string)(thread_get($tid)['title'] ?? ''), 40) . '》中的回复');
     flash('ok', '回复已删除');
     redirect(u('p=thread&id=' . $tid));
 }
@@ -577,12 +582,14 @@ function act_thread_edit(): void
         act_err('无法编辑该帖子（可能已超过可编辑时间、已有回复、被锁定或功能已关闭）');
     }
     $title = post_str('title', 30);
-    $content = post_str('content', 1000);
+    $content = post_str('content', 1500);
     if ($title === '' || $content === '') {
         act_err('标题与正文不能为空');
     }
     thread_save($tid, ['title' => $title, 'content' => $content, 'edited' => time(), 'edited_by' => (int)$u['id']]);
-    log_action('thread_edit', (($u['admin'] ?? false) && (int)$t['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str((string)$t['title'], 20) . '》（帖子 #' . $tid . '）', (int)$u['id'], (string)$u['name']);
+    log_action('thread_edit', (($u['admin'] ?? false) && (int)$t['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str($title, 40) . '》', (int)$u['id'], (string)$u['name']);
+    /* @ 提及：编辑时只通知新增提及（旧内容已提及过的人不重复通知） */
+    mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title, mentions_extract((string)($t['content'] ?? '')));
     act_ok('帖子已更新', u('p=thread&id=' . $tid));
 }
 
@@ -602,7 +609,9 @@ function act_reply_edit(): void
         act_err('回复内容不能为空');
     }
     reply_save($tid, $rid, ['content' => $content, 'edited' => time(), 'edited_by' => (int)$u['id']]);
-    log_action('reply_edit', (($u['admin'] ?? false) && (int)$r['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '帖子 #' . $tid . ' 的回复 #' . $rid, (int)$u['id'], (string)$u['name']);
+    log_action('reply_edit', (($u['admin'] ?? false) && (int)$r['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str((string)($t['title'] ?? ''), 40) . '》中的回复', (int)$u['id'], (string)$u['name']);
+    /* @ 提及：编辑时只通知新增提及 */
+    mentions_notify($content, (int)$u['id'], $tid, (int)$rid, '', mentions_extract((string)($r['content'] ?? '')));
     act_ok('回复已更新', u('p=thread&id=' . $tid) . '#r' . $rid);
 }
 
@@ -618,7 +627,8 @@ function act_like(): void
         act_err('内容不存在');
     }
     $likeRes = like_toggle($type, $tid, $rid, (int)$u['id']);
-    log_action(!empty($likeRes[0]) ? 'like' : 'unlike', ($type === 'r' ? '回复 #' . $tid . '/' . $rid : '帖子 #' . $tid) . (!empty($likeRes[0]) ? '（赞）' : '（取消赞）'));
+    $lt = '《' . cut_str((string)(thread_get($tid)['title'] ?? ''), 40) . '》' . ($type === 'r' ? '中的回复' : '');
+    log_action(!empty($likeRes[0]) ? 'like' : 'unlike', $lt . (!empty($likeRes[0]) ? '（赞）' : '（取消赞）'));
     back_or(u('p=thread&id=' . $tid));
 }
 
@@ -666,7 +676,7 @@ function act_report(): void
         }
     }
     report_add($type, $tid, $type === 'reply' ? $rid : 0, $reason, (int)$u['id']);
-    log_action('report', ($type === 'reply' ? '回复 #' . $tid . '/' . $rid : '帖子 #' . $tid) . '，理由：' . $reason);
+    log_action('report', ($type === 'reply' ? '《' . cut_str((string)($t['title'] ?? ''), 40) . '》中的回复' : '《' . cut_str((string)($t['title'] ?? ''), 40) . '》') . '，理由：' . $reason);
     act_ok('举报已提交，该内容已隐藏并进入审核队列');
 }
 
@@ -684,7 +694,7 @@ function act_appeal(): void
     report_update($rid, ['status' => 'appealed', 'handled' => time()]);
     report_target_set_appealed($rep); // 标记「已申诉」，永久不能再被举报
     notify_clear_appealable((int)$u['id'], $rid);
-    log_action('appeal', '对举报 #' . $rid . ' 提出申诉（' . ($rep['type'] === 'thread' ? '帖子 #' . (int)$rep['tid'] : '帖子 #' . (int)$rep['tid'] . ' 回复 #' . (int)$rep['rid']) . '）');
+    log_action('appeal', '对举报 #' . $rid . ' 提出申诉（《' . cut_str((string)(thread_get((int)$rep['tid'])['title'] ?? ''), 40) . '》' . ($rep['type'] === 'thread' ? '' : '中的回复') . '）');
     act_ok('已发送至管理员，将由人工复核');
 }
 
@@ -726,12 +736,20 @@ function act_admin_save_basic(): void
 /** 后台「功能」页：总开关保存（v1.14.0） */
 function act_admin_save_feat(): void
 {
-    $keys = ['register', 'guest_browse', 'post', 'reply', 'edit', 'like', 'report', 'search', 'emoji', 'online', 'signature'];
+    $keys = ['register', 'guest_browse', 'post', 'reply', 'edit', 'like', 'report', 'search', 'emoji', 'online', 'signature', 'mention'];
     $kv = [];
     $off = [];
     foreach ($keys as $k) {
         $v = isset($_POST['feat_' . $k]) ? 1 : 0;
         $kv['feat_' . $k] = $v;
+        if ($v === 0) {
+            $off[] = $k;
+        }
+    }
+    /* AI 两项直接写「AI」页的原生配置键（ai_precheck / ai_autopilot），与功能页同一份开关 */
+    foreach (['ai_precheck', 'ai_autopilot'] as $k) {
+        $v = isset($_POST['feat_' . $k]) ? 1 : 0;
+        $kv[$k] = $v;
         if ($v === 0) {
             $off[] = $k;
         }
@@ -1101,7 +1119,7 @@ function act_admin_board_move(): void
 {
     $id = (int)($_POST['id'] ?? 0);
     board_move($id, ($_POST['dir'] ?? '') === 'up' ? 'up' : 'down');
-    log_action('admin_board_move', '板块 #' . $id . ' 排序' . (($_POST['dir'] ?? '') === 'up' ? '上移' : '下移'));
+    log_action('admin_board_move', '板块「' . board_name($id) . '」排序' . (($_POST['dir'] ?? '') === 'up' ? '上移' : '下移'));
     back_or(u('p=admin&tab=boards'));
 }
 
@@ -1156,7 +1174,7 @@ function act_admin_user_role(): void
         act_err('用户不存在');
     }
     user_update($uid, ['admin' => $to ? 1 : 0]);
-    log_action('admin_user_role', '用户 #' . $uid . ' ' . ($to ? '设为管理员' : '取消管理员'));
+    log_action('admin_user_role', '用户「' . uname($uid) . '」' . ($to ? '设为管理员' : '取消管理员'));
     act_ok('角色已更新', u('p=admin&tab=users'));
 }
 
@@ -1173,22 +1191,22 @@ function act_admin_thread_op(): void
     switch ($act) {
         case 'lock':
             thread_save($tid, ['locked' => true]);
-            log_action('admin_thread_op', '锁定帖子 #' . $tid . '《' . (string)$t['title'] . '》');
+            log_action('admin_thread_op', '锁定《' . (string)$t['title'] . '》');
             act_ok('帖子已锁定', u('p=thread&id=' . $tid));
             break;
         case 'unlock':
             thread_save($tid, ['locked' => false]);
-            log_action('admin_thread_op', '解锁帖子 #' . $tid . '《' . (string)$t['title'] . '》');
+            log_action('admin_thread_op', '解锁《' . (string)$t['title'] . '》');
             act_ok('帖子已解锁', u('p=thread&id=' . $tid));
             break;
         case 'pin':
             thread_save($tid, ['pinned' => true]);
-            log_action('admin_thread_op', '置顶帖子 #' . $tid . '《' . (string)$t['title'] . '》');
+            log_action('admin_thread_op', '置顶《' . (string)$t['title'] . '》');
             act_ok('帖子已置顶', u('p=thread&id=' . $tid));
             break;
         case 'unpin':
             thread_save($tid, ['pinned' => false]);
-            log_action('admin_thread_op', '取消置顶帖子 #' . $tid);
+            log_action('admin_thread_op', '取消置顶《' . (string)$t['title'] . '》');
             act_ok('已取消置顶', u('p=thread&id=' . $tid));
             break;
         case 'move':
@@ -1197,7 +1215,7 @@ function act_admin_thread_op(): void
                 act_err('目标板块不存在');
             }
             thread_save($tid, ['board' => $b]);
-            log_action('admin_thread_op', '移动帖子 #' . $tid . ' 到「' . board_name($b) . '」');
+            log_action('admin_thread_op', '移动《' . (string)$t['title'] . '》到「' . board_name($b) . '」');
             act_ok('帖子已移动到「' . board_name($b) . '」', u('p=thread&id=' . $tid));
             break;
         case 'delete':
@@ -1208,7 +1226,7 @@ function act_admin_thread_op(): void
             if ($author !== (int)($me['id'] ?? 0)) {
                 notify_add($author, 'delete', '您的帖子已被删除', delete_notify_body('thread', $tid, 0), '');
             }
-            log_action('admin_thread_op', '删除帖子 #' . $tid . '《' . (string)$t['title'] . '》并通知作者');
+            log_action('admin_thread_op', '删除《' . (string)$t['title'] . '》并通知作者');
             act_ok('帖子已删除', u('p=admin&tab=content'));
             break;
         default:
@@ -1230,7 +1248,7 @@ function act_admin_reply_delete(): void
     if ($author !== (int)($me['id'] ?? 0)) {
         notify_add($author, 'delete', '您的回复已被删除', delete_notify_body('reply', $tid, $rid), 'p=thread&id=' . $tid);
     }
-    log_action('admin_reply_delete', '删除帖子 #' . $tid . ' 中的回复 #' . $rid . '（作者 ' . uname($author) . '）并通知作者');
+    log_action('admin_reply_delete', '删除《' . cut_str((string)(thread_get($tid)['title'] ?? ''), 40) . '》中的回复（作者 ' . uname($author) . '）并通知作者');
     act_ok('回复已删除', u('p=thread&id=' . $tid));
 }
 
