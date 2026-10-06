@@ -105,6 +105,7 @@ function page_thread(): void
     }
 
     thread_view_bump($tid); // 浏览量 +1（每会话每帖至多计一次）
+    $t['views'] = (int)(thread_get($tid)['views'] ?? ($t['views'] ?? 0)); // 先计后渲染：首次浏览即显示新值
 
     echo '<article class="card thread-art">';
     echo '<div class="art-head"><h1 class="art-title">' . e((string)$t['title']) . '</h1><div class="art-meta">' .

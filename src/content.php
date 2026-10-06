@@ -407,19 +407,24 @@ function like_toggle(string $type, int $tid, int $rid, int $uid): array
 
 /* ================= 浏览量 / 编辑（v1.14.0） ================= */
 
-/** 浏览量 +1（每会话每帖至多计一次；爬虫/命令行 UA 不计数，与在线统计同标准；写入失败静默） */
-function thread_view_bump(int $tid): void
+/** 浏览量 +1（每会话每帖至多计一次；爬虫/命令行 UA 不计数，与在线统计同标准；写入失败静默）
+ * @return int 计数后的最新浏览量（供页面先计后渲染，避免首次浏览显示旧值） */
+function thread_view_bump(int $tid): int
 {
+    $cur = function (): int {
+        $t = thread_get($tid);
+        return $t ? (int)($t['views'] ?? 0) : 0;
+    };
     $ua = strtolower((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
     if ($ua === '' || session_status() !== PHP_SESSION_ACTIVE
         || preg_match('/bot|crawl|spider|slurp|curl|wget|python|java|okhttp|httpclient|headless|monitor|pingdom|uptime/i', $ua)) {
-        return;
+        return $cur();
     }
     if (!isset($_SESSION['views']) || !is_array($_SESSION['views'])) {
         $_SESSION['views'] = [];
     }
     if (isset($_SESSION['views'][$tid])) {
-        return;
+        return $cur();
     }
     if (count($_SESSION['views']) > 500) { // 防会话数据无限膨胀
         $_SESSION['views'] = array_slice($_SESSION['views'], -250, null, true);
@@ -431,8 +436,11 @@ function thread_view_bump(int $tid): void
         $t['views'] = (int)($t['views'] ?? 0) + 1;
         Store::write('threads/t' . $tid . '.php', $t);
         sync_thread_index($tid, ['views' => (int)$t['views']]);
+        Store::unlock($lk);
+        return (int)$t['views'];
     }
     Store::unlock($lk);
+    return 0;
 }
 
 /** 可编辑时间窗（秒）：作者可在发帖 / 回复后 15 分钟内编辑自己的内容 */
