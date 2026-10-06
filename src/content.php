@@ -411,7 +411,7 @@ function like_toggle(string $type, int $tid, int $rid, int $uid): array
  * @return int 计数后的最新浏览量（供页面先计后渲染，避免首次浏览显示旧值） */
 function thread_view_bump(int $tid): int
 {
-    $cur = function (): int {
+    $cur = function () use ($tid): int {
         $t = thread_get($tid);
         return $t ? (int)($t['views'] ?? 0) : 0;
     };
