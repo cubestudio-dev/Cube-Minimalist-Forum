@@ -203,8 +203,14 @@ function act_admin_save_docs(): void
 {
     $me = admin_tab_guard();
     $kv = [];
+    $nowDoc = time();
     foreach (['doc_terms', 'doc_privacy', 'doc_disclaimer'] as $k) {
-        $kv[$k] = post_str($k, 20000);
+        $v = post_str($k, 20000);
+        /* v1.18.0：内容变化且非空时戳记保存时间（协议中心/文档页展示「最后更新」） */
+        if ($v !== '' && $v !== (string)cfg($k, '')) {
+            $kv['doc_u_' . substr($k, 4)] = $nowDoc;
+        }
+        $kv[$k] = $v;
     }
     $kv['doc_gate'] = !empty($_POST['doc_gate']) ? 1 : 0;
     $kv['doc_footer'] = !empty($_POST['doc_footer']) ? 1 : 0;
@@ -396,8 +402,14 @@ function act_doc_agree(): void
         redirect(u('p=doc'));
     }
     $fp = doc_fingerprint();
-    setcookie('mf_doc', $fp, ['expires' => time() + 31536000, 'path' => '/', 'samesite' => 'Lax', 'secure' => app_is_https()]);
+    /* v1.18.0：cookie 记录「版本指纹.同意时间」，协议中心可向用户展示自己的确认时间；
+       同时写一条站内日志，管理员可追溯谁在何时同意了哪个版本 */
+    $now = time();
+    setcookie('mf_doc', $fp . '.' . $now, ['expires' => $now + 31536000, 'path' => '/', 'samesite' => 'Lax', 'secure' => app_is_https()]);
     $_SESSION['doc_agreed'] = $fp;
+    $_SESSION['doc_agreed_t'] = $now; // 会话也记时间，协议中心状态卡能显示「刚刚确认」
+    $meAgree = current_user();
+    log_action('doc_agree', '同意了站点协议（版本 ' . strtoupper(substr($fp, 0, 8)) . '，共 ' . count(doc_list()) . ' 份）', $meAgree ? (int)$meAgree['id'] : 0);
     flash('ok', '感谢您的确认，祝您浏览愉快');
     $next = (string)($_POST['next'] ?? '');
     if ($next !== '' && preg_match('/^[a-z_=&\d]+$/', $next)) {
@@ -901,6 +913,7 @@ function act_admin_save_basic(): void
         'post_interval' => max(0, min(3600, (int)($_POST['post_interval'] ?? 30))),
         'online_window' => max(60, min(86400, (int)($_POST['online_window'] ?? 300))),
         'live_interval' => max(0, min(300, (int)($_POST['live_interval'] ?? 20))),
+        'ping_interval' => max(0, min(300, (int)($_POST['ping_interval'] ?? 15))), // v1.18.0：侧栏 Ping 测量间隔，0=关闭
     ]);
     log_action('admin_save_basic', '基本设置已保存' . ($bd !== '' ? '（绑定域名：' . $bd . '）' : ''));
     act_ok('基本设置已保存', u('p=admin&tab=basic'));
@@ -1044,6 +1057,9 @@ function act_admin_save_ai(): void
     if (isset($_POST['ai_retries'])) {
         $kv['ai_retries'] = max(1, min(10, (int)$_POST['ai_retries']));
     }
+    if (isset($_POST['ai_timeout'])) {
+        $kv['ai_timeout'] = max(5, min(120, (int)$_POST['ai_timeout']));
+    }
     if (isset($_POST['ai_fail_limit'])) {
         $kv['ai_fail_limit'] = max(1, min(20, (int)$_POST['ai_fail_limit']));
     }
@@ -1077,8 +1093,8 @@ function act_admin_save_ai(): void
     if (isset($kv['ai_mode'])) {
         $parts[] = '审核模式：' . ['normal' => '标准（单模型顺序）', 'fullpower' => '全火力全开（所有模型同审一条）', 'parallel' => '并行火力（多模型同刻各审一条）'][$kv['ai_mode']];
     }
-    if (isset($kv['ai_retries']) || isset($kv['ai_fail_limit'])) {
-        $parts[] = '单模型重试 ' . (int)cfg('ai_retries', 3) . ' 次 / 自动切换阈值 ' . ai_fail_limit() . ' 次';
+    if (isset($kv['ai_retries']) || isset($kv['ai_fail_limit']) || isset($kv['ai_timeout'])) {
+        $parts[] = '单模型重试 ' . (int)cfg('ai_retries', 2) . ' 次 / 单次超时 ' . (int)cfg('ai_timeout', 20) . ' 秒 / 自动切换阈值 ' . ai_fail_limit() . ' 次';
     }
     if (isset($kv['ai_strict'])) {
         $lvName = ['loose' => '宽松', 'standard' => '标准', 'strict' => '严格'][cfg('ai_strict', 'standard')];

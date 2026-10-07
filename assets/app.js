@@ -673,12 +673,16 @@
   })();
 
   /* ---------- v1.17.0：侧栏 Ping（浏览器到服务器的往返延迟） ----------
-     每 15 秒向 p=ping 发一次空请求，用 performance.now() 差值测算 RTT；
+     向 p=ping 发空请求，用 performance.now() 差值测算 RTT；
+     v1.18.0：间隔由后台「基本设置 → Ping 测量间隔」控制（meta[ping-interval]，0=关闭）；
      页面切到后台自动暂停；<100ms 绿色 / <300ms 琥珀 / 其余红色。 */
   (function () {
     var el = $('#pingVal');
     if (!el) return;
     var block = el.closest('.side-ping');
+    var meta = $('meta[name="ping-interval"]');
+    var iv = meta ? Math.max(0, parseInt(meta.getAttribute('content'), 10) || 0) : 15;
+    if (iv <= 0) { if (block) block.hidden = true; return; }
     function measure() {
       if (document.hidden) return;
       var t0 = performance.now();
@@ -694,7 +698,7 @@
         .catch(function () { el.textContent = '--'; });
     }
     measure();
-    setInterval(measure, 15000);
+    setInterval(measure, iv * 1000);
     document.addEventListener('visibilitychange', function () {
       if (!document.hidden) measure();
     });

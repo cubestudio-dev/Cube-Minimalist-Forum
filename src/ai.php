@@ -240,7 +240,8 @@ function ai_call_model(array $m, string $content, string &$verdict, string &$not
 {
     $verdict = '';
     $note = '';
-    $retries = max(1, (int)($ov['retries'] ?? cfg('ai_retries', 3)));
+    $retries = max(1, (int)($ov['retries'] ?? cfg('ai_retries', 2))); // v1.18.0：默认 3→2，减少最坏情况下的叠加等待（后台可调）
+    $timeout = max(5, min(120, (int)cfg('ai_timeout', 20))); // v1.18.0：单次请求超时可配，默认 30→20 秒
     $strict = ($ov['strict'] ?? null) === null ? null : (string)$ov['strict'];
 
     $payload = [
@@ -255,7 +256,7 @@ function ai_call_model(array $m, string $content, string &$verdict, string &$not
     ];
     $err = '';
     for ($i = 1; $i <= $retries; $i++) {
-        $res = http_post_json(ai_endpoint($m['url']), $payload, ['Authorization: Bearer ' . $m['key']], 30, $err);
+        $res = http_post_json(ai_endpoint($m['url']), $payload, ['Authorization: Bearer ' . $m['key']], $timeout, $err);
         if ($res !== null) {
             $j = json_decode($res, true);
             $text = is_array($j) ? ($j['choices'][0]['message']['content'] ?? '') : '';
@@ -389,7 +390,7 @@ function ai_call_multi(array $jobs): array
                 CURLOPT_POST => true,
                 CURLOPT_POSTFIELDS => $body,
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 30,
+                CURLOPT_TIMEOUT => $timeout,
                 CURLOPT_CONNECTTIMEOUT => 10,
                 CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $j['model']['key']],
             ]);
@@ -444,7 +445,7 @@ function ai_call_multi(array $jobs): array
             ],
         ];
         $err = '';
-        $res = http_post_json(ai_endpoint($j['model']['url']), $payload, ['Authorization: Bearer ' . $j['model']['key']], 30, $err);
+        $res = http_post_json(ai_endpoint($j['model']['url']), $payload, ['Authorization: Bearer ' . $j['model']['key']], $timeout, $err);
         if ($res === null) {
             $out[$i]['note'] = $err;
             continue;
@@ -865,7 +866,7 @@ function ai_patrol_call(array $mat, array &$report, string &$used): bool
         $label = ai_model_label($m);
         $payload['model'] = $m['model'];
         $err = '';
-        $res = http_post_json(ai_endpoint($m['url']), $payload, ['Authorization: Bearer ' . $m['key']], 30, $err);
+        $res = http_post_json(ai_endpoint($m['url']), $payload, ['Authorization: Bearer ' . $m['key']], max(5, min(120, (int)cfg('ai_timeout', 20))), $err);
         if ($res !== null) {
             $j = json_decode($res, true);
             $text = is_array($j) ? ($j['choices'][0]['message']['content'] ?? '') : '';

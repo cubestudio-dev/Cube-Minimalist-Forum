@@ -48,8 +48,21 @@ $p = isset($_GET['p']) && is_string($_GET['p']) ? preg_replace('/[^a-z_]/', '', 
 require_once __DIR__ . '/src/pages.php';
 require_once __DIR__ . '/src/admin.php';
 
-/* 私密论坛模式（v1.14.0）：后台关闭「游客可浏览」时，未登录仅允许 登录 / 注册 / 找回密码 / 图标资源 /
-   协议页（协议门禁页需要能查看协议，否则同开会锁死访客）与 v1.17.0 的 ping / asset 资源端点 */
+/* v1.18.0：CSS / JS / Ping / 图标属于「资源」，不是「内容页」——
+   必须先于私密模式与协议门禁出站。否则开启协议门禁后，未同意协议的访客
+   连样式表请求都会被门禁页接管（HTML 冒充 CSS），整站裸奔无样式。 */
+if ($p === 'asset') {
+    page_asset();
+}
+if ($p === 'ping') {
+    page_ping();
+}
+if ($p === 'icon') {
+    page_icon();
+}
+
+/* 私密论坛模式（v1.14.0）：后台关闭「游客可浏览」时，未登录仅允许 登录 / 注册 / 找回密码 /
+   协议页（协议门禁页需要能查看协议，否则同开会锁死访客）；资源端点已在上方先行放行 */
 if (!feat_on('guest_browse') && !current_user()
     && !in_array($p === '' ? 'home' : $p, ['login', 'register', 'forgot', 'icon', 'doc', 'ping', 'asset'], true)) {
     flash('err', '本论坛仅限注册用户浏览，请先登录');
@@ -75,13 +88,13 @@ switch ($p === '' ? 'home' : $p) {
     case 'settings':      page_settings(); break;
     case 'search':        page_search(); break;
     case 'edit':          page_edit(); break;
-    case 'icon':          page_icon(); break;
+    case 'icon':          page_icon(); break; /* 已在上方资源段先行出站，此处仅为兜底 */
     case 'notifications': page_announcements(); break;
     case 'announcements': page_announcements(); break;
     case 'doc':           page_doc(); break;
     case 'mention_api':   page_mention_api(); break;
-    case 'ping':          page_ping(); break;
-    case 'asset':         page_asset(); break;
+    case 'ping':          page_ping(); break; /* 已在上方资源段先行出站，此处仅为兜底 */
+    case 'asset':         page_asset(); break; /* 已在上方资源段先行出站，此处仅为兜底 */
     case 'admin':         page_admin(); break;
     default:              page_404();
 }

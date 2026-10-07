@@ -4,29 +4,50 @@
  */
 defined('APP') or exit('Forbidden');
 
-function layout_header(string $title = '', int $boardId = 0): void
+/**
+ * v1.18.0：样式引入策略——会话首个页面直接内联全部 CSS（渲染不被样式表请求阻塞，
+ * 跨网高延迟链路首屏少一个往返）；之后的页面引用强缓存的外链（浏览器零请求命中）。
+ * 门禁页/协议中心等独立页面始终内联（访客多为冷会话，见 doc_layout_header）。
+ */
+function layout_css_html(bool $alwaysInline = false): string
+{
+    $href = e(u('p=asset&f=style.css&v=' . app_version()));
+    $inline = false;
+    if ($alwaysInline) {
+        $inline = true;
+    } elseif (session_status() === PHP_SESSION_ACTIVE && empty($_SESSION['css_inline_done'])) {
+        $inline = true;
+    }
+    if (!$inline) {
+        return '<link rel="stylesheet" href="' . $href . '" fetchpriority="high">';
+    }
+    $css = (string)@file_get_contents(dirname(DATA_DIR) . '/assets/style.css');
+    if ($css === '') {
+        /* 读不到样式表（异常部署）时不置会话标记，下个页面重试内联而非永久退化为外链 */
+        return '<link rel="stylesheet" href="' . $href . '" fetchpriority="high">';
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        $_SESSION['css_inline_done'] = 1;
+    }
+    /* </style 防逃逸与 custom_css 同规则；外链仍保留，作为缓存与回退通道 */
+    return '<style id="mf-inline-css">' . str_ireplace('</style', '', $css) . '</style>' .
+        '<link rel="preload" as="style" href="' . $href . '">';
+}
+
+/** <head> 公共段（论坛壳与协议独立页共用）：编码 / 视口 / 图标 / 主题初始化 / 样式
+ *  $forceInlineCss=true 时样式必定内联（门禁/协议页访客多为冷会话，不依赖外链） */
+function layout_head_common(string $title = '', bool $forceInlineCss = false): void
 {
     $c = cfg();
     $siteName = (string)($c['site_name'] ?? 'Cube Minimalist Forum');
-    $siteDesc = (string)($c['site_desc'] ?? '');
-    $u = current_user();
-    $unread = $u ? notify_unread((int)$u['id']) : 0;
-    $online = online_count();
     $accent = (string)($c['theme_color'] ?? '');
     if (!preg_match('/^#[0-9a-fA-F]{3,8}$/', $accent)) {
         $accent = '#0f766e';
     }
-    // 实时刷新间隔（秒）：后台可配，0 = 关闭；仅浏览器会轮询，页面隐藏时自动暂停
-    $liveInt = max(0, (int)cfg('live_interval', 20));
-    ?>
-<!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
-<head>
+?>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="csrf" content="<?= e(csrf_token()) ?>">
-<meta name="live-interval" content="<?= $liveInt ?>">
-<meta name="monitor-interval" content="<?= max(0, min(300, (int)cfg('monitor_interval', 5))) ?>">
 <title><?= e($title !== '' ? $title . ' · ' . $siteName : $siteName) ?></title>
 <?php $siteIcon = (string)($c['site_icon'] ?? '');
 if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '/upload/' . $siteIcon)):
@@ -41,13 +62,40 @@ if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '
 <link rel="icon" href="<?= e(u('p=asset&f=favicon.ico')) ?>" sizes="32x32">
 <link rel="apple-touch-icon" href="<?= e(u('p=asset&f=apple-touch-icon.png')) ?>">
 <?php endif; ?>
-<link rel="stylesheet" href="<?= e(u('p=asset&f=style.css&v=' . app_version())) ?>">
+<?php echo layout_css_html($forceInlineCss); ?>
 <script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;window.MF_EMOJI=<?= feat_on('emoji') ? 'true' : 'false' ?>;</script>
 <script>(function(){try{var d=localStorage.getItem('mf-theme')||window.THEME_DEFAULT||'system';if(d==='system'){d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',d);}catch(e){}})();</script>
 <style>:root{--accent:<?= e($accent) ?>;}</style>
 <?php if (!empty($c['custom_css'])): ?>
 <style><?= str_ireplace('</style', '', (string)$c['custom_css']) ?></style>
-<?php endif; ?>
+<?php endif;
+}
+
+function layout_header(string $title = '', int $boardId = 0): void
+{
+    $c = cfg();
+    $siteName = (string)($c['site_name'] ?? 'Cube Minimalist Forum');
+    $siteDesc = (string)($c['site_desc'] ?? '');
+    $u = current_user();
+    $unread = $u ? notify_unread((int)$u['id']) : 0;
+    $online = online_count();
+    $accent = (string)($c['theme_color'] ?? '');
+    if (!preg_match('/^#[0-9a-fA-F]{3,8}$/', $accent)) {
+        $accent = '#0f766e';
+    }
+    // 实时刷新间隔（秒）：后台可配，0 = 关闭；仅浏览器会轮询，页面隐藏时自动暂停
+    $liveInt = max(0, (int)cfg('live_interval', 20));
+    // v1.18.0：Ping 测量间隔（秒）：后台可配，0 = 关闭，5~300
+    $pingInt = max(0, min(300, (int)cfg('ping_interval', 15)));
+    ?>
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<?php layout_head_common($title); ?>
+<meta name="live-interval" content="<?= $liveInt ?>">
+<meta name="ping-interval" content="<?= $pingInt ?>">
+<meta name="monitor-interval" content="<?= max(0, min(300, (int)cfg('monitor_interval', 5))) ?>">
+<script src="<?= e(u('p=asset&f=app.js&v=' . app_version())) ?>" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -96,7 +144,7 @@ if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '
     </div>
     <?php endif; ?>
       <div class="side-block side-online"><?php if (feat_on('online')): ?><a class="online-link" href="<?= e(u('p=online')) ?>" title="查看在线名单"><span class="live-dot" aria-hidden="true"></span><b id="onlineNum"><?= (int)$online ?></b>&nbsp;人在线<span class="online-more" aria-hidden="true">›</span></a><?php else: ?><span class="online-link"><span class="live-dot" aria-hidden="true"></span><b><?= (int)$online ?></b>&nbsp;人在线</span><?php endif; ?></div>
-      <div class="side-block side-ping" title="浏览器到服务器的往返延迟（每 15 秒自动测量）"><span class="online-link"><span class="live-dot" aria-hidden="true"></span>Ping&nbsp;<b id="pingVal">--</b><span class="muted">&nbsp;ms</span></span></div>
+      <div class="side-block side-ping"<?php if ($pingInt > 0): ?> title="浏览器到服务器的往返延迟（每 <?= $pingInt ?> 秒自动测量，后台可调）"<?php else: ?> hidden<?php endif; ?>><span class="online-link"><span class="live-dot" aria-hidden="true"></span>Ping&nbsp;<b id="pingVal">--</b><span class="muted">&nbsp;ms</span></span></div>
     </aside>
     <div class="side-mask" id="sideMask" hidden></div>
     <main class="main" id="main">
@@ -136,7 +184,64 @@ function layout_footer(): void
   </footer>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="<?= e(u('p=asset&f=app.js&v=' . app_version())) ?>" defer></script>
+</body>
+</html>
+<?php
+}
+
+/* ---------------- v1.18.0：协议独立页布局（协议中心 / 协议门禁） ----------------
+ * 用户反馈：门禁与协议查看长在论坛壳里（侧栏“全部帖子”还在旁边），不像个正式页面。
+ * 这里给协议自己的完整界面：迷你顶栏 + 阅读版心，不加载论坛 app.js（保持极简、冷会话零额外请求）。
+ * 样式始终内联：门禁页访客多为未同意协议的冷会话，不能依赖外链样式表。 */
+function doc_layout_header(string $title, string $sub = ''): void
+{
+    $c = cfg();
+    $siteName = (string)($c['site_name'] ?? 'Cube Minimalist Forum');
+    $siteDesc = (string)($c['site_desc'] ?? '');
+    $u = current_user();
+?>
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<?php layout_head_common($title, true); ?>
+</head>
+<body>
+<div class="docshell">
+  <header class="doc-topbar">
+    <a class="brand" href="<?= e(u('p=home')) ?>"><span class="logo" aria-hidden="true"></span><b><?= e($siteName) ?></b></a>
+    <span class="brand-desc"><?= e($siteDesc) ?></span>
+    <span class="flex1"></span>
+    <nav class="top-links">
+      <a class="nav-link" href="<?= e(u('p=doc')) ?>">协议中心</a>
+      <?php if ($u): ?>
+        <a class="nav-link" href="<?= e(u('p=home')) ?>">进入论坛</a>
+      <?php elseif (feat_on('register')): ?>
+        <a class="nav-link" href="<?= e(u('p=login')) ?>">登录 / 注册</a>
+      <?php else: ?>
+        <a class="nav-link" href="<?= e(u('p=login')) ?>">登录</a>
+      <?php endif; ?>
+    </nav>
+  </header>
+  <div class="doc-page">
+    <?= flash_render() ?>
+    <div class="doc-hero">
+      <h1><?= e($title) ?></h1>
+      <?php if ($sub !== ''): ?><p><?= e($sub) ?></p><?php endif; ?>
+    </div>
+<?php
+}
+
+function doc_layout_footer(): void
+{
+    $c = cfg();
+    $siteName = (string)($c['site_name'] ?? 'Cube Minimalist Forum');
+?>
+  </div>
+  <footer class="footer">
+    <span><?= e($siteName) ?> · 协议中心</span>
+    <span class="muted">由 Cube Minimalist Forum v<?= e(app_version()) ?> 驱动</span>
+  </footer>
+</div>
 </body>
 </html>
 <?php

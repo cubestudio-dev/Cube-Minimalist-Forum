@@ -67,6 +67,8 @@ function admin_tab_basic(): void
         '</div>' .
         '<label class="field"><span class="field-l">实时刷新间隔（秒）</span><input class="input" name="live_interval" type="number" min="0" max="300" value="' . (int)cfg('live_interval', 20) . '">' .
         '<span class="hint">前台自动刷新在线人数、未读通知，并提示新帖 / 新回复；设为 0 关闭。页面切到后台时自动暂停，不产生无效流量</span></label>' .
+        '<label class="field"><span class="field-l">Ping 测量间隔（秒）</span><input class="input" name="ping_interval" type="number" min="0" max="300" value="' . (int)cfg('ping_interval', 15) . '">' .
+        '<span class="hint">侧栏「Ping」每 N 秒测量一次浏览器到服务器的往返延迟（绿 &lt;100ms / 琥珀 &lt;300ms / 红 ≥300ms）；设为 0 关闭整个 Ping 显示。间隔越短数据越实时，但心跳请求也越频繁（5-300 秒）</span></label>' .
         '</div>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存基本设置</button></div></form></div>';
 }
@@ -219,12 +221,13 @@ function admin_tab_ai(): void
     /* ---- 卡片 2：审核策略 ---- */
     echo '<div class="card form-card"><form id="ai-form">' .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">单模型重试次数</span><input class="input" name="ai_retries" type="number" min="1" max="10" value="' . (int)cfg('ai_retries', 3) . '"><span class="hint">同一模型单次审核内的 HTTP 重试次数（1-10，默认 3）</span></label>' .
+        '<label class="field"><span class="field-l">单模型重试次数</span><input class="input" name="ai_retries" type="number" min="1" max="10" value="' . (int)cfg('ai_retries', 2) . '"><span class="hint">同一模型单次审核内的 HTTP 重试次数（1-10；v1.18.0 起默认 2，降低最坏情况的叠加等待）</span></label>' .
+        '<label class="field"><span class="field-l">单次请求超时（秒）</span><input class="input" name="ai_timeout" type="number" min="5" max="120" value="' . (int)cfg('ai_timeout', 20) . '"><span class="hint">等待 AI 返回的最长时间（5-120 秒；v1.18.0 起默认 20 秒）。模型平时响应慢就调大，想快速失败换模型就调小</span></label>' .
         '<label class="field"><span class="field-l">自动切换阈值（连续失败 N 次）</span><input class="input" name="ai_fail_limit" type="number" min="1" max="20" value="' . $limit . '"><span class="hint">某模型连续失败达到该次数后，后续审核自动换下一个模型（默认 3）</span></label>' .
         '</div>' .
         '<label class="field"><span class="field-l">审核模式（火力）</span>' .
         '<label class="check"><input type="radio" name="ai_mode" value="normal"' . (ai_mode() === 'normal' ? ' checked' : '') . '> <b>标准</b> —— 按模型顺序审核，失败自动切换（消耗最低）</label>' .
-        '<label class="check"><input type="radio" name="ai_mode" value="parallel"' . (ai_mode() === 'parallel' ? ' checked' : '') . '> <b>并行火力</b> —— 队列一次取出多条，多个模型<b>同刻并发、各审一条</b>（模型有几个就同时审几条，吞吐成倍提升；AI 返回仍是单模型口径）</label>' .
+        '<label class="check"><input type="radio" name="ai_mode" value="parallel"' . (ai_mode() === 'parallel' ? ' checked' : '') . '> <b>并行火力</b> —— 队列一次取出多条，多个模型<b>同刻并发、各审一条</b>（模型有几个就同时审几条，吞吐成倍提升）；只剩一条时自动改为<b>双模型竞速</b>——两个模型同刻出发审同一条，先返回者胜出，单条等待时间约减半</label>' .
         '<label class="check"><input type="radio" name="ai_mode" value="fullpower"' . (ai_mode() === 'fullpower' ? ' checked' : '') . '> <b>全火力全开</b> —— 每条内容同时交给<b>所有启用的模型</b>一起审核：任一模型判定违规即判违规，全部无问题才放行（严判，API 消耗与启用模型数成正比）</label>' .
         '</label>' .
         '<label class="field"><span class="field-l">审核严格程度</span><select name="ai_strict" class="input" style="max-width:100%">' .
@@ -258,12 +261,14 @@ function admin_tab_docs(): void
         'doc_disclaimer' => ['免责声明', '本站对用户发布内容的免责说明。UGC 站点建议填写'],
     ];
     echo '<div class="card form-card"><h2 class="card-title">协议管理</h2>' .
-        '<p class="muted">填写内容后即自动启用该协议：出现在注册页确认、协议门禁与页脚入口（按下方开关）。支持直接输入多行纯文本；URL 会自动变成可点击链接。没有现成文案？点每栏的「填入内置模板」一键生成，替换其中的【站名】【站长邮箱】后保存即可。</p>' .
+        '<p class="muted">填写内容后即自动启用该协议：出现在注册页确认、协议门禁与页脚入口（按下方开关）。支持直接输入多行纯文本；URL 会自动变成可点击链接。没有现成文案？点每栏的「填入内置模板」一键生成，替换其中的【站名】【站长邮箱】【更新日期】后保存即可。</p>' .
+        '<p class="hint">前台展示：访客通过页脚或 <a href="' . e(u('p=doc')) . '">协议中心</a> 查看协议——协议中心与每份协议都有独立的完整大页面（自动生成目录、版本号与更新时间，支持打印 / 保存 PDF）。</p>' .
         '<form method="post" action="' . e(u('a=admin_save_docs')) . '" data-ajax="1">' . csrf_field();
     $tpls = doc_templates();
     foreach ($defs as $key => [$name, $desc]) {
         $tk = substr($key, 4); // 模板短键：doc_terms → terms（与 doc_templates()/前端占位节点一致）
-        echo '<label class="field"><span class="field-l">' . e($name) . '</span>' .
+        $uTs = doc_updated($tk);
+        echo '<label class="field"><span class="field-l">' . e($name) . ($uTs > 0 ? ' <span class="muted" style="font-weight:400">（最后保存：' . gmdate('Y-m-d H:i', $uTs + 8 * 3600) . '）</span>' : '') . '</span>' .
             '<textarea class="input" name="' . $key . '" rows="6" placeholder="（留空 = 未启用）\n' . e($desc) . '" style="min-height:110px">' . e((string)cfg($key, '')) . '</textarea>' .
             '<span class="hint">' . e($desc) . '</span>' .
             '<span class="doc-tpl-row"><button class="btn btn-ghost btn-sm" type="button" data-doc-tpl="' . $tk . '">填入内置模板</button></span>' .
@@ -274,6 +279,15 @@ function admin_tab_docs(): void
         '<div class="form-foot"><button class="btn btn-primary" type="submit">保存协议设置</button></div>' .
         '</form>' .
         '<p class="hint">注册页的强制勾选自动生效：只要对应协议已填写，新用户注册时必须勾选「我已阅读并同意」才能提交。</p>';
+    /* v1.18.0：同意记录机制说明（用户问"记住隐私协议是在哪儿弄的"，这里说清楚） */
+    echo '<div class="card form-card"><h2 class="card-title">「同意协议」是如何记录的</h2>' .
+        '<p class="hint" style="font-size:13.5px;line-height:1.9">' .
+        '· <b>当前协议版本号</b>：<b>' . e(strtoupper(substr(doc_fingerprint(), 0, 8))) . '</b>（由三份协议内容计算指纹生成，任何一份内容修改后版本号自动变化）<br>' .
+        '· <b>记录位置</b>：访客点「同意」时，本站在其浏览器写入一年期 Cookie（<code>mf_doc</code>，值为「版本指纹.同意时间戳」），并同步写入其登录会话；<br>' .
+        '· <b>如何判定已同意</b>：每次访问时比对 Cookie / 会话中的指纹与当前版本号，一致即放行；<br>' .
+        '· <b>协议更新后</b>：指纹变化 → 全部旧同意自动失效，访客下次访问需重新确认；<br>' .
+        '· <b>留痕</b>：每次同意都会写一条「协议」日志（谁、何时、哪个版本），可在「日志」页检索 <code>doc_agree</code>；<br>' .
+        '· <b>豁免</b>：管理员账号不受门禁限制（避免把自己锁在门外）；访客可在前台「协议中心」查看自己的确认状态与时间。</p></div>';
     /* 内置模板（v1.17.0）：以 text/plain 节点随页携带，前端一键填入，不额外发请求 */
     foreach ($tpls as $key => $tpl) {
         echo '<script type="text/plain" id="doc-tpl-' . e($key) . '" hidden>' . e($tpl) . '</script>';

@@ -796,9 +796,80 @@ function page_404(): void
 }
 
 
-/* ---------------- 协议（v1.16.0） ---------------- */
+/* ---------------- 协议（v1.16.0，v1.18.0 独立大页面重构） ---------------- */
 
-/** 协议门禁页：未同意协议的访客访问任何页面时先看到这里，不同意无法继续 */
+/** 渲染协议正文：生成锚点章节 + TOC 数据；返回 [html, toc]（toc = [['id','text','lvl'],..]） */
+function doc_render_body(string $body): array
+{
+    /* 首个一级标题由页面 hero 展示，正文里去掉避免重复 */
+    $body = (string)preg_replace('/^#\s*[^\n]*\n+/', '', trim($body));
+    $html = md_render($body);
+    $toc = [];
+    $n = 0;
+    /* md_render 会把 # / ## / ### 降两级输出为 h3 / h4 / h5；首行 h3 已移除，这里处理 h4（章）与 h5（节） */
+    $html = (string)preg_replace_callback('/<h([45])>(.*?)<\/h\1>/s', function ($m) use (&$toc, &$n) {
+        $n++;
+        $lvl = (int)$m[1];
+        $id = 'doc-sec-' . $n;
+        $text = trim(strip_tags($m[2]));
+        if ($text !== '') {
+            $toc[] = ['id' => $id, 'text' => $text, 'lvl' => $lvl];
+        }
+        return '<' . ($lvl === 4 ? 'h3' : 'h4') . ' class="' . ($lvl === 4 ? 'doc-sec' : 'doc-sub') . '" id="' . $id . '">' . $m[2] . '</' . ($lvl === 4 ? 'h3' : 'h4') . '>';
+    }, $html) ?? $html;
+    return [$html, $toc];
+}
+
+/** 协议摘要（协议中心卡片用）：去标题/引用/表格符号后的纯文本首段 */
+function doc_summary(string $body, int $max = 110): string
+{
+    $body = (string)preg_replace('/^#\s*[^\n]*\n+/', '', trim($body));
+    foreach (preg_split('/\n+/', $body) ?: [] as $line) {
+        $t = trim($line);
+        if ($t === '') {
+            continue;
+        }
+        $t = preg_replace('/^[>\-*\d.\s|]+/u', '', $t) ?? $t;
+        $t = str_replace(['**', '__', '`', '|'], '', $t);
+        $t = trim($t);
+        if ($t !== '') {
+            return cut_str($t, $max);
+        }
+    }
+    return '';
+}
+
+/** 当前访客的协议确认状态条（协议中心 / 门禁页共用；$gateOn=是否显示"未同意"警示态） */
+function doc_status_card(bool $gateOn): string
+{
+    $rec = doc_agree_record();
+    if ($rec === null) {
+        if (!$gateOn) {
+            return '';
+        }
+        return '<div class="doc-status"><span class="badge badge-warn">未同意</span>' .
+            '<span>您尚未确认当前版本的站点协议。协议用于说明双方的权利义务与数据用途，确认后即可正常浏览。</span></div>';
+    }
+    $t = (int)$rec['time'] > 0 ? '确认于 ' . fmt_time((int)$rec['time']) . '（' . gmdate('Y-m-d H:i', (int)$rec['time'] + 8 * 3600) . '）' : '确认时间：更早（升级前已同意）';
+    return '<div class="doc-status"><span class="badge badge-ok">已同意</span>' .
+        '<span>协议版本 <b>v' . e($rec['ver']) . '</b> · ' . e($t) . '</span>' .
+        '<span class="muted">记录载体：' . e($rec['via']) . '；协议内容更新后需重新确认</span></div>';
+}
+
+/** 协议同意表单（门禁页 / 文档页底部通用；$next=同意后回跳地址查询串） */
+function doc_agree_form(string $next = '', string $btnText = '确认并继续'): string
+{
+    return '<div class="card form-card doc-agree-card no-print"><form method="post" action="' . e(u('a=doc_agree')) . '">' . csrf_field() .
+        '<input type="hidden" name="next" value="' . e($next) . '">' .
+        '<label class="check"><input type="checkbox" name="agree" value="1" required> <b>我已仔细阅读并同意以上协议</b></label>' .
+        '<div class="form-foot"><span class="muted">确认会记录在本站 Cookie（一年内免重复确认）与登录会话中，协议内容更新后会再次提示</span>' .
+        '<button class="btn btn-primary" type="submit">' . e($btnText) . '</button></div></form></div>';
+}
+
+/**
+ * 协议门禁页（v1.18.0 重构）：独立全屏插屏，不再嵌在论坛壳里（此前侧栏"全部帖子"
+ * 仍在旁边，用户误以为协议长在帖子页）。仅展示协议与同意表单，同意后回到原目标页。
+ */
 function page_doc_gate(): void
 {
     $next = '';
@@ -808,20 +879,28 @@ function page_doc_gate(): void
             $next .= '&id=' . (int)$_GET['id'];
         }
     }
-    layout_header('请先确认并同意协议', 0);
-    echo page_head('请确认并同意以下协议', '同意后即可继续浏览（一年内无需重复确认；协议更新后会再次提示）。不同意将无法进入本站。');
-    foreach (doc_list() as $d) {
-        echo '<div class="card form-card"><h2 class="card-title">' . e($d['title']) . '</h2><div class="md doc-body">' . md_render($d['body']) . '</div></div>';
+    $siteName = (string)(cfg('site_name') ?? 'Cube Minimalist Forum');
+    doc_layout_header('欢迎使用 ' . $siteName, '在进入社区之前，请先阅读并同意以下协议（预计 3 分钟）');
+    echo doc_status_card(true);
+    echo '<div class="card doc-card gate-doc"><div class="doc-card-head"><h2>协议全文</h2>' .
+        '<span class="doc-tag">' . count(doc_list()) . ' 份</span>' .
+        '<span class="doc-meta"><span>点击标题可展开 / 折叠</span></span></div>';
+    $first = true;
+    foreach (doc_list() as $k => $d) {
+        [$html] = doc_render_body($d['body']);
+        echo '<details' . ($first ? ' open' : '') . '><summary>' . e($d['title']) . '<span class="muted" style="font-weight:400;font-size:12.5px">（' . u_strlen(trim((string)preg_replace('/^#\s*[^\n]*\n+/', '', $d['body']))) . ' 字）</span></summary>' .
+            '<div class="gate-doc-body"><div class="md doc-body">' . $html . '</div>' .
+            '<p><a class="btn btn-ghost btn-sm" href="' . e(u('p=doc&type=' . $k)) . '">独立大页面阅读 ' . e($d['title']) . ' ›</a></p></div></details>';
+        $first = false;
     }
-    echo '<div class="card form-card doc-agree-card"><form method="post" action="' . e(u('a=doc_agree')) . '">' . csrf_field() .
-        '<input type="hidden" name="next" value="' . e($next) . '">' .
-        '<label class="check"><input type="checkbox" name="agree" value="1" required> <b>我已仔细阅读并同意以上全部协议</b></label>' .
-        '<div class="form-foot"><span class="muted">点击「确认并继续」即代表您已理解并接受全部条款</span>' .
-        '<button class="btn btn-primary" type="submit">确认并继续</button></div></form></div>';
-    layout_footer();
+    echo '</div>';
+    echo doc_agree_form($next, '同意并进入 ' . $siteName);
+    echo '<div class="doc-status no-print"><span class="badge">暂不同意？</span>' .
+        '<span>不同意协议将无法进入本站。您可以随时回到本页重新考虑；如有疑问请联系站长。</span></div>';
+    doc_layout_footer();
 }
 
-/** 协议查看页：p=doc&type=terms|privacy|disclaimer；不带 type 时列出全部已启用协议 */
+/** 协议中心：p=doc（hub 总览）｜p=doc&type=terms|privacy|disclaimer（独立文档大页面，带 TOC / 版本 / 打印） */
 function page_doc(): void
 {
     $type = (string)($_GET['type'] ?? '');
@@ -829,25 +908,64 @@ function page_doc(): void
         $type = '';
     }
     $list = doc_list();
-    layout_header($type !== '' && isset($list[$type]) ? $list[$type]['title'] : '网站协议', 0);
+    $me = current_user();
+    $gateOn = (int)cfg('doc_gate', 0) === 1 && !($me && !empty($me['admin'])) && !doc_gate_passed();
+
+    /* ---- 文档大页面 ---- */
     if ($type !== '' && isset($list[$type])) {
-        echo page_head($list[$type]['title'], '协议内容由站点管理员维护，如有疑问请联系管理员');
-        echo '<div class="card form-card"><div class="md doc-body">' . md_render($list[$type]['body']) . '</div></div>';
-    } else {
-        echo page_head('网站协议', '以下为本站已启用的全部协议');
-        if (!$list) {
-            echo '<div class="card form-card">' . empty_state('站长还没有启用任何协议') . '</div>';
+        $d = $list[$type];
+        $upd = doc_updated($type);
+        [$html, $toc] = doc_render_body($d['body']);
+        doc_layout_header($d['title'], '协议中心 · 本页由站长维护，最后更新：' . ($upd > 0 ? gmdate('Y-m-d H:i', $upd + 8 * 3600) : '未记录') . ' · 版本 ' . strtoupper(substr(doc_fingerprint(), 0, 8)));
+        echo '<div class="doc-status no-print"><span class="doc-card-foot" style="padding:0;display:flex;gap:8px;flex-wrap:wrap">' .
+            '<a class="btn btn-ghost btn-sm" href="' . e(u('p=doc')) . '">‹ 返回协议中心</a>' .
+            '<button class="btn btn-ghost btn-sm" type="button" onclick="window.print()">打印 / 保存 PDF</button></span></div>';
+        echo '<div class="doc-grid"><div class="doc-sheet"><div class="md doc-body">' . $html . '</div></div>';
+        if ($toc) {
+            echo '<aside class="doc-toc no-print" aria-label="目录"><div class="doc-toc-title">目 录</div>';
+            foreach ($toc as $t) {
+                echo '<a class="' . ((int)$t['lvl'] === 5 ? 'lvl3' : '') . '" href="#' . e((string)$t['id']) . '">' . e((string)$t['text']) . '</a>';
+            }
+            echo '</aside>';
         }
-        foreach ($list as $k => $d) {
-            echo '<div class="card form-card"><h2 class="card-title"><a href="' . e(u('p=doc&type=' . $k)) . '">' . e($d['title']) . '</a></h2><div class="md doc-body">' . md_render($d['body']) . '</div></div>';
+        echo '</div>';
+        echo '<div style="height:14px"></div>';
+        echo doc_status_card($gateOn);
+        if ($gateOn) {
+            echo doc_agree_form('p=doc&type=' . $type, '确认并继续浏览');
         }
+        if (count($list) > 1) {
+            echo '<div class="doc-status no-print"><span class="muted">其他协议：</span>';
+            $links = [];
+            foreach ($list as $k => $x) {
+                if ($k !== $type) {
+                    $links[] = '<a href="' . e(u('p=doc&type=' . $k)) . '">' . e($x['title']) . '</a>';
+                }
+            }
+            echo implode(' · ', $links) . '</div>';
+        }
+        doc_layout_footer();
+        return;
     }
-    if ($list && (int)cfg('doc_gate', 0) === 1 && !doc_gate_passed()) {
-        echo '<div class="card form-card doc-agree-card"><form method="post" action="' . e(u('a=doc_agree')) . '">' . csrf_field() .
-            '<label class="check"><input type="checkbox" name="agree" value="1" required> <b>我已仔细阅读并同意以上协议</b></label>' .
-            '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">确认并继续浏览</button></div></form></div>';
+
+    /* ---- 协议中心 hub ---- */
+    doc_layout_header('协议中心', '这里汇总本站全部协议：您的权利义务、我们如何处理数据、以及双方的责任边界');
+    echo doc_status_card($gateOn);
+    if (!$list) {
+        echo '<div class="card form-card">' . empty_state('站长还没有启用任何协议') . '</div>';
     }
-    layout_footer();
+    foreach ($list as $k => $d) {
+        $upd = doc_updated($k);
+        echo '<div class="doc-card"><div class="doc-card-head"><h2>' . e($d['title']) . '</h2><span class="doc-tag">已启用</span>' .
+            '<span class="doc-meta"><span>' . u_strlen(trim((string)preg_replace('/^#\s*[^\n]*\n+/', '', $d['body']))) . ' 字</span>' .
+            '<span>' . ($upd > 0 ? '更新于 ' . fmt_time($upd) : '更新时间未记录') . '</span></span></div>' .
+            '<div class="doc-card-body"><p class="doc-card-summary">' . e(doc_summary($d['body'])) . '…</p></div>' .
+            '<div class="doc-card-foot"><a class="btn btn-primary btn-sm" href="' . e(u('p=doc&type=' . $k)) . '">阅读全文</a></div></div>';
+    }
+    if ($gateOn) {
+        echo doc_agree_form('p=doc', '确认并继续浏览');
+    }
+    doc_layout_footer();
 }
 
 /** @ 提及补全数据源（v1.16.0）：登录用户可用，按关键词过滤用户名，JSON 输出 */
