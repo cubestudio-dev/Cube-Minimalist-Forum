@@ -54,7 +54,7 @@ function page_admin(): void
 /* ---------------- 基本 ---------------- */
 function admin_tab_basic(): void
 {
-    echo '<div class="card form-card"><form method="post" action="' . e(u('a=admin_save_basic')) . '">' . csrf_field() .
+    echo '<div class="card form-card"><form method="post" action="' . e(u('a=admin_save_basic')) . '" data-ajax="1" data-ajax-live="brand">' . csrf_field() .
         '<label class="field"><span class="field-l">论坛名称</span><input class="input" name="site_name" required maxlength="30" value="' . e((string)cfg('site_name')) . '"></label>' .
         '<label class="field"><span class="field-l">论坛简介</span><input class="input" name="site_desc" maxlength="100" value="' . e((string)cfg('site_desc')) . '"></label>' .
         '<label class="field"><span class="field-l">站点地址（可选）</span><input class="input" name="site_url" type="url" maxlength="200" placeholder="https://" value="' . e((string)cfg('site_url')) . '"></label>' .
@@ -105,7 +105,7 @@ function admin_tab_feat(): void
         'ai_autopilot' => ['AI 自主管理', 'AI 无人值守巡逻：自主封禁风险 IP / 解除误封 / 邮件警报管理员；间隔与红线在「安全防护」页配置'],
     ];
     echo '<div class="card form-card"><h2 class="card-title">功能总开关</h2><p class="muted">勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。</p>' .
-        '<form method="post" action="' . e(u('a=admin_save_feat')) . '">' . csrf_field();
+        '<form method="post" action="' . e(u('a=admin_save_feat')) . '" data-ajax="1">' . csrf_field();
     foreach ($items as $k => [$name, $desc]) {
         $on = feat_on($k);
         echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
@@ -258,18 +258,27 @@ function admin_tab_docs(): void
         'doc_disclaimer' => ['免责声明', '本站对用户发布内容的免责说明。UGC 站点建议填写'],
     ];
     echo '<div class="card form-card"><h2 class="card-title">协议管理</h2>' .
-        '<p class="muted">填写内容后即自动启用该协议：出现在注册页确认、协议门禁与页脚入口（按下方开关）。支持直接输入多行纯文本；URL 会自动变成可点击链接。</p>' .
-        '<form method="post" action="' . e(u('a=admin_save_docs')) . '">' . csrf_field();
+        '<p class="muted">填写内容后即自动启用该协议：出现在注册页确认、协议门禁与页脚入口（按下方开关）。支持直接输入多行纯文本；URL 会自动变成可点击链接。没有现成文案？点每栏的「填入内置模板」一键生成，替换其中的【站名】【站长邮箱】后保存即可。</p>' .
+        '<form method="post" action="' . e(u('a=admin_save_docs')) . '" data-ajax="1">' . csrf_field();
+    $tpls = doc_templates();
     foreach ($defs as $key => [$name, $desc]) {
+        $tk = substr($key, 4); // 模板短键：doc_terms → terms（与 doc_templates()/前端占位节点一致）
         echo '<label class="field"><span class="field-l">' . e($name) . '</span>' .
             '<textarea class="input" name="' . $key . '" rows="6" placeholder="（留空 = 未启用）\n' . e($desc) . '" style="min-height:110px">' . e((string)cfg($key, '')) . '</textarea>' .
-            '<span class="hint">' . e($desc) . '</span></label>';
+            '<span class="hint">' . e($desc) . '</span>' .
+            '<span class="doc-tpl-row"><button class="btn btn-ghost btn-sm" type="button" data-doc-tpl="' . $tk . '">填入内置模板</button></span>' .
+            '</label>';
     }
     echo '<label class="check"><input type="hidden" name="doc_gate" value="0"><input type="checkbox" name="doc_gate" value="1"' . (!empty(cfg('doc_gate', 0)) ? ' checked' : '') . '> <b>访问门禁</b> —— 开启后，未同意协议的访客打开网站任何页面时，都会先看到「请阅读并同意协议」页面，不同意无法进入（登录、注册、协议页除外；管理员不受限，避免把自己锁在门外）。协议内容每次修改后，已同意的用户需重新确认一次</label>' .
         '<label class="check"><input type="hidden" name="doc_footer" value="0"><input type="checkbox" name="doc_footer" value="1"' . (!empty(cfg('doc_footer', 0)) ? ' checked' : '') . '> <b>页脚入口</b> —— 在网站页脚显示「用户协议 / 隐私政策 / 免责声明」查看入口</label>' .
         '<div class="form-foot"><button class="btn btn-primary" type="submit">保存协议设置</button></div>' .
         '</form>' .
-        '<p class="hint">注册页的强制勾选自动生效：只要对应协议已填写，新用户注册时必须勾选「我已阅读并同意」才能提交。</p></div>';
+        '<p class="hint">注册页的强制勾选自动生效：只要对应协议已填写，新用户注册时必须勾选「我已阅读并同意」才能提交。</p>';
+    /* 内置模板（v1.17.0）：以 text/plain 节点随页携带，前端一键填入，不额外发请求 */
+    foreach ($tpls as $key => $tpl) {
+        echo '<script type="text/plain" id="doc-tpl-' . e($key) . '" hidden>' . e($tpl) . '</script>';
+    }
+    echo '</div>';
 }
 
 /* ---------------- 板块 ---------------- */
@@ -544,7 +553,7 @@ function admin_tab_theme(): void
         '<label class="field"><span class="field-l">上传新图标</span><input class="input" type="file" name="icon" accept=".png,.jpg,.jpeg,.webp,.gif,.ico,.svg" required>' .
         '<span class="hint">支持 PNG / JPG / WEBP / GIF / ICO / SVG；不超过 200KB，建议 256×256 以上；上传后浏览器可能需要强制刷新才能看到新图标</span></label>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">上传图标</button></div></form></div>';
-    echo '<div class="card form-card"><h2 class="card-title">颜色与页脚</h2><form method="post" action="' . e(u('a=admin_save_theme')) . '">' . csrf_field() .
+    echo '<div class="card form-card"><h2 class="card-title">颜色与页脚</h2><form method="post" action="' . e(u('a=admin_save_theme')) . '" data-ajax="1" data-ajax-live="accent">' . csrf_field() .
         '<div class="field"><span class="field-l">主题色</span><div class="palette">';
     foreach ($palette as $p) {
         echo '<label class="swatch" style="background:' . e($p) . '"><input type="radio" name="theme_color" value="' . e($p) . '"' . (strcasecmp($cur, $p) === 0 ? ' checked' : '') . ' aria-label="' . e($p) . '"></label>';
@@ -833,7 +842,7 @@ function admin_tab_logs(): void
     [$lf, $lb] = log_stats();
     echo '<div class="card form-card"><div class="list-head"><h2 class="card-title">日志设置</h2>' .
         '<span class="muted">共 ' . $lf . ' 个日志文件 · ' . e(fmt_bytes($lb)) . '</span></div>' .
-        '<form method="post" action="' . e(u('a=admin_logs_settings')) . '" class="inline-form">' . csrf_field() .
+        '<form method="post" action="' . e(u('a=admin_logs_settings')) . '" class="inline-form" data-ajax="1">' . csrf_field() .
         '<label class="field"><span class="field-l">日志保留天数（0 = 永久）</span><input class="input" type="number" name="log_days" min="0" max="3650" value="' . (int)cfg('log_days', 90) . '" style="max-width:170px"></label>' .
         '<label class="field"><span class="field-l">记录页面访问（含游客）</span><select class="input" name="log_views" style="max-width:170px">' .
         '<option value="0"' . ((int)cfg('log_views', 0) === 0 ? ' selected' : '') . '>关闭</option>' .
@@ -1054,7 +1063,7 @@ function admin_tab_security(): void
         $atkLast = '尚未触发过。';
     }
     echo '<div class="card form-card"><h2 class="card-title">攻击告警（自动邮件）</h2>' .
-        '<form method="post" action="' . e(u('a=admin_save_attack')) . '">' . csrf_field() .
+        '<form method="post" action="' . e(u('a=admin_save_attack')) . '" data-ajax="1">' . csrf_field() .
         '<div class="grid2">' .
         '<label class="field"><span class="field-l">攻击告警邮件</span><select name="fw_atk_alert_on" class="input">' .
         '<option value="1"' . ($atkOn ? ' selected' : '') . '>开启（推荐）</option>' .
@@ -1070,7 +1079,7 @@ function admin_tab_security(): void
 
     /* ---- 防护设置（限流 / 策略 / 白名单 / 代理） ---- */
     echo '<div class="card form-card"><h2 class="card-title">限流与自动策略</h2>' .
-        '<form method="post" action="' . e(u('a=admin_fw_save')) . '">' . csrf_field() .
+        '<form method="post" action="' . e(u('a=admin_fw_save')) . '" data-ajax="1">' . csrf_field() .
         '<input type="hidden" name="fw_on" value="' . ($on ? '1' : '0') . '">';
     echo '<div class="grid2">';
     echo '<label class="field"><span class="field-l">访问限流</span><select name="fw_rl_on" class="input">' .
@@ -1160,7 +1169,7 @@ function admin_tab_security(): void
         }
         echo '</div>';
     }
-    echo '<form method="post" action="' . e(u('a=admin_fw_intel_save')) . '">' . csrf_field() . '<div class="grid2">';
+    echo '<form method="post" action="' . e(u('a=admin_fw_intel_save')) . '" data-ajax="1">' . csrf_field() . '<div class="grid2">';
     echo '<label class="field"><span class="field-l">危险 IP 库拦截</span><select name="fw_intel_on" class="input">' .
         '<option value="1"' . ((int)cfg('fw_intel_on', 1) === 1 ? ' selected' : '') . '>开启</option><option value="0"' . ((int)cfg('fw_intel_on', 1) !== 1 ? ' selected' : '') . '>关闭</option></select></label>';
     echo '<label class="field"><span class="field-l">自动同步间隔（小时）</span><input class="input" type="number" name="fw_intel_hours" min="1" max="168" value="' . (int)cfg('fw_intel_hours', 24) . '"></label>';
@@ -1211,11 +1220,31 @@ function admin_tab_security(): void
     unset($ipTmp);
     $geoTop = array_slice(fw_geo_distribution($ips), 0, 8, true);
 
-    echo '<div class="card form-card"><div class="list-head"><h2 class="card-title">访问统计（每个 IP 的请求次数与归属地）</h2>' .
+    /* v1.17.0 新增图表：客户端分布（解析 UA）与 IP 状态分布（正常 / 封禁 / 白名单） */
+    $uaTop = [];
+    $stTop = ['正常' => 0, '封禁中' => 0, '白名单' => 0];
+    foreach ($ips as $ipS => $rS) {
+        $uaTop[fw_ua_family((string)($rS['ua'] ?? ''))] =
+            ($uaTop[fw_ua_family((string)($rS['ua'] ?? ''))] ?? 0) + (int)($rS['c'] ?? 0);
+        $bS = fw_is_banned((string)$ipS);
+        $wlS = !empty($rS['wl']) || fw_whitelisted((string)$ipS);
+        if ($bS) {
+            $stTop['封禁中']++;
+        } elseif ($wlS) {
+            $stTop['白名单']++;
+        } else {
+            $stTop['正常']++;
+        }
+    }
+    arsort($uaTop);
+    $uaTop = array_slice($uaTop, 0, 8, true);
+    $stTop = array_filter($stTop);
+
+    echo '<div class="card form-card wide-card"><div class="list-head"><h2 class="card-title">访问统计（每个 IP 的请求次数与归属地）</h2>' .
         '<span class="muted">共 ' . $ipTotal . ' 个活跃 IP · ' .
         '<a class="fw-link' . ($sort === 'time' ? ' on' : '') . '" href="' . e(u('p=admin&tab=security&ssort=time')) . '">最近活跃</a> · ' .
         '<a class="fw-link' . ($sort === 'req' ? ' on' : '') . '" href="' . e(u('p=admin&tab=security&ssort=req')) . '">请求最多</a></span></div>';
-    if ($ipTop || $geoTop) {
+    if ($ipTop || $geoTop || $uaTop || $stTop) {
         echo '<div class="chart-grid2">';
         echo '<div><h3 class="chart-title">请求最多的 IP' . (count($ipTop) >= 10 ? ' Top 10' : '') . '</h3>' .
             ($ipTop
@@ -1225,13 +1254,21 @@ function admin_tab_security(): void
             ($geoTop
                 ? chart_bars_h($geoTop, ['label' => '各归属地请求次数分布', 'tip' => function ($l, $v) { return $l . '：' . $v . ' 次请求'; }])
                 : empty_state('归属地尚未查询：点下方「查询本页归属地」后自动生成分布图')) . '</div>';
+        echo '<div><h3 class="chart-title">客户端分布（按请求次数）</h3>' .
+            ($uaTop
+                ? chart_bars_h($uaTop, ['label' => '各浏览器与客户端的请求次数分布', 'tip' => function ($l, $v) { return $l . '：' . $v . ' 次请求'; }])
+                : empty_state('暂无数据')) . '</div>';
+        echo '<div><h3 class="chart-title">IP 状态分布（按数量）</h3>' .
+            ($stTop
+                ? chart_bars_h($stTop, ['label' => '正常 / 封禁中 / 白名单 IP 数量分布', 'tip' => function ($l, $v) { return $l . '：' . $v . ' 个 IP'; }])
+                : empty_state('暂无数据')) . '</div>';
         echo '</div>';
     }
-    echo '<div class="table-wrap"><table class="log-table"><thead><tr>' .
-        '<th>IP</th><th>请求数</th><th>404</th><th>最近活动</th><th>UA / 归属地</th><th>状态</th><th>操作</th>' .
-        '</tr></thead><tbody>';
+
+    /* v1.17.0：单列长表改为响应式多列卡片网格——一屏可见十几个 IP，不再需要无尽下滚 */
+    echo '<div class="ip-grid">';
     if (!$ipRows) {
-        echo '<tr><td colspan="7">' . empty_state('暂无访问数据（随访问自动统计）') . '</td></tr>';
+        echo empty_state('暂无访问数据（随访问自动统计）');
     }
     foreach ($ipRows as $ip => $r) {
         $banned = fw_is_banned((string)$ip);
@@ -1241,14 +1278,16 @@ function admin_tab_security(): void
             : ($wl ? '<span class="badge badge-accent">白名单</span>'
                 : '<span class="badge badge-ok">正常</span>');
         $banLeft = $banned ? ((int)($banned['until'] ?? 0) > 0 ? '至 ' . date('m-d H:i', (int)$banned['until']) : '永久') : '';
-        echo '<tr>' .
-            '<td class="nowrap"><b>' . e((string)$ip) . '</b></td>' .
-            '<td>' . (int)($r['c'] ?? 0) . '</td>' .
-            '<td>' . ((int)($r['f'] ?? 0) > 0 ? '<span class="muted" style="color:var(--warn)">' . (int)$r['f'] . '</span>' : '0') . '</td>' .
-            '<td class="nowrap muted">' . ((int)($r['l'] ?? 0) > 0 ? e(fmt_time((int)$r['l'])) : '-') . '</td>' .
-            '<td class="log-detail">' . e((string)($r['ua'] ?? '')) . '<br><span class="muted" data-fw-geo-for="' . e((string)$ip) . '">' . ($geo ? e(fw_geo_label($geo)) : '归属地未查询') . '</span></td>' .
-            '<td class="nowrap">' . $state . ($banned ? '<br><span class="muted">' . e($banLeft) . '</span>' : '') . '</td>' .
-            '<td class="nowrap">';
+        $uaTxt = trim((string)($r['ua'] ?? ''));
+        echo '<div class="ip-card' . ($banned ? ' is-banned' : '') . '">' .
+            '<div class="ip-card-top"><b class="ip-card-ip">' . e((string)$ip) . '</b>' . $state . '</div>' .
+            '<div class="ip-card-nums">请求 <b>' . (int)($r['c'] ?? 0) . '</b>' .
+            ' · 404 <b' . ((int)($r['f'] ?? 0) > 0 ? ' class="ip-404"' : '') . '>' . (int)($r['f'] ?? 0) . '</b>' .
+            ' · ' . ((int)($r['l'] ?? 0) > 0 ? e(fmt_time((int)$r['l'])) : '无活动') .
+            ($banned ? ' · <span class="muted">' . e($banLeft) . '</span>' : '') . '</div>' .
+            '<div class="ip-card-ua" title="' . e($uaTxt) . '">' . ($uaTxt !== '' ? e(cut_str($uaTxt, 60)) : 'UA 未知') . '</div>' .
+            '<div class="ip-card-geo muted" data-fw-geo-for="' . e((string)$ip) . '">' . ($geo ? e(fw_geo_label($geo)) : '归属地未查询') . '</div>' .
+            '<div class="ip-card-ops">';
         if ($banned) {
             echo '<form method="post" action="' . e(u('a=admin_fw_unban')) . '" class="inline">' . csrf_field() .
                 '<input type="hidden" name="ip" value="' . e((string)$ip) . '">' .
@@ -1258,9 +1297,9 @@ function admin_tab_security(): void
                 '<input type="hidden" name="ip" value="' . e((string)$ip) . '"><input type="hidden" name="dur" value="1440"><input type="hidden" name="reason" value="后台手动封禁">' .
                 '<button class="btn btn-ghost btn-sm danger" type="submit">封禁24h</button></form>';
         }
-        echo '</td></tr>';
+        echo '</div></div>';
     }
-    echo '</tbody></table></div>';
+    echo '</div>';
     echo '<button class="btn btn-ghost btn-sm" type="button" data-fw-geo>查询本页归属地（免key接口，未查询到的才会请求）</button> ';
     echo '<span class="muted" id="fw-geo-msg"></span>';
     echo paginate($ipTotal, $ipPer, $ipPage, 'p=admin&tab=security&ssort=' . $sort, 'ippage');

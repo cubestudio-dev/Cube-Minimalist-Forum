@@ -48,9 +48,10 @@ $p = isset($_GET['p']) && is_string($_GET['p']) ? preg_replace('/[^a-z_]/', '', 
 require_once __DIR__ . '/src/pages.php';
 require_once __DIR__ . '/src/admin.php';
 
-/* 私密论坛模式（v1.14.0）：后台关闭「游客可浏览」时，未登录仅允许 登录 / 注册 / 找回密码 与图标资源 */
+/* 私密论坛模式（v1.14.0）：后台关闭「游客可浏览」时，未登录仅允许 登录 / 注册 / 找回密码 / 图标资源 /
+   协议页（协议门禁页需要能查看协议，否则同开会锁死访客）与 v1.17.0 的 ping / asset 资源端点 */
 if (!feat_on('guest_browse') && !current_user()
-    && !in_array($p === '' ? 'home' : $p, ['login', 'register', 'forgot', 'icon'], true)) {
+    && !in_array($p === '' ? 'home' : $p, ['login', 'register', 'forgot', 'icon', 'doc', 'ping', 'asset'], true)) {
     flash('err', '本论坛仅限注册用户浏览，请先登录');
     redirect(u('p=login'));
 }
@@ -79,13 +80,23 @@ switch ($p === '' ? 'home' : $p) {
     case 'announcements': page_announcements(); break;
     case 'doc':           page_doc(); break;
     case 'mention_api':   page_mention_api(); break;
+    case 'ping':          page_ping(); break;
+    case 'asset':         page_asset(); break;
     case 'admin':         page_admin(); break;
     default:              page_404();
 }
 
 /* AI 审核队列：随访问按需触发（每次至多处理一条，非阻塞锁防并发）
- * AI 自主管理（严全面）：常驻巡逻器不在线时，由访问惰性触发巡逻（有事件才调用 AI，零浪费） */
+ * AI 自主管理（严全面）：常驻巡逻器不在线时，由访问惰性触发巡逻（有事件才调用 AI，零浪费）
+ * v1.17.0：先冲刷输出 + 释放会话文件锁，再跑 AI ——
+ * 此前 AI 审核在关机阶段执行时会一直持有当前用户的会话锁，同一用户接下来的
+ * 页面请求会被会话锁阻塞到 AI 调用结束，表现为“部分页面打开很慢/卡”。 */
 register_shutdown_function(function () {
+    @session_write_close();
+    while (ob_get_level() > 0) {
+        @ob_end_flush();
+    }
+    @flush();
     ai_process_queue(false);
     ai_autopilot_tick();
 });

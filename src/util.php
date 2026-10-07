@@ -46,9 +46,19 @@ function ua(string $path): string
     return $path . (strpos($path, '?') === false ? '?' : '&') . 'XTransformPort=' . $p;
 }
 
-/** 跳转（强制剥离换行符，杜绝任何输入拼入 Location 造成的响应拆分风险） */
+/** 跳转（强制剥离换行符，杜绝任何输入拼入 Location 造成的响应拆分风险）
+ *  v1.17.0：AJAX 表单提交时不再跳转，直接以 JSON 返回 Flash 消息——
+ *  配合前端 form[data-ajax] 免刷新保存；所有动作共用此安全网，无需逐个改造 */
 function redirect(string $url): void
 {
+    if (function_exists('is_ajax') && is_ajax()) {
+        $f = take_flash();
+        json_response([
+            'ok'   => !$f || $f['t'] !== 'err',
+            'msg'  => (string)($f['m'] ?? '操作完成'),
+            'type' => (string)($f['t'] ?? 'ok'),
+        ]);
+    }
     header('Location: ' . str_replace(["\r", "\n", "\0"], '', (string)$url));
     exit;
 }

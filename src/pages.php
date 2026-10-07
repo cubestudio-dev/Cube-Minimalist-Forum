@@ -277,9 +277,9 @@ function page_new(): void
         echo '<option value="' . (int)$b['id'] . '"' . ($pre === (int)$b['id'] ? ' selected' : '') . '>' . e((string)$b['name']) . '</option>';
     }
     echo '</select></label>' .
-        '<label class="field"><span class="field-l">标题 <em class="cnt"><i id="t-count">0</i>/30</em></span>' .
+        '<label class="field"><span class="field-l">标题 <span class="cnt"><span id="t-count">0</span>/30</span></span>' .
         '<input class="input" name="title" id="title-input" maxlength="30" required data-counter="#t-count" value="' . e($dt) . '" placeholder="一句话说清主题"></label>' .
-        '<label class="field"><span class="field-l">正文 <em class="cnt"><i id="c-count">0</i>/1500</em></span>' .
+        '<label class="field"><span class="field-l">正文 <span class="cnt"><span id="c-count">0</span>/1500</span></span>' .
         '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1500" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮==；@用户名 会通知对方">' . e($dc) . '</textarea></label>' .
         '<div class="form-foot"><span class="muted">两次发帖间隔不低于 ' . (int)cfg('post_interval', 30) . ' 秒</span>' .
         '<button class="btn btn-primary" type="submit">发布</button></div></form></div>';
@@ -725,6 +725,58 @@ function page_icon(): void
         // 纵深防御：即使存在漏检的脚本，CSP sandbox 也使其无法执行
         header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox");
     }
+    readfile($p);
+    exit;
+}
+
+/* ---------------- v1.17.0：Ping 端点（侧栏延迟显示） ---------------- */
+function page_ping(): void
+{
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode(['pong' => 1, 't' => time()]);
+    exit;
+}
+
+/* ---------------- v1.17.0：静态资源端点（显式强缓存头） ----------------
+ * PHP 内置服务器（php -S）不读 .htaccess，此前的 assets/*.js|css 是裸响应、
+ * 无 Cache-Control，浏览器只能启发式缓存，二次访问也会重复下载，
+ * 是“部分页面加载慢/卡”的直接原因之一；改由 PHP 出响应可保证在一切环境下都有
+ * ETag + 一年期 immutable 强缓存（URL 自带版本号，升级自动失效），命中 If-None-Match 直接 304。 */
+function page_asset(): void
+{
+    $f = (string)($_GET['f'] ?? '');
+    $allow = [
+        'app.js'                => ['text/javascript; charset=UTF-8', 'assets/app.js'],
+        'style.css'             => ['text/css; charset=UTF-8', 'assets/style.css'],
+        'favicon.svg'           => ['image/svg+xml', 'assets/favicon.svg'],
+        'favicon.ico'           => ['image/x-icon', 'assets/favicon.ico'],
+        'apple-touch-icon.png'  => ['image/png', 'assets/apple-touch-icon.png'],
+    ];
+    if (!isset($allow[$f])) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'asset not found';
+        exit;
+    }
+    [$mime, $rel] = $allow[$f];
+    $p = dirname(DATA_DIR) . '/' . $rel;
+    if (!is_file($p)) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'asset not found';
+        exit;
+    }
+    $etag = '"' . app_version() . '-' . $f . '-' . (int)@filesize($p) . '"';
+    header('ETag: ' . $etag);
+    header('Cache-Control: public, max-age=31536000, immutable');
+    header('X-Content-Type-Options: nosniff');
+    if (($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) {
+        http_response_code(304);
+        exit;
+    }
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . (string)filesize($p));
     readfile($p);
     exit;
 }

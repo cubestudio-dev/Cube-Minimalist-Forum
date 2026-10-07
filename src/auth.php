@@ -7,7 +7,9 @@ defined('APP') or exit('Forbidden');
 /* ---------------- 用户读写 ---------------- */
 function user_all(): array
 {
-    $us = Store::read('users.php', []);
+    /* v1.17.0：请求级缓存——列表页每张帖子卡都会经 uname() 查用户，
+       此前每张卡都完整读一次 users.php（gz 解压 + JSON 解析），卡顿主因之一 */
+    $us = Store::readMemo('users.php', []);
     return is_array($us) ? $us : [];
 }
 

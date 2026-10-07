@@ -16,6 +16,8 @@ class Store
     public static $lastWriteError = null;
     /** 本次请求累计写入失败次数（用于启动自检与友好错误提示） */
     public static $writeFailures = 0;
+    /** v1.17.0 请求级读取缓存：rel => 数据；write() 成功后自动同步，取锁时全部失效（保证锁内读到最新落盘值） */
+    private static array $memo = [];
 
     public static function path(string $rel): string
     {
@@ -196,6 +198,21 @@ class Store
         return is_file(self::path($rel));
     }
 
+    /**
+     * v1.17.0 请求级缓存读取：同一请求内对同一文件只做一次磁盘读 + gz 解压 + JSON 解析。
+     * 页面渲染时 user_all()/board_all()/thread_get() 等热点读会在单页内重复几十次，
+     * 此前每次都完整走一遍文件 IO，是列表页卡顿的主因之一。
+     * 一致性由两个钩子保证：write() 成功后同步更新缓存；lock()/tryLock() 取锁时清空全部缓存
+     * （所有“读-改-写”临界区都先取锁，因此锁内读到的必然是磁盘最新值，不会回写旧数据）。
+     */
+    public static function readMemo(string $rel, $def = null)
+    {
+        if (!array_key_exists($rel, self::$memo)) {
+            self::$memo[$rel] = self::read($rel, $def);
+        }
+        return self::$memo[$rel];
+    }
+
     public static function read(string $rel, $def = null)
     {
         $p = self::path($rel);
@@ -289,10 +306,14 @@ class Store
         $payload = DATA_GUARD . (is_string($bin) && $bin !== '' ? $bin : $json);
         $err = '';
         $ok = self::writeTmp($tmp, $payload, $p, $err);
+        if ($ok) {
+            self::$memo[$rel] = $data; // v1.17.0：写后同步缓存，同请求内后续读免 IO
+        }
         if (!$ok) {
             // 首次失败：先尝试目录自愈（建目录 / 修权限 / 重建空目录），再重试一次
             $firstErr = $err;
             if (self::repairDir(dirname($rel)) && self::writeTmp($tmp, $payload, $p, $err)) {
+                self::$memo[$rel] = $data;
                 return true;
             }
             @unlink($tmp);
@@ -332,11 +353,19 @@ class Store
         if (is_file($p)) {
             @unlink($p);
         }
+        unset(self::$memo[$rel]);
+    }
+
+    /** v1.17.0：清空请求级缓存（取锁时调用——进入临界区后必须读磁盘最新值） */
+    public static function memoFlushAll(): void
+    {
+        self::$memo = [];
     }
 
     /** 阻塞式命名锁（带超时），返回锁句柄或 false（锁不可用时降级放行，不阻断业务） */
     public static function lock(string $name, int $timeout = 5)
     {
+        self::memoFlushAll(); // v1.17.0：进入临界区前弃缓存，保证锁内读到最新落盘值
         self::ensureDir('locks');
         $fp = @fopen(self::path('locks/' . $name . '.lock'), 'c');
         if (!$fp) {
@@ -366,6 +395,7 @@ class Store
     /** 非阻塞尝试锁：拿到返回句柄，拿不到立即返回 false */
     public static function tryLock(string $name)
     {
+        self::memoFlushAll();
         self::ensureDir('locks');
         $fp = @fopen(self::path('locks/' . $name . '.lock'), 'c');
         if ($fp && @flock($fp, LOCK_EX | LOCK_NB)) {
@@ -396,8 +426,10 @@ class Store
 }
 
 /**
- * 极简 ZIP 生成器（仅 store 模式、零依赖）
- * 用于「一键备份数据目录」，不依赖 ZipArchive 扩展。
+ * 极简 ZIP 生成器（零依赖）
+ * 用于「一键备份数据目录」与更新前自动备份，不依赖 ZipArchive 扩展。
+ * v1.17.0：逐条尝试 deflate 压缩（gzdeflate），压不小再原样存储（method 0）——
+ * 数据目录以中文 JSON 文本为主，备份包体积通常 -50%～-80%。
  */
 class MiniZip
 {
@@ -422,10 +454,22 @@ class MiniZip
             }
             $crc = crc32($data);
             $sz = strlen($data);
-            $head = pack('VvvvvvVVVvv', 0x04034b50, 20, 0x0800, 0, $dtime, $ddate, $crc, $sz, $sz, strlen($name), 0) . $name;
-            $local .= $head . $data;
-            $central .= pack('VvvvvvvVVVvvvvvVV', 0x02014b50, 20, 20, 0x0800, 0, $dtime, $ddate, $crc, $sz, $sz, strlen($name), 0, 0, 0, 0, 0, $offset) . $name;
-            $offset += strlen($head) + $sz;
+            $method = 0;
+            $payload = $data;
+            if ($sz > 0) {
+                $def = @gzdeflate($data, 6);
+                if (is_string($def) && $def !== '' && strlen($def) < $sz) {
+                    $method = 8;
+                    $payload = $def;
+                }
+            }
+            $csize = strlen($payload);
+            $head = pack('VvvvvvVVVvv', 0x04034b50, 20, 0x0800, $method, $dtime, $ddate, $crc, $csize, $sz, strlen($name), 0) . $name;
+            $local .= $head . $payload;
+            /* 中央目录 17 个字段：sig / made / need / flags / method / time / date /
+               crc / csize / usize / namelen / extralen / commentlen / diskstart / intattr / extattr / offset */
+            $central .= pack('VvvvvvvVVVvvvvvVV', 0x02014b50, 20, 20, 0x0800, $method, $dtime, $ddate, $crc, $csize, $sz, strlen($name), 0, 0, 0, 0, 0, $offset) . $name;
+            $offset += strlen($head) + $csize;
             $n++;
         }
         $eocd = pack('VvvvvVVv', 0x06054b50, 0, 0, $n, $n, strlen($central), $offset, 0);

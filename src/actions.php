@@ -254,11 +254,14 @@ function act_admin_data_compress(): void
             $n++;
         }
     }
-    $saved = max(0, $before - $after);
+    /* v1.17.0：同时压缩存量日志（昨天及更早的 log-*.php / fw-*.php） */
+    [$ln, $lsaved] = log_compress_old(200);
+    $n += $ln;
+    $saved = max(0, $before - $after) + $lsaved;
     $msg = $n > 0
-        ? '压缩完成：' . $n . ' 个数据文件，共节省 ' . round($saved / 1024, 1) . ' KB'
-        : '所有数据文件均已是压缩格式，无需处理';
-    log_action('admin_data_compress', '数据压缩：' . $n . ' 个文件，' . round($before / 1024, 1) . 'KB → ' . round($after / 1024, 1) . 'KB，节省 ' . round($saved / 1024, 1) . 'KB', (int)$me['id']);
+        ? '压缩完成：' . $n . ' 个文件（含日志 ' . $ln . ' 个），共节省 ' . round($saved / 1024, 1) . ' KB'
+        : '所有数据与日志文件均已是压缩格式，无需处理';
+    log_action('admin_data_compress', '数据压缩：' . $n . ' 个文件（日志 ' . $ln . '），节省 ' . round($saved / 1024, 1) . 'KB', (int)$me['id']);
     if (is_ajax()) {
         json_response(['ok' => true, 'msg' => $msg]);
     }

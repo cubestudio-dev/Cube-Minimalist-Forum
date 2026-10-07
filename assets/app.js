@@ -651,7 +651,7 @@
     try { sessionStorage.removeItem(KEY); } catch (e) {}
   })();
 
-  /* ---------- v1.16.0：注销账号 10 秒冷静期倒计时 ---------- */
+  /* ---------- v1.17.0：注销账号 10 秒冷静期倒计时 ---------- */
   (function () {
     var btn = $('#del-go');
     if (!btn) return;
@@ -671,4 +671,102 @@
       }
     }, 1000);
   })();
+
+  /* ---------- v1.17.0：侧栏 Ping（浏览器到服务器的往返延迟） ----------
+     每 15 秒向 p=ping 发一次空请求，用 performance.now() 差值测算 RTT；
+     页面切到后台自动暂停；<100ms 绿色 / <300ms 琥珀 / 其余红色。 */
+  (function () {
+    var el = $('#pingVal');
+    if (!el) return;
+    var block = el.closest('.side-ping');
+    function measure() {
+      if (document.hidden) return;
+      var t0 = performance.now();
+      fetch(apiUrl('p=ping'), { credentials: 'same-origin', cache: 'no-store' })
+        .then(function () {
+          var rtt = Math.round(performance.now() - t0);
+          el.textContent = String(rtt);
+          if (block) {
+            block.classList.remove('ping-ok', 'ping-mid', 'ping-bad');
+            block.classList.add(rtt < 100 ? 'ping-ok' : (rtt < 300 ? 'ping-mid' : 'ping-bad'));
+          }
+        })
+        .catch(function () { el.textContent = '--'; });
+    }
+    measure();
+    setInterval(measure, 15000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) measure();
+    });
+  })();
+
+  /* ---------- v1.17.0：设置表单免刷新保存（form[data-ajax]） ----------
+     提交后不再整页跳转：服务端所有动作用 redirect() 返回前会先走 is_ajax()
+     分支把 Flash 消息转成 JSON，这里弹出 Toast 即完成，滚动位置原样保留。
+     仅用于"保存后页面内容不变"的设置类表单；会改变列表内容的操作（封禁、
+     删除、板块管理等）仍走整页回跳以反映最新状态。 */
+  document.addEventListener('submit', function (ev) {
+    var f = ev.target;
+    if (!f || !f.matches || !f.matches('form[data-ajax]')) return;
+    ev.preventDefault();
+    var btn = f.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    fetch(f.getAttribute('action'), {
+      method: 'POST',
+      body: new FormData(f),
+      credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'fetch' }
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (btn) btn.disabled = false;
+      var ok = !!(res && res.ok);
+      toast((res && res.msg) || (ok ? '已保存' : '保存失败'));
+      if (ok && f.hasAttribute('data-ajax-live')) applyLive(f); // 基本设置 / 主题：保存后页面即时生效
+    }).catch(function () {
+      if (btn) btn.disabled = false;
+      toast('网络错误，请重试');
+    });
+  });
+
+  /* v1.17.0：基本设置 / 主题保存后，把可见的配置即时应用到当前页面（免刷新可见） */
+  function applyLive(f) {
+    var a = f.getAttribute('data-ajax-live');
+    if (a === 'brand') {
+      var nameI = f.querySelector('[name="site_name"]');
+      var descI = f.querySelector('[name="site_desc"]');
+      var brand = document.querySelector('.brand b');
+      if (brand && nameI && nameI.value.trim() !== '') brand.textContent = nameI.value.trim();
+      var desc = document.querySelector('.brand-desc');
+      if (desc && descI) desc.textContent = descI.value;
+    } else if (a === 'accent') {
+      var color = '';
+      var checked = f.querySelector('[name="theme_color"]:checked');
+      if (checked && /^#[0-9a-fA-F]{3,8}$/.test(checked.value)) color = checked.value;
+      /* 取色器仅在“用户真的改了它”（与当前主题色不同）时生效——与服务端 theme_pick_color 同规则，
+         否则取色器总是携带旧值，会覆盖色板选择 */
+      var custom = f.querySelector('[name="theme_color_custom"]');
+      var cur = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+      if (custom && /^#[0-9a-fA-F]{3,8}$/.test(custom.value) && custom.value.toLowerCase() !== cur.toLowerCase()) {
+        color = custom.value;
+      }
+      if (/^#[0-9a-fA-F]{3,8}$/.test(color)) {
+        document.documentElement.style.setProperty('--accent', color);
+      }
+    }
+  }
+
+  /* ---------- v1.17.0：协议内置模板一键填入（后台 · 协议页） ---------- */
+  $$('[data-doc-tpl]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.getAttribute('data-doc-tpl');            // 短键：terms / privacy / disclaimer
+      var holder = document.getElementById('doc-tpl-' + key); // 模板占位节点：doc-tpl-terms …
+      var ta = document.querySelector('textarea[name="doc_' + key + '"]'); // 对应 textarea：doc_terms …
+      if (!holder || !ta) return;
+      var tpl = (holder.textContent || '').replace(/^\n+/, '').replace(/\s+$/, '');
+      if (!tpl) return;
+      if (ta.value.trim() !== '' && !window.confirm('当前已填写内容，填入内置模板将覆盖，确定？')) return;
+      ta.value = tpl;
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      toast('内置模板已填入，可先修改再点「保存协议设置」生效');
+    });
+  });
 })();

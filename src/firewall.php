@@ -1326,10 +1326,8 @@ function fw_events_read(string $date, int $per, int $page, string $qip, int &$to
     if (!is_file($f)) {
         return [];
     }
-    $raw = (string)@file_get_contents($f);
-    if (strpos($raw, DATA_GUARD) === 0) {
-        $raw = substr($raw, strlen(DATA_GUARD));
-    }
+    /* v1.17.0：明文 / 压缩自动识别（旧日志文件日切后原位 gzencode） */
+    $raw = log_raw_load($f);
     $out = [];
     foreach (explode("\n", $raw) as $ln) {
         $ln = trim($ln);
@@ -1490,6 +1488,52 @@ function fw_geo_label(array $r): string
         $s .= ' · ' . cut_str($isp, 16);
     }
     return $s !== '' ? $s : '未知';
+}
+
+/**
+ * v1.17.0：把 User-Agent 归类为可读的客户端家族（后台「访问统计 · 客户端分布」图表用）
+ * 纯字符串判断，零依赖；未知 UA 单列，爬虫/命令行工具单独标识。
+ */
+function fw_ua_family(string $ua): string
+{
+    $ua = trim($ua);
+    if ($ua === '') {
+        return '无 UA';
+    }
+    if (preg_match('/bot|crawl|spider|slurp|bing|yandex|baidu|sogou|360|duckduck|facebook|twitter|bytespider/i', $ua)) {
+        return '搜索引擎 / 爬虫';
+    }
+    if (preg_match('/curl|wget|python|java|okhttp|go-http|libwww|scrapy|httpclient|axios|node/i', $ua)) {
+        return '脚本 / 命令行工具';
+    }
+    if (stripos($ua, 'MicroMessenger') !== false || stripos($ua, 'WeChat') !== false) {
+        return '微信内置浏览器';
+    }
+    if (stripos($ua, 'QQ/') !== false || stripos($ua, 'MQQBrowser') !== false) {
+        return 'QQ 内置浏览器';
+    }
+    if (stripos($ua, 'Edg/') !== false || stripos($ua, 'Edge') !== false) {
+        return 'Edge';
+    }
+    if (stripos($ua, 'Firefox') !== false || stripos($ua, 'FxiOS') !== false) {
+        return 'Firefox';
+    }
+    if (preg_match('/iPhone|iPad|iPod/i', $ua) && stripos($ua, 'Safari') !== false) {
+        return 'iPhone / iPad Safari';
+    }
+    if (stripos($ua, 'Android') !== false && stripos($ua, 'Chrome') !== false) {
+        return 'Android Chrome';
+    }
+    if (stripos($ua, 'Chrome') !== false) {
+        return 'Chrome';
+    }
+    if (stripos($ua, 'Safari') !== false) {
+        return 'Safari';
+    }
+    if (preg_match('/Mobile|Android|iPhone/i', $ua)) {
+        return '其他移动端';
+    }
+    return '其他';
 }
 
 /**

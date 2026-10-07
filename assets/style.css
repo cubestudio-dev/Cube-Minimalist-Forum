@@ -707,3 +707,35 @@ a .mention, .mention a { text-decoration: none; }
 .footer-docs a { color: inherit; }
 .doc-body { line-height: 1.8; white-space: normal; }
 .doc-agree-card { border-color: var(--primary, #0f766e); }
+
+/* ================= v1.17.0 ================= */
+/* 发帖 / 回复字数计数：修复 <em>/<i> 斜体（现改为 span，此处兜底保险） */
+.cnt, .cnt i, .cnt span, .field-l .cnt { font-style: normal; }
+
+/* 侧栏 Ping 延迟（沿用在线人数样式，数值带绿/琥珀/红分级） */
+.side-ping { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.side-ping b { font-variant-numeric: tabular-nums; }
+.side-ping.ping-ok .live-dot { background: var(--ok); }
+.side-ping.ping-mid .live-dot { background: var(--warn, #d97706); animation: none; }
+.side-ping.ping-bad .live-dot { background: var(--danger, #dc2626); animation: none; }
+.side-ping.ping-mid b { color: var(--warn, #d97706); }
+.side-ping.ping-bad b { color: var(--danger, #dc2626); }
+
+/* 后台 · 安全防护：访问统计 IP 多列卡片网格（替代单列长表） */
+.ip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); gap: 10px; margin: 12px 0; }
+.ip-card { background: var(--bg, #fafafa); border: 1px solid var(--border); border-radius: var(--radius-s, 8px); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.ip-card.is-banned { border-color: var(--warn, #d97706); background: color-mix(in srgb, var(--warn, #d97706) 6%, transparent); }
+.ip-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ip-card-ip { font-family: ui-monospace, monospace; font-size: 13.5px; word-break: break-all; }
+.ip-card-nums { font-size: 12.5px; color: var(--muted); }
+.ip-card-nums b { color: var(--text); font-variant-numeric: tabular-nums; }
+.ip-card-nums b.ip-404 { color: var(--warn, #d97706); }
+.ip-card-ua { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-card-geo { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-card-ops { display: flex; gap: 6px; margin-top: 2px; }
+@media (max-width: 560px) { .ip-grid { grid-template-columns: 1fr; } }
+
+/* 协议内置模板按钮行 */
+.doc-tpl-row { display: block; margin-top: 6px; }
+/* v1.17.0：IP 访问统计卡加宽（多列网格需要横向空间；.wrap 1260px 内自适应） */
+.wide-card { max-width: 1260px; }

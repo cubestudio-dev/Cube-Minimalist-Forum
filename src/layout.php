@@ -37,11 +37,11 @@ if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '
 <link rel="apple-touch-icon" href="<?= e(u('p=icon&v=' . $iv)) ?>">
 <?php endif; ?>
 <?php else: ?>
-<link rel="icon" href="<?= e(ua('assets/favicon.svg')) ?>" type="image/svg+xml">
-<link rel="icon" href="<?= e(ua('assets/favicon.ico')) ?>" sizes="32x32">
-<link rel="apple-touch-icon" href="<?= e(ua('assets/apple-touch-icon.png')) ?>">
+<link rel="icon" href="<?= e(u('p=asset&f=favicon.svg')) ?>" type="image/svg+xml">
+<link rel="icon" href="<?= e(u('p=asset&f=favicon.ico')) ?>" sizes="32x32">
+<link rel="apple-touch-icon" href="<?= e(u('p=asset&f=apple-touch-icon.png')) ?>">
 <?php endif; ?>
-<link rel="stylesheet" href="<?= e(ua('assets/style.css?v=' . app_version())) ?>">
+<link rel="stylesheet" href="<?= e(u('p=asset&f=style.css&v=' . app_version())) ?>">
 <script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;window.MF_EMOJI=<?= feat_on('emoji') ? 'true' : 'false' ?>;</script>
 <script>(function(){try{var d=localStorage.getItem('mf-theme')||window.THEME_DEFAULT||'system';if(d==='system'){d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',d);}catch(e){}})();</script>
 <style>:root{--accent:<?= e($accent) ?>;}</style>
@@ -96,6 +96,7 @@ if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '
     </div>
     <?php endif; ?>
       <div class="side-block side-online"><?php if (feat_on('online')): ?><a class="online-link" href="<?= e(u('p=online')) ?>" title="查看在线名单"><span class="live-dot" aria-hidden="true"></span><b id="onlineNum"><?= (int)$online ?></b>&nbsp;人在线<span class="online-more" aria-hidden="true">›</span></a><?php else: ?><span class="online-link"><span class="live-dot" aria-hidden="true"></span><b><?= (int)$online ?></b>&nbsp;人在线</span><?php endif; ?></div>
+      <div class="side-block side-ping" title="浏览器到服务器的往返延迟（每 15 秒自动测量）"><span class="online-link"><span class="live-dot" aria-hidden="true"></span>Ping&nbsp;<b id="pingVal">--</b><span class="muted">&nbsp;ms</span></span></div>
     </aside>
     <div class="side-mask" id="sideMask" hidden></div>
     <main class="main" id="main">
@@ -134,7 +135,8 @@ function layout_footer(): void
     <span class="muted"><?= e($note) ?></span>
   </footer>
 </div>
-<script src="<?= e(ua('assets/app.js?v=' . app_version())) ?>" defer></script>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="<?= e(u('p=asset&f=app.js&v=' . app_version())) ?>" defer></script>
 </body>
 </html>
 <?php

@@ -95,6 +95,90 @@ function log_label(string $action): string
     return LOG_ACTIONS[$action] ?? $action;
 }
 
+/* ================= v1.17.0 日志文件透明压缩 =================
+ * 当天的日志保持明文（每条都是一行 JSON 追加写入，性能优先）；
+ * 日切（每天首次写日志时）把「昨天及更早」的 log-*.php / fw-*.php 原位转成
+ * guard + gzencode(全部行)。读侧按 gzip 魔数自动解压，新旧格式完全兼容。
+ * 中英文日志文本压缩比通常 5:1～10:1，日志目录实际可容纳的历史记录翻数倍。 */
+
+/** 读一个守卫日志文件并返回解压后的纯文本行（压缩 / 明文自动识别） */
+function log_raw_load(string $path): string
+{
+    $raw = (string)@file_get_contents($path);
+    if ($raw === '') {
+        return '';
+    }
+    if (strpos($raw, DATA_GUARD) === 0) {
+        $raw = substr($raw, strlen(DATA_GUARD));
+    }
+    if (strlen($raw) > 2 && substr($raw, 0, 2) === "\x1f\x8b") {
+        $dec = @gzdecode($raw);
+        return is_string($dec) ? $dec : '';
+    }
+    return $raw;
+}
+
+/** 把单个守卫日志文件原位压缩（guard + gzencode）；已压缩 / 空文件 / 压不小时不动 */
+function log_gzip_file(string $path): bool
+{
+    $raw = (string)@file_get_contents($path);
+    if ($raw === '' || strpos($raw, DATA_GUARD) !== 0) {
+        return false;
+    }
+    $body = substr($raw, strlen(DATA_GUARD));
+    if ($body === '') {
+        return false; // 空文件等日切再处理
+    }
+    if (strlen($body) > 2 && substr($body, 0, 2) === "\x1f\x8b") {
+        return false; // 已压缩
+    }
+    $gz = @gzencode($body, 6);
+    if (!is_string($gz) || $gz === '' || strlen($gz) >= strlen($body)) {
+        return false; // 压不小就不动（例如全部是随机串）
+    }
+    $tmp = $path . '.gz.tmp';
+    if (@file_put_contents($tmp, DATA_GUARD . $gz) === false) {
+        @unlink($tmp);
+        return false;
+    }
+    if (!@rename($tmp, $path)) {
+        @unlink($tmp);
+        return false;
+    }
+    return true;
+}
+
+/**
+ * 压缩「昨天及更早」的日志文件（操作日志 + 防火墙事件日志）。
+ * 当天文件绝不压缩：业务仍在向当天文件追加明文行，压缩会造成新旧格式混写。
+ * @return array [压缩文件数, 节省字节]
+ */
+function log_compress_old(int $limit = 50): array
+{
+    $today = date('Y-m-d');
+    $n = 0;
+    $saved = 0;
+    $files = array_merge(log_files(), fw_event_files());
+    foreach ($files as $f) {
+        if ($n >= max(1, $limit)) {
+            break;
+        }
+        if (substr($f, 4, 10) === $today) { // log-YYYY-MM-DD / fw-YYYY-MM-DD 的日期部分
+            continue;
+        }
+        $p = Store::path('logs/' . $f);
+        $before = (int)@filesize($p);
+        if ($before <= 0) {
+            continue;
+        }
+        if (log_gzip_file($p)) {
+            $n++;
+            $saved += max(0, $before - (int)@filesize($p));
+        }
+    }
+    return [$n, $saved];
+}
+
 /**
  * 记录一条操作日志（任何失败都不影响主业务）
  * @param string   $action 动作标识（见 LOG_ACTIONS）
@@ -131,11 +215,17 @@ function log_action(string $action, string $detail = '', ?int $uid = null, strin
         @file_put_contents($f, json_encode($entry, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
         Store::unlock($lk);
 
-        // 每天第一次写日志时顺带执行一次自动清理（零成本巡检）
+        // 每天第一次写日志时顺带执行一次日切维护（零成本巡检）：
+        // ① 清理过期日志  ② 把昨天及更早的日志原位压缩（v1.17.0）
         $st = Store::read('log_state.php', []);
         if (!is_array($st) || (string)($st['pruned'] ?? '') !== date('Y-m-d')) {
             Store::write('log_state.php', ['pruned' => date('Y-m-d')]);
             log_prune(max(0, (int)cfg('log_days', 90)));
+            try {
+                log_compress_old(30);
+            } catch (Throwable $t) {
+                // 压缩失败不影响业务
+            }
         }
     } catch (Throwable $t) {
         // 日志写入失败静默，不影响业务
@@ -218,12 +308,9 @@ function log_read(string $date, int $per, int $page, string $qUser, string $qAct
     if (!is_file($f)) {
         return [];
     }
-    $raw = (string)@file_get_contents($f);
+    $raw = log_raw_load($f); // v1.17.0：明文 / 压缩自动识别
     if ($raw === '') {
         return [];
-    }
-    if (strpos($raw, DATA_GUARD) === 0) {
-        $raw = substr($raw, strlen(DATA_GUARD));
     }
     $out = [];
     foreach (explode("\n", $raw) as $ln) {
@@ -265,12 +352,9 @@ function log_action_stats(string $date, int $top = 10): array
     if (!is_file($f)) {
         return [];
     }
-    $raw = (string)@file_get_contents($f);
+    $raw = log_raw_load($f); // v1.17.0：明文 / 压缩自动识别
     if ($raw === '') {
         return [];
-    }
-    if (strpos($raw, DATA_GUARD) === 0) {
-        $raw = substr($raw, strlen(DATA_GUARD));
     }
     $cnt = [];
     foreach (explode("\n", $raw) as $ln) {
@@ -324,19 +408,14 @@ function fw_txt_line(array $j): string
 function log_txt_stream(string $path, callable $fn, $out = null): int
 {
     $n = 0;
-    $fp = @fopen($path, 'rb');
-    if (!$fp) {
+    /* v1.17.0：统一走 log_raw_load——明文流式语义不变，压缩文件解压后逐行遍历
+       （单个日志文件受落盘上限保护，实测峰值内存可忽略） */
+    $body = log_raw_load($path);
+    if ($body === '') {
         return 0;
     }
-    $first = true;
-    while (($ln = fgets($fp, 65536)) !== false) {
+    foreach (explode("\n", $body) as $ln) {
         $ln = trim($ln);
-        if ($first) {
-            $first = false;
-            if (strpos($ln, DATA_GUARD) === 0) {
-                $ln = trim(substr($ln, strlen(DATA_GUARD)));
-            }
-        }
         if ($ln === '') {
             continue;
         }
@@ -352,7 +431,6 @@ function log_txt_stream(string $path, callable $fn, $out = null): int
             }
         }
     }
-    fclose($fp);
     return $n;
 }
 
@@ -495,7 +573,11 @@ function view_page_name(array $vs): string
         case 'announcements':
             return '通知中心';
         case 'icon':
-            return ''; // 图标资源，不记录
+        case 'ping':
+        case 'asset':
+        case 'mention_api':
+        case 'live':
+            return ''; // 图标 / 延迟探测 / 静态资源 / AJAX 端点，不记录
         case 'admin':
             $titles = function_exists('admin_tab_titles') ? admin_tab_titles() : [];
             $tn = $titles[$tab] ?? '';
