@@ -21,7 +21,8 @@ function user_by_id(int $id): ?array
     return null;
 }
 
-function user_by_name(string $n): ?array
+/** 按用户名查用户；默认跳过已注销账号（用户名已释放可被重新注册），登录场景传 true */
+function user_by_name(string $n, bool $includeDeleted = false): ?array
 {
     $n = strtolower(trim($n));
     if ($n === '') {
@@ -29,6 +30,9 @@ function user_by_name(string $n): ?array
     }
     foreach (user_all() as $u) {
         if (strtolower((string)($u['name'] ?? '')) === $n) {
+            if (!$includeDeleted && !empty($u['deleted'])) {
+                return null;
+            }
             return $u;
         }
     }
@@ -64,6 +68,12 @@ function user_update(int $id, array $fields): void
     unset($u);
     Store::write('users.php', $us);
     Store::unlock($lk);
+}
+
+/** 自助注销（v1.16.0）：标记 deleted + 清空凭据与隐私字段；记录保留（帖子作者显示「已注销」，用户名与邮箱可被重新注册） */
+function user_delete(int $id): void
+{
+    user_update($id, ['deleted' => 1, 'pass' => '', 'email' => '', 'sig' => '', 'remember' => '']);
 }
 
 /** 计数器增减（被赞数/被回复数/帖子数） */
@@ -102,13 +112,17 @@ function user_create(string $name, string $email, string $passHash, bool $admin 
     return $id;
 }
 
-/** 页面内展示用用户名（带请求级缓存） */
+/** 页面内展示用用户名（带请求级缓存；v1.16.0：id=0 显示「系统」，已注销账号显示「已注销」） */
 function uname(int $id): string
 {
     static $c = [];
     if (!isset($c[$id])) {
+        if ($id === 0) {
+            $c[$id] = '系统';
+            return $c[$id];
+        }
         $u = user_by_id($id);
-        $c[$id] = $u ? (string)$u['name'] : '已注销';
+        $c[$id] = $u ? (!empty($u['deleted']) ? '已注销' : (string)$u['name']) : '已注销';
     }
     return $c[$id];
 }

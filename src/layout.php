@@ -118,11 +118,19 @@ function layout_footer(): void
     if ($note === '') {
         $note = '纯文字 · 文件存储 · 无数据库';
     }
+    /* v1.16.0：页脚协议入口（后台「协议」页开关） */
+    $docLinks = [];
+    if ((int)($c['doc_footer'] ?? 0) === 1) {
+        foreach (doc_list() as $k => $d) {
+            $docLinks[] = '<a href="' . e(u('p=doc&type=' . $k)) . '">' . e($d['title']) . '</a>';
+        }
+    }
     ?>
     </main>
   </div>
   <footer class="footer">
     <span><?= e($left) ?></span>
+    <?php if ($docLinks): ?><span class="footer-docs"><?= implode(' · ', $docLinks) ?></span><?php endif; ?>
     <span class="muted"><?= e($note) ?></span>
   </footer>
 </div>

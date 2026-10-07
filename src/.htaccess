@@ -1,0 +1,8 @@
+# 源码目录禁止一切 Web 访问（Apache）；nginx 用户请参考 README 拦截 /src/
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Deny from all
+</IfModule>

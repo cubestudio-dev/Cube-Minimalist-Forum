@@ -17,7 +17,7 @@
   --radius: 12px;
   --radius-s: 8px;
   --shadow: 0 1px 2px rgba(23, 23, 28, .04), 0 10px 30px -18px rgba(23, 23, 28, .18);
-  --wrap: 1080px;
+  --wrap: 1260px; /* v1.16.0：1080→1260，缓解大屏两侧留白过宽 */
 }
 [data-theme="dark"] {
   --bg: #131316;
@@ -681,3 +681,29 @@ a.online-row:hover { background: var(--hover); }
 /* ================= v1.15.0：@ 提及高亮 ================= */
 .mention { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); border-radius: 5px; padding: 1px 4px; font-weight: 600; }
 a .mention, .mention a { text-decoration: none; }
+
+/* ================= v1.16.0 ================= */
+/* @ 提及补全下拉 */
+.mention-pop {
+  position: absolute; z-index: 60; background: var(--card, #fff); border: 1px solid var(--border);
+  border-radius: var(--radius-s); box-shadow: var(--shadow, 0 6px 24px rgba(0,0,0,.12));
+  max-height: 220px; overflow-y: auto; min-width: 180px; padding: 4px; margin-top: 4px;
+}
+.reply-form-card, .form-card, .card { position: relative; }
+.mention-item {
+  display: block; width: 100%; text-align: left; border: 0; background: none; cursor: pointer;
+  padding: 7px 10px; border-radius: 6px; font-size: 14px; color: var(--text);
+}
+.mention-item:hover, .mention-item.on { background: var(--bg, #f2f3f5); color: var(--primary); }
+
+/* 注销账号危险区 */
+.danger-zone { border-color: var(--warn, #d97706); }
+.danger-zone .card-title { color: var(--warn, #d97706); }
+.btn.danger { background: var(--warn, #d97706); color: #fff; border: 1px solid var(--warn, #d97706); }
+.btn.danger:disabled { opacity: .55; cursor: not-allowed; }
+.delete-confirm { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+
+/* 协议 */
+.footer-docs a { color: inherit; }
+.doc-body { line-height: 1.8; white-space: normal; }
+.doc-agree-card { border-color: var(--primary, #0f766e); }

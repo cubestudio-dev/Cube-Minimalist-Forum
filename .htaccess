@@ -1,0 +1,25 @@
+# 极简论坛 · Apache 配置
+# 关闭目录列表，拦截日志与锁文件
+Options -Indexes
+
+<IfModule mod_authz_core.c>
+  <FilesMatch "\.(log|lock|tmp)$">
+    Require all denied
+  </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+  <FilesMatch "\.(log|lock|tmp)$">
+    Order allow,deny
+    Deny from all
+  </FilesMatch>
+</IfModule>
+
+# v1.16.0：静态资源浏览器缓存（Apache；其他服务器环境由 CDN/浏览器协商缓存兜底）
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/css "access plus 7 days"
+  ExpiresByType application/javascript "access plus 7 days"
+  ExpiresByType image/png "access plus 7 days"
+  ExpiresByType image/jpeg "access plus 7 days"
+  ExpiresByType image/x-icon "access plus 30 days"
+</IfModule>

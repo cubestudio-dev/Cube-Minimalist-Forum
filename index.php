@@ -6,6 +6,12 @@
 define('APP', 1);
 require __DIR__ . '/src/bootstrap.php';
 
+/* v1.16.0 输出 gzip 压缩：HTML 文本传输体积约 -60%～-80%，
+   客户端不支持时 ob_gzhandler 自动降级为不压缩，无需额外判断 */
+if (!ob_start('ob_gzhandler')) {
+    ob_start();
+}
+
 /* 未安装 → 安装向导 */
 if (!Store::exists('lock/install.lock')) {
     redirect(ua('install.php'));
@@ -49,6 +55,12 @@ if (!feat_on('guest_browse') && !current_user()
     redirect(u('p=login'));
 }
 
+/* v1.16.0 协议门禁：后台开启且未同意协议的访客，先确认协议才能进入（登录/注册/协议页除外） */
+if (doc_gate_required($p === '' ? 'home' : $p)) {
+    page_doc_gate();
+    exit;
+}
+
 switch ($p === '' ? 'home' : $p) {
     case 'home':          page_home(); break;
     case 'board':         page_board(); break;
@@ -65,6 +77,8 @@ switch ($p === '' ? 'home' : $p) {
     case 'icon':          page_icon(); break;
     case 'notifications': page_announcements(); break;
     case 'announcements': page_announcements(); break;
+    case 'doc':           page_doc(); break;
+    case 'mention_api':   page_mention_api(); break;
     case 'admin':         page_admin(); break;
     default:              page_404();
 }

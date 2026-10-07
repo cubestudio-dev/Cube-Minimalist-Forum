@@ -12,6 +12,9 @@ function page_admin(): void
     if (!preg_match('/^[a-z]{1,12}$/', $tab)) {
         $tab = 'basic';
     }
+    /* v1.16.0：记录当前后台完整地址（tab/筛选/分页），动作保存后 admin_redirect 精确回跳；
+       配合前端滚动位置恢复，保存后不再"从头刷新、回到顶部" */
+    $_SESSION['admin_back'] = http_build_query($_GET);
     layout_header('后台管理', 0);
     echo page_head('后台管理', '所有修改即时生效');
 
@@ -35,6 +38,7 @@ function page_admin(): void
         case 'reports': admin_tab_reports(); break;
         case 'anns': admin_tab_anns(); break;
         case 'theme': admin_tab_theme(); break;
+        case 'docs': admin_tab_docs(); break;
         case 'logs': admin_tab_logs(); break;
         case 'security': admin_tab_security(); break;
         case 'monitor': admin_tab_monitor(); break;
@@ -75,7 +79,7 @@ function admin_tab_titles(): array
     return [
         'basic' => '基本', 'feat' => '功能', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
-        'anns' => '公告', 'theme' => '主题', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
+        'anns' => '公告', 'theme' => '主题', 'docs' => '协议', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
 }
 
@@ -98,7 +102,7 @@ function admin_tab_feat(): void
     /* AI 两项直接绑定「AI」页的原生配置键（ai_precheck / ai_autopilot），两处开关同一份，避免双开关不同步 */
     $aiItems = [
         'ai_precheck'  => ['AI 审查（发帖预检）', '每条帖子 / 回复发布后立即交给 AI 审核，违规自动隐藏、通知作者可申诉；模型与严格程度在「AI」页配置'],
-        'ai_autopilot' => ['AI 自主管理', 'AI 无人值守巡逻：自主封禁风险 IP / 解除误封 / 邮件警报管理员；间隔与红线在「AI」页配置'],
+        'ai_autopilot' => ['AI 自主管理', 'AI 无人值守巡逻：自主封禁风险 IP / 解除误封 / 邮件警报管理员；间隔与红线在「安全防护」页配置'],
     ];
     echo '<div class="card form-card"><h2 class="card-title">功能总开关</h2><p class="muted">勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。</p>' .
         '<form method="post" action="' . e(u('a=admin_save_feat')) . '">' . csrf_field();
@@ -218,7 +222,11 @@ function admin_tab_ai(): void
         '<label class="field"><span class="field-l">单模型重试次数</span><input class="input" name="ai_retries" type="number" min="1" max="10" value="' . (int)cfg('ai_retries', 3) . '"><span class="hint">同一模型单次审核内的 HTTP 重试次数（1-10，默认 3）</span></label>' .
         '<label class="field"><span class="field-l">自动切换阈值（连续失败 N 次）</span><input class="input" name="ai_fail_limit" type="number" min="1" max="20" value="' . $limit . '"><span class="hint">某模型连续失败达到该次数后，后续审核自动换下一个模型（默认 3）</span></label>' .
         '</div>' .
-        '<label class="check ai-fullpower"><input type="checkbox" name="ai_fullpower" value="1"' . (!empty(cfg('ai_fullpower')) ? ' checked' : '') . '> <b>全火力全开</b> —— 每条内容同时交给<b>所有启用的模型</b>一起审核：任一模型判定违规即判违规，全部无问题才放行；任一模型成功返回即视为审核有效。API 消耗与启用模型数成正比，适合合规要求高的论坛</label>' .
+        '<label class="field"><span class="field-l">审核模式（火力）</span>' .
+        '<label class="check"><input type="radio" name="ai_mode" value="normal"' . (ai_mode() === 'normal' ? ' checked' : '') . '> <b>标准</b> —— 按模型顺序审核，失败自动切换（消耗最低）</label>' .
+        '<label class="check"><input type="radio" name="ai_mode" value="parallel"' . (ai_mode() === 'parallel' ? ' checked' : '') . '> <b>并行火力</b> —— 队列一次取出多条，多个模型<b>同刻并发、各审一条</b>（模型有几个就同时审几条，吞吐成倍提升；AI 返回仍是单模型口径）</label>' .
+        '<label class="check"><input type="radio" name="ai_mode" value="fullpower"' . (ai_mode() === 'fullpower' ? ' checked' : '') . '> <b>全火力全开</b> —— 每条内容同时交给<b>所有启用的模型</b>一起审核：任一模型判定违规即判违规，全部无问题才放行（严判，API 消耗与启用模型数成正比）</label>' .
+        '</label>' .
         '<label class="field"><span class="field-l">审核严格程度</span><select name="ai_strict" class="input" style="max-width:100%">' .
         '<option value="loose"' . ($strict === 'loose' ? ' selected' : '') . '>宽松 —— 拿不准一律不违规（创作 / 交流型论坛友好）</option>' .
         '<option value="standard"' . ($strict === 'standard' ? ' selected' : '') . '>标准 —— 直接命中违规类别才判违规（推荐）</option>' .
@@ -230,67 +238,38 @@ function admin_tab_ai(): void
         '<div class="prompt-box' . ($strict === 'standard' ? ' on' : '') . '"><b>标准' . ($strict === 'standard' ? '（当前）' : '') . '</b><pre>' . e(AI_STRICT_LEVELS['standard']) . '</pre></div>' .
         '<div class="prompt-box' . ($strict === 'strict' ? ' on' : '') . '"><b>严格' . ($strict === 'strict' ? '（当前）' : '') . '</b><pre>' . e(AI_STRICT_LEVELS['strict']) . '</pre></div>' .
         '</details>' .
-        '<div class="ai-autopilot-box">' .
-        '<b class="ai-sub">严全面模式（AI 全自主值守）</b>' .
-        '<label class="check"><input type="checkbox" name="ai_precheck" value="1"' . (!empty(cfg('ai_precheck', 1)) ? ' checked' : '') . '> <b>发帖 AI 预检</b> —— 每条新帖子 / 回复发布后立即交给 AI 主动审核：判定违规将<b>自动隐藏</b>并通知作者（可申诉）；AI 调用失败时不拦截（宁纵勿枉）。适合无人值守时自动把关内容</label>' .
-        '<label class="check"><input type="checkbox" name="ai_autopilot" value="1"' . (!empty(cfg('ai_autopilot')) ? ' checked' : '') . '> <b>AI 自主管理</b> —— 授权 AI 无人值守时自主巡逻论坛：分析风险 IP 与关键日志，<b>自主封禁恶意 IP / 解除误封 / 邮件警报管理员</b>。所有动作强制白名单校验：只能封本次材料中出现过的风险 IP、保护名单免疫、单轮封禁≤上限、管理员手动封禁不可解，全部留痕可撤销。巡逻节奏：常驻巡逻器（php daemon.php）在线时按间隔主动巡，否则由访客访问惰性触发（有风险事件才调用 AI，零浪费）</label>' .
-        '<div class="grid2">' .
-        '<label class="field"><span class="field-l">巡逻间隔（分钟）</span><input class="input" name="ai_patrol_interval" type="number" min="2" max="360" value="' . ai_patrol_interval() . '"><span class="hint">每次巡逻至少间隔（2-360，默认 15）；间隔越短响应越快，无事件时零消耗</span></label>' .
-        '<label class="field"><span class="field-l">单轮封禁上限（个）</span><input class="input" name="ai_patrol_ban_limit" type="number" min="1" max="10" value="' . ai_patrol_ban_limit() . '"><span class="hint">AI 一轮巡逻最多封禁的 IP 数（1-10，默认 3，红线防滥杀）</span></label>' .
-        '</div>' .
-        '<label class="check"><input type="checkbox" name="ai_patrol_alert" value="1"' . (!empty(cfg('ai_patrol_alert', 1)) ? ' checked' : '') . '> <b>允许 AI 发邮件警报</b> —— 巡逻发现严重态势（持续攻击、封禁激增、审核服务异常）时给管理员发邮件（30 分钟节流，轻微事件不打扰）</label>' .
-        '</div>' .
-        '<div class="form-foot">' .
+                '<div class="form-foot">' .
         '<button class="btn btn-primary" type="button" data-admin-save="ai">保存 AI 设置</button>' .
         '<button class="btn btn-ghost" type="button" data-admin-test="ai">测试主力模型</button>' .
         '</div>' .
         '<span class="test-msg muted"></span></form>' .
-        '<p class="hint">AI 每次只处理举报队列中的一条（先进先出，随页面访问自动触发）；自动切换后仍全部失败时，内容保持隐藏并通知管理员人工处理（后台「AI 待审队列」）。</p></div>';
+        '<p class="hint">标准模式每次处理队列中的一条（先进先出，随页面访问自动触发）；并行火力模式每次并发处理多条；自动切换后仍全部失败时，内容保持隐藏并通知管理员人工处理（后台「AI 待审队列」）。发帖 AI 预检在下方勾选；AI 自主管理（无人值守巡逻）在「安全防护」页配置。</p></div>';
 
-    /* ---- 卡片 3：巡逻状态与最近报告 ---- */
-    $ps = ai_patrol_state();
-    $alive = ai_daemon_alive();
-    $prep = is_array($ps['report'] ?? null) ? $ps['report'] : null;
-    $lastT = (int)($ps['last'] ?? 0);
-    if ($alive) {
-        $modeBadge = '<span class="badge badge-ok">🟢 常驻巡逻器在线</span>';
-        $modeHint = 'daemon.php 正在值守，按巡逻间隔主动巡逻，无需访客触发';
-    } elseif (!empty(cfg('ai_autopilot')) && ai_ready()) {
-        $modeBadge = '<span class="badge badge-warn">🟡 访客触发模式</span>';
-        $modeHint = '可选增强：在能常驻进程的主机运行 php daemon.php 可开启 7×24 常驻巡逻（响应更快）；当前由访客访问惰性触发巡逻，效果一致';
-    } else {
-        $modeBadge = '<span class="badge">⚪ 未启用</span>';
-        $modeHint = '在上方勾选「AI 自主管理」并保存后开始巡逻';
+}
+
+
+
+/* ---------------- 协议（v1.16.0） ---------------- */
+function admin_tab_docs(): void
+{
+    $defs = [
+        'doc_terms'      => ['用户协议', '注册与使用本站时双方的权利义务。启用后注册页强制勾选确认'],
+        'doc_privacy'    => ['隐私政策', '说明本站收集哪些数据（IP 日志、Cookie、邮箱等）与用途。合规站点建议填写'],
+        'doc_disclaimer' => ['免责声明', '本站对用户发布内容的免责说明。UGC 站点建议填写'],
+    ];
+    echo '<div class="card form-card"><h2 class="card-title">协议管理</h2>' .
+        '<p class="muted">填写内容后即自动启用该协议：出现在注册页确认、协议门禁与页脚入口（按下方开关）。支持直接输入多行纯文本；URL 会自动变成可点击链接。</p>' .
+        '<form method="post" action="' . e(u('a=admin_save_docs')) . '">' . csrf_field();
+    foreach ($defs as $key => [$name, $desc]) {
+        echo '<label class="field"><span class="field-l">' . e($name) . '</span>' .
+            '<textarea class="input" name="' . $key . '" rows="6" placeholder="（留空 = 未启用）\n' . e($desc) . '" style="min-height:110px">' . e((string)cfg($key, '')) . '</textarea>' .
+            '<span class="hint">' . e($desc) . '</span></label>';
     }
-    echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">AI 自主管理 · 巡逻状态与最近报告</h2>' .
-        '<div class="ai-patrol-head">' . $modeBadge .
-        '<span class="hint">上次巡逻：' . ($lastT > 0 ? e(date('m-d H:i', $lastT)) . '（' . e(fmt_time($lastT)) . '）' : '尚未巡逻')
-        . ' · 间隔 ' . ai_patrol_interval() . ' 分钟 · 单轮封禁上限 ' . ai_patrol_ban_limit() . '</span>' .
-        '<button class="btn btn-ghost btn-sm" type="button" data-admin-patrol="now">立即巡逻一次</button></div>' .
-        '<p class="hint">' . e($modeHint) . '</p>';
-    if ($prep === null) {
-        echo empty_state('巡逻器还没有产出报告，点击「立即巡逻一次」查看 AI 对当前态势的判断');
-    } else {
-        echo '<div class="ai-patrol-report">' .
-            '<div class="report-head"><b>' . ($prep['ok'] ? '态势总结' : '巡逻异常') . '</b>' .
-            '<span class="muted">' . e(date('Y-m-d H:i:s', (int)($prep['time'] ?? 0))) . ' · ' . e((string)($prep['used'] ?? '')) . '</span></div>' .
-            '<p class="assess">' . e((string)($prep['assess'] ?? '')) . '</p>';
-        $rows = (array)($prep['rows'] ?? []);
-        if ($rows) {
-            $actName = ['ban' => '封禁', 'unban' => '解封', 'alert' => '邮件警报'];
-            echo '<table class="patrol-rows"><thead><tr><th>动作</th><th>对象</th><th>结果</th></tr></thead><tbody>';
-            foreach ($rows as $r) {
-                $a = (string)($r[0] ?? '');
-                echo '<tr><td>' . e($actName[$a] ?? $a) . '</td><td>' . e((string)($r[1] ?? '')) . '</td><td>' .
-                    '<span class="badge ' . (!empty($r[3]) ? 'badge-ok">已执行' : 'badge-warn">已拦截') . '</span> ' . e((string)($r[2] ?? '')) . '</td></tr>';
-            }
-            echo '</tbody></table>';
-        } elseif (!empty($prep['ok'])) {
-            echo '<p class="hint">本轮无需执行任何动作（AI 判定态势平稳）</p>';
-        }
-        echo '</div>';
-    }
-    echo '<p class="hint">AI 封禁的 IP 可在后台「防火墙」中随时手动解封；巡逻决策与动作全部留痕于系统日志（AI·自主巡逻 / AI·自主封禁 等）。</p></div>';
+    echo '<label class="check"><input type="hidden" name="doc_gate" value="0"><input type="checkbox" name="doc_gate" value="1"' . (!empty(cfg('doc_gate', 0)) ? ' checked' : '') . '> <b>访问门禁</b> —— 开启后，未同意协议的访客打开网站任何页面时，都会先看到「请阅读并同意协议」页面，不同意无法进入（登录、注册、协议页除外；管理员不受限，避免把自己锁在门外）。协议内容每次修改后，已同意的用户需重新确认一次</label>' .
+        '<label class="check"><input type="hidden" name="doc_footer" value="0"><input type="checkbox" name="doc_footer" value="1"' . (!empty(cfg('doc_footer', 0)) ? ' checked' : '') . '> <b>页脚入口</b> —— 在网站页脚显示「用户协议 / 隐私政策 / 免责声明」查看入口</label>' .
+        '<div class="form-foot"><button class="btn btn-primary" type="submit">保存协议设置</button></div>' .
+        '</form>' .
+        '<p class="hint">注册页的强制勾选自动生效：只要对应协议已填写，新用户注册时必须勾选「我已阅读并同意」才能提交。</p></div>';
 }
 
 /* ---------------- 板块 ---------------- */
@@ -839,6 +818,13 @@ function admin_tab_system(array $me): void
             '</span></div>';
     }
     echo '</div></div>';
+    /* v1.16.0 存量数据一键压缩 */
+    echo '<div class="card form-card"><h2 class="card-title">数据占用压缩</h2>' .
+        '<p class="muted">v1.16.0 起新写入的数据文件均为 gzip 压缩格式（中文数据体积约省一半以上）；此按钮可把存量明文数据一次性转为压缩格式。</p>' .
+        '<form method="post" action="' . e(u('a=admin_data_compress')) . '" class="inline-form">' . csrf_field() .
+        '<button class="btn btn-primary" type="submit" data-confirm="遍历并压缩所有数据文件？数据内容不会变化，仅重新压缩存储。">一键压缩存量数据</button>' .
+        '</form></div>';
+
 }
 
 /* ---------------- 操作日志 ---------------- */
@@ -960,6 +946,65 @@ function admin_tab_update(): void
 /** 安全防护总览（防火墙 / 限流 / 策略 / 危险 IP 库 / 访问统计 / 封禁 / 事件日志） */
 function admin_tab_security(): void
 {
+    /* ================= v1.16.0：AI 自主防护（严全面模式）—— 从「AI」页移入本页（本质是安全防护功能） ================= */
+    echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">AI 自主防护（严全面模式）</h2>' .
+        '<form>' .
+        '<b class="ai-sub">无人值守时让 AI 全自主值守论坛</b>' .
+        '<label class="check"><input type="hidden" name="ai_autopilot" value="0"><input type="checkbox" name="ai_autopilot" value="1"' . (!empty(cfg('ai_autopilot')) ? ' checked' : '') . '> <b>AI 自主管理</b> —— 授权 AI 无人值守时自主巡逻论坛：分析风险 IP 与关键日志，<b>自主封禁恶意 IP / 解除误封 / 邮件警报管理员</b>。所有动作强制白名单校验：只能封本次材料中出现过的风险 IP、保护名单免疫、单轮封禁≤上限、管理员手动封禁不可解，全部留痕可撤销。巡逻节奏：常驻巡逻器（php daemon.php）在线时按间隔主动巡，否则由访客访问惰性触发（有风险事件才调用 AI，零浪费）</label>' .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">巡逻间隔（分钟）</span><input class="input" name="ai_patrol_interval" type="number" min="2" max="360" value="' . ai_patrol_interval() . '"><span class="hint">每次巡逻至少间隔（2-360，默认 15）；间隔越短响应越快，无事件时零消耗</span></label>' .
+        '<label class="field"><span class="field-l">单轮封禁上限（个）</span><input class="input" name="ai_patrol_ban_limit" type="number" min="1" max="10" value="' . ai_patrol_ban_limit() . '"><span class="hint">AI 一轮巡逻最多封禁的 IP 数（1-10，默认 3，红线防滥杀）</span></label>' .
+        '</div>' .
+        '<label class="check"><input type="hidden" name="ai_patrol_alert" value="0"><input type="checkbox" name="ai_patrol_alert" value="1"' . (!empty(cfg('ai_patrol_alert', 1)) ? ' checked' : '') . '> <b>允许 AI 发邮件警报</b> —— 巡逻发现严重态势（持续攻击、封禁激增、审核服务异常）时给管理员发邮件（30 分钟节流，轻微事件不打扰）</label>' .
+        '<div class="form-foot"><button class="btn btn-primary" type="button" data-admin-save="ai">保存自主防护设置</button></div>' .
+        '<span class="test-msg muted"></span></form>' .
+        '<p class="hint">「发帖 AI 预检」（内容审核开关）在「AI」页与「功能」页配置。</p></div>';
+
+
+/* ---- 卡片 3：巡逻状态与最近报告 ---- */
+    $ps = ai_patrol_state();
+    $alive = ai_daemon_alive();
+    $prep = is_array($ps['report'] ?? null) ? $ps['report'] : null;
+    $lastT = (int)($ps['last'] ?? 0);
+    if ($alive) {
+        $modeBadge = '<span class="badge badge-ok">🟢 常驻巡逻器在线</span>';
+        $modeHint = 'daemon.php 正在值守，按巡逻间隔主动巡逻，无需访客触发';
+    } elseif (!empty(cfg('ai_autopilot')) && ai_ready()) {
+        $modeBadge = '<span class="badge badge-warn">🟡 访客触发模式</span>';
+        $modeHint = '可选增强：在能常驻进程的主机运行 php daemon.php 可开启 7×24 常驻巡逻（响应更快）；当前由访客访问惰性触发巡逻，效果一致';
+    } else {
+        $modeBadge = '<span class="badge">⚪ 未启用</span>';
+        $modeHint = '在上方勾选「AI 自主管理」并保存后开始巡逻';
+    }
+    echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">AI 自主管理 · 巡逻状态与最近报告</h2>' .
+        '<div class="ai-patrol-head">' . $modeBadge .
+        '<span class="hint">上次巡逻：' . ($lastT > 0 ? e(date('m-d H:i', $lastT)) . '（' . e(fmt_time($lastT)) . '）' : '尚未巡逻')
+        . ' · 间隔 ' . ai_patrol_interval() . ' 分钟 · 单轮封禁上限 ' . ai_patrol_ban_limit() . '</span>' .
+        '<button class="btn btn-ghost btn-sm" type="button" data-admin-patrol="now">立即巡逻一次</button></div>' .
+        '<p class="hint">' . e($modeHint) . '</p>';
+    if ($prep === null) {
+        echo empty_state('巡逻器还没有产出报告，点击「立即巡逻一次」查看 AI 对当前态势的判断');
+    } else {
+        echo '<div class="ai-patrol-report">' .
+            '<div class="report-head"><b>' . ($prep['ok'] ? '态势总结' : '巡逻异常') . '</b>' .
+            '<span class="muted">' . e(date('Y-m-d H:i:s', (int)($prep['time'] ?? 0))) . ' · ' . e((string)($prep['used'] ?? '')) . '</span></div>' .
+            '<p class="assess">' . e((string)($prep['assess'] ?? '')) . '</p>';
+        $rows = (array)($prep['rows'] ?? []);
+        if ($rows) {
+            $actName = ['ban' => '封禁', 'unban' => '解封', 'alert' => '邮件警报'];
+            echo '<table class="patrol-rows"><thead><tr><th>动作</th><th>对象</th><th>结果</th></tr></thead><tbody>';
+            foreach ($rows as $r) {
+                $a = (string)($r[0] ?? '');
+                echo '<tr><td>' . e($actName[$a] ?? $a) . '</td><td>' . e((string)($r[1] ?? '')) . '</td><td>' .
+                    '<span class="badge ' . (!empty($r[3]) ? 'badge-ok">已执行' : 'badge-warn">已拦截') . '</span> ' . e((string)($r[2] ?? '')) . '</td></tr>';
+            }
+            echo '</tbody></table>';
+        } elseif (!empty($prep['ok'])) {
+            echo '<p class="hint">本轮无需执行任何动作（AI 判定态势平稳）</p>';
+        }
+        echo '</div>';
+    }
+    echo '<p class="hint">AI 封禁的 IP 可在后台「防火墙」中随时手动解封；巡逻决策与动作全部留痕于系统日志（AI·自主巡逻 / AI·自主封禁 等）。</p></div>';
     // 访问统计已随每次计数原子落盘（fw_state_save），直接读 fw_state.php 即为最新数据
     $on = (int)cfg('fw_on', 1) === 1;
     $st = Store::read('fw_state.php', []);
@@ -1218,7 +1263,7 @@ function admin_tab_security(): void
     echo '</tbody></table></div>';
     echo '<button class="btn btn-ghost btn-sm" type="button" data-fw-geo>查询本页归属地（免key接口，未查询到的才会请求）</button> ';
     echo '<span class="muted" id="fw-geo-msg"></span>';
-    echo paginate($ipTotal, $ipPer, $ipPage, 'p=admin&tab=security&ssort=' . $sort);
+    echo paginate($ipTotal, $ipPer, $ipPage, 'p=admin&tab=security&ssort=' . $sort, 'ippage');
     echo '<p class="hint">统计随访问自动聚合（每 60 秒落盘一次）；7 天不活跃的 IP 自动移除统计。归属地通过 ip-api.com 免费接口批量查询并缓存 30 天（主源连不上时自动改用备用源，查不到的 IP 稍后重试，不会留下错误的「未知」记录）。</p></div>';
 
     /* ---- 封禁管理 ---- */
@@ -1338,6 +1383,6 @@ function admin_tab_security(): void
             '</tr>';
     }
     echo '</tbody></table></div>';
-    echo paginate($fwTotal, 50, $fwPage, 'p=admin&tab=security&fwdate=' . urlencode($date) . '&fwq=' . urlencode($qip));
+    echo paginate($fwTotal, 50, $fwPage, 'p=admin&tab=security&fwdate=' . urlencode($date) . '&fwq=' . urlencode($qip), 'fwpage');
     echo '</div>';
 }

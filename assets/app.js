@@ -503,7 +503,9 @@
       b.setAttribute('aria-label', ':' + it[0] + ':');
       b.textContent = it[1];
       b.addEventListener('click', function () {
-        emojiInsertAt(ta, ':' + it[0] + ':');
+        /* v1.16.0：直接插入 emoji 字符本身（此前插入 :name: 短代码，
+           标题 / 通知 / 日志等不经过 Markdown 渲染的位置会显示冒号原文） */
+        emojiInsertAt(ta, it[1]);
         pop.hidden = true;
         btn.setAttribute('aria-expanded', 'false');
         ta.focus();
@@ -546,3 +548,127 @@
     });
   });
 })();
+
+  /* ---------- v1.16.0：@ 提及自动补全 ----------
+     在 textarea 输入 @ 后继续键入，弹出用户名下拉；↑↓ 选择、Enter/点击 插入、Esc 关闭。 */
+  (function () {
+    var ta = $('textarea[name="content"]');
+    if (!ta || window.MF_MENTION === false) return;
+    var pop = document.createElement('div');
+    pop.className = 'mention-pop';
+    pop.hidden = true;
+    pop.setAttribute('role', 'listbox');
+    ta.parentNode.appendChild(pop);
+    var items = [];
+    var active = -1;
+    var ctx = null; /* {start, q} */
+
+    function close() {
+      pop.hidden = true;
+      pop.innerHTML = '';
+      items = [];
+      active = -1;
+      ctx = null;
+    }
+
+    function pick(idx) {
+      if (!items[idx] || !ctx) return;
+      var name = items[idx];
+      var v = ta.value;
+      var pos = ta.selectionStart;
+      /* 替换 @q（含 @ 符号）为 @名字 + 空格 */
+      var atPos = v.lastIndexOf('@', pos - 1);
+      if (atPos < 0) { close(); return; }
+      v = v.slice(0, atPos) + '@' + name + ' ' + v.slice(pos);
+      ta.value = v;
+      var np = atPos + name.length + 2;
+      ta.selectionStart = ta.selectionEnd = np;
+      close();
+      ta.focus();
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function render() {
+      pop.innerHTML = '';
+      items.forEach(function (n, i) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'mention-item' + (i === active ? ' on' : '');
+        b.textContent = '@' + n;
+        b.addEventListener('mousedown', function (ev) { ev.preventDefault(); pick(i); });
+        pop.appendChild(b);
+      });
+      pop.hidden = items.length === 0;
+    }
+
+    ta.addEventListener('input', function () {
+      var pos = ta.selectionStart;
+      var before = ta.value.slice(0, pos);
+      var m = before.match(/@([^@\s]{0,20})$/);
+      if (!m) { close(); return; }
+      ctx = { q: m[1] };
+      fetch(apiUrl('p=mention_api&q=' + encodeURIComponent(m[1])), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!ctx || !j || !j.ok || !j.users || !j.users.length) { close(); return; }
+          /* 用户输入可能已经变化，丢弃过期结果 */
+          var pos2 = ta.selectionStart;
+          var before2 = ta.value.slice(0, pos2);
+          var m2 = before2.match(/@([^@\s]{0,20})$/);
+          if (!m2 || m2[1] !== ctx.q) return;
+          items = j.users;
+          active = 0;
+          render();
+        })
+        .catch(function () { close(); });
+    });
+
+    ta.addEventListener('keydown', function (ev) {
+      if (pop.hidden) return;
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); active = (active + 1) % items.length; render(); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); active = (active - 1 + items.length) % items.length; render(); }
+      else if (ev.key === 'Enter') { ev.preventDefault(); pick(active); }
+      else if (ev.key === 'Escape') { close(); }
+    });
+    ta.addEventListener('blur', function () { setTimeout(close, 120); });
+  })();
+
+  /* ---------- v1.16.0：后台保存后回到原位置 ----------
+     后台动作保存后整页回跳（tab/筛选/分页由服务端 session 精确恢复）；
+     前端配合：页面带 flash 提示（保存成功 / 操作完成的回跳）时，恢复离开前的滚动位置。 */
+  (function () {
+    if (location.search.indexOf('p=admin') === -1) return;
+    var KEY = 'mf_admin_scroll';
+    window.addEventListener('beforeunload', function () {
+      try { sessionStorage.setItem(KEY, String(window.scrollY || 0)); } catch (e) {}
+    });
+    var hasFlash = $('.flash');
+    if (hasFlash) {
+      var y = parseInt(sessionStorage.getItem(KEY) || '0', 10);
+      if (y > 0) {
+        window.scrollTo(0, y);
+      }
+    }
+    try { sessionStorage.removeItem(KEY); } catch (e) {}
+  })();
+
+  /* ---------- v1.16.0：注销账号 10 秒冷静期倒计时 ---------- */
+  (function () {
+    var btn = $('#del-go');
+    if (!btn) return;
+    var wait = parseInt(btn.getAttribute('data-wait') || '0', 10);
+    if (wait <= 0) return;
+    var cnt = $('#del-count');
+    btn.disabled = true;
+    var left = wait;
+    var label = btn.textContent;
+    var timer = setInterval(function () {
+      left--;
+      if (cnt) cnt.textContent = String(left);
+      if (left <= 0) {
+        clearInterval(timer);
+        btn.disabled = false;
+        btn.textContent = '确认注销（立即生效，不可恢复）';
+      }
+    }, 1000);
+  })();

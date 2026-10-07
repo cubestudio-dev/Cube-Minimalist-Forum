@@ -71,6 +71,11 @@ function route_action(string $a): void
         case 'appeal':           act_appeal(); return;
         case 'notify_read':      act_notify_read(); return;
         case 'notify_read_all':  act_notify_read_all(); return;
+        case 'account_delete':         act_account_delete(); return;
+        case 'account_delete_confirm': act_account_delete_confirm(); return;
+        case 'doc_agree':              act_doc_agree(); return;
+        case 'admin_save_docs':    admin_tab_guard(); act_admin_save_docs(); return;
+        case 'admin_data_compress': admin_tab_guard(); act_admin_data_compress(); return;
         case 'admin_save_basic': admin_tab_guard(); act_admin_save_basic(); return;
         case 'admin_save_feat':  admin_tab_guard(); act_admin_save_feat(); return;
         case 'admin_icon_upload': admin_tab_guard(); act_admin_icon_upload(); return;
@@ -182,6 +187,85 @@ function admin_tab_guard(): array
     return require_admin();
 }
 
+/** 后台动作完成后的回跳（v1.16.0）：优先回到操作前所在的完整后台页面（tab/筛选/分页不丢），
+ *  配合前端滚动位置恢复，保存设置后不再"从头刷新、回到顶部" */
+function admin_redirect(string $fallback = 'p=admin'): void
+{
+    $back = (string)($_SESSION['admin_back'] ?? '');
+    if ($back !== '' && strpos($back, 'p=admin') === 0 && preg_match('/^[a-zA-Z0-9_=&%.\-]+$/', $back)) {
+        redirect('index.php?' . $back);
+    }
+    redirect(u($fallback));
+}
+
+/** 后台保存三份协议（v1.16.0） */
+function act_admin_save_docs(): void
+{
+    $me = admin_tab_guard();
+    $kv = [];
+    foreach (['doc_terms', 'doc_privacy', 'doc_disclaimer'] as $k) {
+        $kv[$k] = post_str($k, 20000);
+    }
+    $kv['doc_gate'] = !empty($_POST['doc_gate']) ? 1 : 0;
+    $kv['doc_footer'] = !empty($_POST['doc_footer']) ? 1 : 0;
+    cfg_update($kv);
+    $msg = '协议设置已保存'
+        . ($kv['doc_gate'] ? '；访问门禁已开启，未同意的访客下次访问需先确认' : '');
+    log_action('admin_save_docs', '协议设置已保存：'
+        . '用户协议 ' . ($kv['doc_terms'] !== '' ? '已启用' : '未填写')
+        . '，隐私政策 ' . ($kv['doc_privacy'] !== '' ? '已启用' : '未填写')
+        . '，免责声明 ' . ($kv['doc_disclaimer'] !== '' ? '已启用' : '未填写')
+        . '；访问门禁 ' . ($kv['doc_gate'] ? '开' : '关')
+        . '，页脚入口 ' . ($kv['doc_footer'] ? '开' : '关'), (int)$me['id']);
+    if (is_ajax()) {
+        json_response(['ok' => true, 'msg' => $msg]);
+    }
+    flash('ok', $msg);
+    admin_redirect('p=admin&tab=docs');
+}
+
+/** 后台一键压缩存量数据文件（v1.16.0）：把仍是明文 JSON 的数据文件重写为 gzip 格式 */
+function act_admin_data_compress(): void
+{
+    $me = admin_tab_guard();
+    $before = 0;
+    $after = 0;
+    $n = 0;
+    foreach (Store::scan('') as $rel) {
+        if (!preg_match('/\.php$/', $rel) || strpos($rel, 'lock/') === 0) {
+            continue;
+        }
+        $p = Store::path($rel);
+        $raw = @file_get_contents($p);
+        if (!is_string($raw) || $raw === '' || strpos($raw, DATA_GUARD) !== 0) {
+            continue;
+        }
+        $body = substr($raw, strlen(DATA_GUARD));
+        if (strlen($body) > 2 && substr($body, 0, 2) === "\x1f\x8b") {
+            continue; // 已是 gzip
+        }
+        $data = json_decode($body, true);
+        if (!is_array($data)) {
+            continue;
+        }
+        $before += strlen($raw);
+        if (Store::write($rel, $data)) {
+            $after += (int)@filesize(Store::path($rel));
+            $n++;
+        }
+    }
+    $saved = max(0, $before - $after);
+    $msg = $n > 0
+        ? '压缩完成：' . $n . ' 个数据文件，共节省 ' . round($saved / 1024, 1) . ' KB'
+        : '所有数据文件均已是压缩格式，无需处理';
+    log_action('admin_data_compress', '数据压缩：' . $n . ' 个文件，' . round($before / 1024, 1) . 'KB → ' . round($after / 1024, 1) . 'KB，节省 ' . round($saved / 1024, 1) . 'KB', (int)$me['id']);
+    if (is_ajax()) {
+        json_response(['ok' => true, 'msg' => $msg]);
+    }
+    flash('ok', $msg);
+    admin_redirect('p=admin&tab=system');
+}
+
 /** 功能总开关拦截：关闭时 act_err（AJAX 返回 JSON / 普通请求 flash+回跳），不会继续执行 */
 function feat_guard(string $k, string $msg): void
 {
@@ -192,8 +276,9 @@ function feat_guard(string $k, string $msg): void
 
 /* ================= 通用 ================= */
 
-/** 发帖/回复间隔检查与占用（在 users 锁内完成检查+写入，防并发双发） */
-function flood_check(array $u): bool
+/** 发帖/回复间隔检查与占用（在 users 锁内完成检查+写入，防并发双发）
+ * v1.16.0：被拒时把内容存入会话草稿，回跳后自动填回，不再让用户重打一遍 */
+function flood_check(array $u, array $draft = []): bool
 {
     $interval = max(0, (int)cfg('post_interval', 30));
     if ($interval <= 0) {
@@ -216,7 +301,10 @@ function flood_check(array $u): bool
     }
     Store::unlock($lk);
     if ($wait > 0) {
-        flash('err', '发言太频繁，请 ' . $wait . ' 秒后再试');
+        if ($draft !== [] && !empty($draft['key'])) {
+            $_SESSION['post_draft'] = ['key' => (string)$draft['key'], 'title' => (string)($draft['title'] ?? ''), 'content' => (string)($draft['content'] ?? ''), 'wait' => $wait, 'at' => time()];
+        }
+        flash('err', '发言太频繁，请 ' . $wait . ' 秒后再试；您写的内容已自动保留，回来自动填回，无需重打');
         return false;
     }
     return true;
@@ -253,10 +341,87 @@ function act_logout(): void
     redirect(u('p=home'));
 }
 
+/* ================= 注销账号（v1.16.0） ================= */
+
+/** 用户自助注销 · 第一步：邮箱验证码校验（通过后进入 10 秒冷静期） */
+function act_account_delete(): void
+{
+    $u = require_login('p=settings');
+    $code = post_str('code', 6);
+    $email = strtolower(trim((string)($u['email'] ?? '')));
+    $err = '';
+    if (!code_verify($email, 'delete', $code, $err)) {
+        flash('err', $err !== '' ? $err : '验证码错误或已过期');
+        redirect(u('p=settings'));
+    }
+    $_SESSION['delete_armed'] = time();
+    flash('ok', '验证通过。请再想 10 秒——10 秒后「确认注销」按钮亮起，点击后立即生效且不可恢复');
+    redirect(u('p=settings'));
+}
+
+/** 用户自助注销 · 第二步：10 秒冷静期结束后确认执行（服务端强制校验 10 秒） */
+function act_account_delete_confirm(): void
+{
+    $u = require_login('p=settings');
+    $armed = (int)($_SESSION['delete_armed'] ?? 0);
+    if ($armed <= 0 || time() - $armed < 10) {
+        flash('err', '请先完成邮箱验证码校验，并等满 10 秒冷静期');
+        redirect(u('p=settings'));
+    }
+    unset($_SESSION['delete_armed']);
+    $name = (string)$u['name'];
+    $uid = (int)$u['id'];
+    user_delete($uid);
+    log_action('account_delete', '用户「' . $name . '」（#' . $uid . '）已自助注销；历史帖子保留，作者显示为「已注销」', $uid);
+    foreach (user_all() as $au) {
+        if (!empty($au['admin']) && (int)$au['id'] !== $uid) {
+            notify_add((int)$au['id'], 'system', '有用户注销了账号', '用户「' . $name . '」（#' . $uid . '）已通过邮箱验证完成注销。其历史帖子保留，作者显示为「已注销」。', 'p=admin&tab=users');
+        }
+    }
+    auth_logout();
+    flash('ok', '您的账号已注销。历史帖子保留，作者显示为「已注销」。感谢您曾经的陪伴！');
+    redirect(u('p=home'));
+}
+
+/* ================= 协议（v1.16.0） ================= */
+
+/** 访客同意协议（协议门禁页 / 协议页表单）：同意后写一年 cookie（内容指纹，协议更新后需重新同意） */
+function act_doc_agree(): void
+{
+    if (empty($_POST['agree'])) {
+        flash('err', '请先阅读并勾选同意协议，才能继续访问');
+        redirect(u('p=doc'));
+    }
+    $fp = doc_fingerprint();
+    setcookie('mf_doc', $fp, ['expires' => time() + 31536000, 'path' => '/', 'samesite' => 'Lax', 'secure' => app_is_https()]);
+    $_SESSION['doc_agreed'] = $fp;
+    flash('ok', '感谢您的确认，祝您浏览愉快');
+    $next = (string)($_POST['next'] ?? '');
+    if ($next !== '' && preg_match('/^[a-z_=&\d]+$/', $next)) {
+        redirect(u($next));
+    }
+    redirect(u('p=home'));
+}
+
 function act_send_code(): void
 {
-    $email = strtolower(post_str('email', 60));
-    $purpose = post_str('purpose', 10) === 'register' ? 'register' : 'reset';
+    $purpose = post_str('purpose', 10);
+    if (!in_array($purpose, ['register', 'reset', 'delete'], true)) {
+        $purpose = 'reset';
+    }
+    if ($purpose === 'delete') {
+        /* 注销账号验证码：仅限已登录用户，且只能发到自己绑定的邮箱（不接受外部邮箱，防骚扰） */
+        $me = current_user();
+        if (!$me) {
+            act_err('请先登录', true);
+        }
+        $email = strtolower(trim((string)($me['email'] ?? '')));
+        if (!valid_email($email)) {
+            act_err('您的账号未绑定有效邮箱，无法自助注销，请联系管理员', true);
+        }
+    } else {
+        $email = strtolower(post_str('email', 60));
+    }
     if (!valid_email($email)) {
         act_err('邮箱格式不正确', true);
     }
@@ -273,7 +438,8 @@ function act_send_code(): void
         act_err($err, true);
     }
     $_SESSION['code_sent_at'] = time();
-    log_action('code_send', ($purpose === 'register' ? '注册' : '找回密码') . '验证码 → ' . $email);
+    $lbl = ['register' => '注册', 'reset' => '找回密码', 'delete' => '注销账号'][$purpose] ?? '验证';
+    log_action('code_send', $lbl . '验证码 → ' . $email);
     json_response(['ok' => true, 'msg' => '验证码已发送，请查收邮箱（注意垃圾箱）']);
 }
 
@@ -293,6 +459,11 @@ function act_register(): void
     }
     if (user_by_name($name)) {
         flash('err', '用户名已被占用');
+        redirect(u('p=register'));
+    }
+    /* v1.16.0：已启用协议时，注册必须勾选同意 */
+    if (doc_list() !== [] && empty($_POST['doc_agree'])) {
+        flash('err', '请先阅读并勾选同意相关协议后再注册');
         redirect(u('p=register'));
     }
     if (!valid_email($email)) {
@@ -334,7 +505,12 @@ function act_login(): void
     $remember = !empty($_POST['remember']);
     set_old(['id' => $id]);
 
-    $u = $id !== '' ? (user_by_name($id) ?? user_by_email($id)) : null;
+    $u = $id !== '' ? (user_by_name($id, true) ?? user_by_email($id)) : null;
+    if ($u && !empty($u['deleted'])) {
+        log_action('login_failed', '已注销账号尝试登录：' . (string)$u['name']);
+        flash('err', '该账号已注销');
+        redirect(u('p=login'));
+    }
     if (!$u || !password_verify($pass, (string)($u['pass'] ?? ''))) {
         log_action('login_failed', '凭据错误：' . $id);
         flash('err', '用户名或密码错误');
@@ -463,7 +639,7 @@ function act_thread_new(): void
         flash('err', '正文不能为空');
         redirect(u('p=new'));
     }
-    if (!flood_check($u)) {
+    if (!flood_check($u, ['key' => 'thread', 'title' => $title, 'content' => $content])) {
         redirect(u('p=new'));
     }
     $tid = thread_create($board, $title, $content, (int)$u['id']);
@@ -471,13 +647,11 @@ function act_thread_new(): void
     log_action('thread_new', '发布《' . cut_str($title, 40) . '》（板块：' . board_name($board) . '）');
     /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
     mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title);
-    /* 严全面·消息审核：发布后立即交给 AI 预检（后台可开关），违规自动隐藏并可申诉 */
-    $preMsg = ai_precheck_after_post('thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
-    if ($preMsg !== '') {
-        flash('err', $preMsg);
-        redirect(u('p=thread&id=' . $tid));
-    }
-    flash('ok', '发布成功');
+    /* 严全面·消息审核：v1.16.0 改为响应后异步预检（register_shutdown_function），
+       发帖立即返回不再被 AI 调用阻塞（此前同步调用会让整个服务等待数秒）；
+       判定违规后仍会自动隐藏 + 通知申诉，机制不变 */
+    register_shutdown_function('ai_precheck_after_post', 'thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
+    flash('ok', '发布成功，AI 正在后台审核内容');
     redirect(u('p=thread&id=' . $tid));
 }
 
@@ -501,7 +675,7 @@ function act_reply_new(): void
         flash('err', '该帖子已锁定或不存在，无法回复');
         redirect(u('p=thread&id=' . $tid));
     }
-    if (!flood_check($u)) {
+    if (!flood_check($u, ['key' => 'reply' . $tid, 'content' => $content])) {
         redirect(u('p=thread&id=' . $tid));
     }
     $rid = reply_add($tid, $content, (int)$u['id']);
@@ -512,13 +686,9 @@ function act_reply_new(): void
     log_action('reply_new', '在《' . cut_str((string)($t['title'] ?? ''), 40) . '》中发表回复');
     /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
     mentions_notify($content, (int)$u['id'], $tid, (int)$rid);
-    /* 严全面·消息审核：发布后立即交给 AI 预检（后台可开关），违规自动隐藏并可申诉 */
-    $preMsg = ai_precheck_after_post('reply', $tid, $rid, $content, (int)$u['id']);
-    if ($preMsg !== '') {
-        flash('err', $preMsg);
-        redirect(u('p=thread&id=' . $tid) . '#r' . $rid);
-    }
-    flash('ok', '回复成功');
+    /* 严全面·消息审核：v1.16.0 改为响应后异步预检，不再阻塞响应（同上） */
+    register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id']);
+    flash('ok', '回复成功，AI 正在后台审核内容');
     redirect(u('p=thread&id=' . $tid) . '#r' . $rid);
 }
 
@@ -865,25 +1035,63 @@ function act_admin_test_mail(): void
 
 function act_admin_save_ai(): void
 {
-    cfg_update([
-        'ai_retries' => max(1, min(10, (int)($_POST['ai_retries'] ?? 3))),
-        'ai_fail_limit' => max(1, min(20, (int)($_POST['ai_fail_limit'] ?? 3))),
-        'ai_fullpower' => isset($_POST['ai_fullpower']) ? 1 : 0,
-        'ai_strict' => ai_strict_norm(post_str('ai_strict', 10)),
-        /* 严全面模式：消息预检 + AI 自主管理 */
-        'ai_precheck' => isset($_POST['ai_precheck']) ? 1 : 0,
-        'ai_autopilot' => isset($_POST['ai_autopilot']) ? 1 : 0,
-        'ai_patrol_interval' => max(2, min(360, (int)($_POST['ai_patrol_interval'] ?? 15))),
-        'ai_patrol_ban_limit' => max(1, min(10, (int)($_POST['ai_patrol_ban_limit'] ?? 3))),
-        'ai_patrol_alert' => isset($_POST['ai_patrol_alert']) ? 1 : 0,
-    ]);
-    $lvName = ['loose' => '宽松', 'standard' => '标准', 'strict' => '严格'][cfg('ai_strict', 'standard')];
-    log_action('admin_save_ai', '审核策略：单模型重试 ' . (int)cfg('ai_retries', 3) . ' 次；自动切换阈值 '
-        . ai_fail_limit() . ' 次；全火力全开：' . (!empty(cfg('ai_fullpower')) ? '开' : '关') . '；审核严格程度：' . $lvName
-        . '；发帖预检：' . (!empty(cfg('ai_precheck')) ? '开' : '关')
-        . '；AI 自主管理：' . (!empty(cfg('ai_autopilot')) ? '开' : '关')
-        . '（巡逻间隔 ' . ai_patrol_interval() . ' 分钟，单轮封禁上限 ' . ai_patrol_ban_limit() . '，邮件警报：' . (!empty(cfg('ai_patrol_alert')) ? '开' : '关') . '）');
-    act_ok('AI 设置已保存', u('p=admin&tab=ai'));
+    /* v1.16.0：AI 页与「安全防护」页（严全面区块）共用本动作，各页只提交自己的字段，
+       因此全部按"提交了才更新"处理，避免一页保存把另一页的设置重置为默认值 */
+    $kv = [];
+    if (isset($_POST['ai_retries'])) {
+        $kv['ai_retries'] = max(1, min(10, (int)$_POST['ai_retries']));
+    }
+    if (isset($_POST['ai_fail_limit'])) {
+        $kv['ai_fail_limit'] = max(1, min(20, (int)$_POST['ai_fail_limit']));
+    }
+    if (isset($_POST['ai_mode'])) {
+        $mode = (string)$_POST['ai_mode'];
+        if (!in_array($mode, ['normal', 'fullpower', 'parallel'], true)) {
+            $mode = 'normal';
+        }
+        $kv['ai_mode'] = $mode;
+        $kv['ai_fullpower'] = $mode === 'fullpower' ? 1 : 0; /* 旧开关同步，兼容降级场景 */
+    }
+    if (isset($_POST['ai_strict'])) {
+        $kv['ai_strict'] = ai_strict_norm((string)$_POST['ai_strict']);
+    }
+    /* checkbox 用 hidden(0)+checkbox(1) 组合提交，取消勾选也能落盘为 0 */
+    foreach (['ai_precheck', 'ai_autopilot', 'ai_patrol_alert'] as $k) {
+        if (array_key_exists($k, $_POST)) {
+            $kv[$k] = !empty($_POST[$k]) ? 1 : 0;
+        }
+    }
+    if (isset($_POST['ai_patrol_interval'])) {
+        $kv['ai_patrol_interval'] = max(2, min(360, (int)$_POST['ai_patrol_interval']));
+    }
+    if (isset($_POST['ai_patrol_ban_limit'])) {
+        $kv['ai_patrol_ban_limit'] = max(1, min(10, (int)$_POST['ai_patrol_ban_limit']));
+    }
+    if ($kv) {
+        cfg_update($kv);
+    }
+    $parts = [];
+    if (isset($kv['ai_mode'])) {
+        $parts[] = '审核模式：' . ['normal' => '标准（单模型顺序）', 'fullpower' => '全火力全开（所有模型同审一条）', 'parallel' => '并行火力（多模型同刻各审一条）'][$kv['ai_mode']];
+    }
+    if (isset($kv['ai_retries']) || isset($kv['ai_fail_limit'])) {
+        $parts[] = '单模型重试 ' . (int)cfg('ai_retries', 3) . ' 次 / 自动切换阈值 ' . ai_fail_limit() . ' 次';
+    }
+    if (isset($kv['ai_strict'])) {
+        $lvName = ['loose' => '宽松', 'standard' => '标准', 'strict' => '严格'][cfg('ai_strict', 'standard')];
+        $parts[] = '审核严格程度：' . $lvName;
+    }
+    if (isset($kv['ai_precheck'])) {
+        $parts[] = '发帖预检：' . ($kv['ai_precheck'] ? '开' : '关');
+    }
+    if (isset($kv['ai_autopilot'])) {
+        $parts[] = 'AI 自主管理：' . ($kv['ai_autopilot'] ? '开' : '关') . '（巡逻间隔 ' . ai_patrol_interval() . ' 分钟，单轮封禁上限 ' . ai_patrol_ban_limit() . '，邮件警报：' . (!empty(cfg('ai_patrol_alert', 1)) ? '开' : '关') . '）';
+    }
+    if ($parts) {
+        log_action('admin_save_ai', 'AI 设置：' . implode('；', $parts));
+    }
+    $backTab = (isset($_POST['ai_autopilot']) || isset($_POST['ai_patrol_interval'])) ? 'security' : 'ai';
+    act_ok('AI 设置已保存', u('p=admin&tab=' . $backTab));
 }
 
 function act_admin_test_ai(): void
@@ -1263,7 +1471,7 @@ function act_admin_queue_run(): void
         flash('ok', $msg);
     }
     log_action('admin_queue_run', $done ? '手动触发 AI 审核：' . $msg : '手动触发 AI 审核（队列为空）');
-    redirect(u('p=admin&tab=queue'));
+    admin_redirect('p=admin&tab=queue');
 }
 
 function act_admin_queue_restore(): void
@@ -1443,12 +1651,12 @@ function act_admin_backup_dl(): void
     $name = (string)($_GET['id'] ?? '');
     if (!preg_match('/^(backup|pre-update)-\d{8}-\d{6}\.zip$/', $name)) {
         flash('err', '无效的备份文件名');
-        redirect(u('p=admin&tab=system'));
+        admin_redirect('p=admin&tab=system');
     }
     $p = Store::path('backup/' . $name);
     if (!is_file($p)) {
         flash('err', '备份文件不存在');
-        redirect(u('p=admin&tab=system'));
+        admin_redirect('p=admin&tab=system');
     }
     log_action('admin_backup_dl', '下载备份：' . $name, (int)$u['id'], (string)$u['name']);
     header('Content-Type: application/zip');
@@ -1466,16 +1674,16 @@ function act_admin_backup_del(): void
     $name = (string)($_POST['id'] ?? '');
     if (!preg_match('/^(backup|pre-update)-\d{8}-\d{6}\.zip$/', $name)) {
         flash('err', '无效的备份文件名');
-        redirect(u('p=admin&tab=system'));
+        admin_redirect('p=admin&tab=system');
     }
     $p = Store::path('backup/' . $name);
     if (!is_file($p)) {
         flash('err', '备份文件不存在');
-        redirect(u('p=admin&tab=system'));
+        admin_redirect('p=admin&tab=system');
     }
     if (!@unlink($p)) {
         flash('err', '删除失败：文件被占用或目录不可写，请检查 data/backup/ 权限');
-        redirect(u('p=admin&tab=system'));
+        admin_redirect('p=admin&tab=system');
     }
     log_action('admin_backup_del', '删除备份：' . $name, (int)$u['id'], (string)$u['name']);
     act_ok('备份已删除：' . $name, u('p=admin&tab=system'));
@@ -1523,7 +1731,7 @@ function act_admin_repair_dirs(): void
             : '如仍无法发帖，请重试一次发帖看是否已恢复。';
         flash('ok', '检查/修复完成：' . $fixed . ' 个目录均已可写。' . $extra);
     }
-    redirect(u('p=admin&tab=monitor'));
+    admin_redirect('p=admin&tab=monitor');
 }
 
 /** 手动发送测试 / 真实告警邮件（force 跳过冷却） */
@@ -1573,12 +1781,12 @@ function act_admin_update(): void
         @unlink($tmp);
         log_action('admin_update', '更新失败：' . $ex->getMessage());
         flash('err', '更新失败：' . $ex->getMessage());
-        redirect(u('p=admin&tab=update'));
+        admin_redirect('p=admin&tab=update');
     }
     @unlink($tmp);
     flash('ok', '更新成功：v' . $res['from'] . ' → v' . $res['version'] . '，共应用 ' . $res['files'] . ' 个文件'
         . ($res['backup'] !== '' ? '；更新前程序已备份为 ' . $res['backup'] : ''));
-    redirect(u('p=admin&tab=update'));
+    admin_redirect('p=admin&tab=update');
 }
 
 /** 日志设置：保留天数 + 页面访问日志开关 */
@@ -1601,7 +1809,7 @@ function act_admin_logs_clear(): void
     } else {
         flash('ok', '没有需要清理的日志文件');
     }
-    redirect(u('p=admin&tab=logs'));
+    admin_redirect('p=admin&tab=logs');
 }
 
 /** 一键导出全部日志为 TXT（操作日志 + 防火墙事件 + 错误日志尾部），流式下载 */
@@ -1736,7 +1944,7 @@ function act_admin_fw_intel_sync(): void
     $msg = '同步完成：' . (int)$r['total'] . ' 条（IP ' . count($r['ips']) . ' · 网段 ' . count($r['nets']) . '），' . $ok . ' 个源成功'
         . ($fail ? '；失败：' . implode('；', $fail) : '');
     flash(strpos($msg, '失败') === false ? 'ok' : 'err', $msg);
-    redirect(u('p=admin&tab=security'));
+    admin_redirect('p=admin&tab=security');
 }
 
 /** 导入黑名单文本 / 上传 txt */
@@ -1754,13 +1962,13 @@ function act_admin_fw_intel_import(): void
             }
         } else {
             flash('err', '上传文件无效（仅支持 ≤2MB 的 .txt / .csv / .list）');
-            redirect(u('p=admin&tab=security'));
+            admin_redirect('p=admin&tab=security');
         }
     }
     $text = trim($text);
     if ($text === '') {
         flash('err', '请粘贴黑名单文本或上传 txt 文件');
-        redirect(u('p=admin&tab=security'));
+        admin_redirect('p=admin&tab=security');
     }
     $n = fw_intel_import($text, (string)$me['name']);
     log_action('fw_intel_import', '手动导入黑名单：' . $n . ' 条有效记录', (int)$me['id']);
@@ -1769,7 +1977,7 @@ function act_admin_fw_intel_import(): void
     } else {
         flash('err', '没有解析到有效的 IP / 网段（每行一个，支持 CIDR 与区间）');
     }
-    redirect(u('p=admin&tab=security'));
+    admin_redirect('p=admin&tab=security');
 }
 
 /** 手动封禁（单 IP 或 CIDR） */
@@ -1894,7 +2102,7 @@ function act_admin_fw_log_clear(): void
     $date = (string)($_POST['date'] ?? '');
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         flash('err', '日期无效');
-        redirect(u('p=admin&tab=security'));
+        admin_redirect('p=admin&tab=security');
     }
     $f = Store::path('logs/fw-' . $date . '.php');
     $ok = is_file($f) ? @unlink($f) : true;

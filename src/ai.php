@@ -294,6 +294,174 @@ function ai_call_model(array $m, string $content, string &$verdict, string &$not
     return false;
 }
 
+/* ================= 并行火力（v1.16.0） ================= */
+
+/**
+ * 审核模式：
+ *  - normal    标准：按模型顺序调用，失败自动切换（每条内容一个模型在审）
+ *  - fullpower 全火力：所有启用模型同时审同一条内容（严判，任一违规即违规）
+ *  - parallel  并行火力：队列一次取出 K 条（K = 启用模型数），K 个模型并行各审一条（吞吐 ×K）
+ */
+function ai_mode(): string
+{
+    $m = (string)cfg('ai_mode', '');
+    if (!in_array($m, ['normal', 'fullpower', 'parallel'], true)) {
+        /* 旧版本兼容：老开关 ai_fullpower=1 视为全火力 */
+        $m = !empty(cfg('ai_fullpower', 0)) ? 'fullpower' : 'normal';
+    }
+    return $m;
+}
+
+/** 解析单次 AI 响应文本（与 ai_call_model 内联解析同一套规则，供并行批量调用复用） */
+function ai_parse_reply(string $res, string &$verdict, string &$note): bool
+{
+    $verdict = '';
+    $note = '';
+    $j = json_decode($res, true);
+    $text = is_array($j) ? ($j['choices'][0]['message']['content'] ?? '') : '';
+    if (is_string($text) && $text !== '') {
+        $mm = [];
+        if (preg_match('/\{[^{}]*\}/s', $text, $mm)) {
+            $v = json_decode($mm[0], true);
+            if (is_array($v) && array_key_exists('violation', $v)) {
+                $verdict = !empty($v['violation']) ? 'violation' : 'ok';
+                $note = trim((string)($v['reason'] ?? ''));
+                return true;
+            }
+        }
+        $t = strtolower(preg_replace('/\s+/', '', $text));
+        if (strpos($t, '"violation":true') !== false) {
+            $verdict = 'violation';
+            $note = cut_str($text, 60);
+            return true;
+        }
+        if (strpos($t, '"violation":false') !== false) {
+            $verdict = 'ok';
+            $note = cut_str($text, 60);
+            return true;
+        }
+        $note = 'AI 返回格式无法解析：' . cut_str($text, 120);
+        return false;
+    }
+    $msg = is_array($j) ? (string)($j['error']['message'] ?? json_encode($j, JSON_UNESCAPED_UNICODE)) : '响应非 JSON';
+    $note = '响应异常：' . cut_str($msg, 160);
+    return false;
+}
+
+/**
+ * 并行批量调用（curl_multi）：每个任务 = 一个模型审一条不同内容，真正的同刻并发。
+ * jobs：[['model'=>模型行, 'content'=>待审内容], ...]
+ * 返回与输入同序的结果数组：['ok'=>bool, 'verdict'=>'violation|ok', 'note'=>string, 'label'=>模型名]
+ * curl 扩展不可用时自动降级为串行；失败计数沿用 fail 窗口（成功清零 / 失败累计）。
+ */
+function ai_call_multi(array $jobs): array
+{
+    $strict = (string)cfg('ai_strict', 'standard');
+    if ($strict === '' || $strict === 'default') {
+        $strict = 'standard';
+    }
+    $out = [];
+    foreach ($jobs as $j) {
+        $out[] = ['ok' => false, 'verdict' => '', 'note' => '', 'label' => ai_model_label($j['model'])];
+    }
+    if (!$jobs) {
+        return $out;
+    }
+
+    $canMulti = function_exists('curl_multi_init');
+    $chs = [];
+    if ($canMulti) {
+        $mh = curl_multi_init();
+        foreach ($jobs as $i => $j) {
+            $payload = [
+                'model' => $j['model']['model'],
+                'temperature' => 0,
+                'stream' => false,
+                'max_tokens' => 300,
+                'messages' => [
+                    ['role' => 'system', 'content' => ai_system_prompt($strict)],
+                    ['role' => 'user', 'content' => "待审核内容：\n" . cut_str($j['content'], 1200)],
+                ],
+            ];
+            $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
+            $ch = curl_init(ai_endpoint($j['model']['url']));
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $body,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $j['model']['key']],
+            ]);
+            curl_multi_add_handle($mh, $ch);
+            $chs[$i] = $ch;
+        }
+        /* 同刻并发执行 */
+        do {
+            curl_multi_exec($mh, $running);
+            if ($running) {
+                curl_multi_select($mh, 0.2);
+            }
+        } while ($running > 0);
+        foreach ($chs as $i => $ch) {
+            $res = curl_multi_getcontent($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $cerr = curl_error($ch);
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+            if ($res === false || $res === null || $cerr !== '') {
+                $out[$i]['note'] = $cerr !== '' ? 'curl: ' . $cerr : 'HTTP 请求失败';
+                continue;
+            }
+            if ($code < 200 || $code >= 300) {
+                $out[$i]['note'] = "HTTP {$code}：" . cut_str(strip_tags((string)$res), 160);
+                continue;
+            }
+            $v = '';
+            $n = '';
+            if (ai_parse_reply((string)$res, $v, $n)) {
+                $out[$i]['ok'] = true;
+                $out[$i]['verdict'] = $v;
+                $out[$i]['note'] = $n;
+            } else {
+                $out[$i]['note'] = $n;
+            }
+        }
+        curl_multi_close($mh);
+        return $out;
+    }
+
+    /* 无 curl_multi：串行降级（结果等价，只是不并发） */
+    foreach ($jobs as $i => $j) {
+        $payload = [
+            'model' => $j['model']['model'],
+            'temperature' => 0,
+            'stream' => false,
+            'max_tokens' => 300,
+            'messages' => [
+                ['role' => 'system', 'content' => ai_system_prompt($strict)],
+                ['role' => 'user', 'content' => "待审核内容：\n" . cut_str($j['content'], 1200)],
+            ],
+        ];
+        $err = '';
+        $res = http_post_json(ai_endpoint($j['model']['url']), $payload, ['Authorization: Bearer ' . $j['model']['key']], 30, $err);
+        if ($res === null) {
+            $out[$i]['note'] = $err;
+            continue;
+        }
+        $v = '';
+        $n = '';
+        if (ai_parse_reply($res, $v, $n)) {
+            $out[$i]['ok'] = true;
+            $out[$i]['verdict'] = $v;
+            $out[$i]['note'] = $n;
+        } else {
+            $out[$i]['note'] = $n;
+        }
+    }
+    return $out;
+}
+
 /* ================= 多模型编排 ================= */
 
 /**

@@ -235,10 +235,14 @@ function page_thread(): void
     } elseif (mute_left($u) > 0) {
         echo '<div class="muted">您已被禁言，剩余 ' . ceil(mute_left($u) / 60) . ' 分钟。</div>';
     } else {
+        /* v1.16.0：发言间隔被拒时内容已存会话草稿，回跳后自动填回，用户不必重打 */
+        $draft = $_SESSION['post_draft'] ?? null;
+        $rd = (is_array($draft) && ($draft['key'] ?? '') === 'reply' . $tid) ? (string)($draft['content'] ?? '') : '';
+        unset($_SESSION['post_draft']);
         echo '<form method="post" action="' . e(u('a=reply_new')) . '">' .
             '<input type="hidden" name="tid" value="' . $tid . '">' .
             csrf_field() . hidden_back() .
-            '<textarea class="input" name="content" rows="4" maxlength="1000" required placeholder="友善回复（支持 Markdown，最多 1000 字；可用 @用户名 提及他人，对方会收到通知）"></textarea>' .
+            '<textarea class="input" name="content" rows="4" maxlength="1000" required placeholder="友善回复（支持 Markdown，最多 1000 字；可用 @用户名 提及他人，对方会收到通知）">' . e($rd) . '</textarea>' .
             '<div class="form-foot"><span class="muted">支持 Markdown</span>' .
             '<button class="btn btn-primary" type="submit">回复</button></div></form>';
     }
@@ -259,6 +263,11 @@ function page_new(): void
         redirect(u('p=home'));
     }
     $pre = get_int('id', 0);
+    /* v1.16.0：发言间隔被拒时内容已存会话草稿，回跳后自动填回，用户不必重打 */
+    $draft = $_SESSION['post_draft'] ?? null;
+    $dt = (is_array($draft) && ($draft['key'] ?? '') === 'thread') ? (string)($draft['title'] ?? '') : '';
+    $dc = (is_array($draft) && ($draft['key'] ?? '') === 'thread') ? (string)($draft['content'] ?? '') : '';
+    unset($_SESSION['post_draft']);
     layout_header('发布帖子', 0);
     echo page_head('发布帖子', '标题最多 30 字，正文最多 1500 字，支持 Markdown 与 @用户名 提及（图片可用 https 外链，无附件）');
     echo '<div class="card form-card"><form method="post" action="' . e(u('a=thread_new')) . '">' .
@@ -269,9 +278,9 @@ function page_new(): void
     }
     echo '</select></label>' .
         '<label class="field"><span class="field-l">标题 <em class="cnt"><i id="t-count">0</i>/30</em></span>' .
-        '<input class="input" name="title" id="title-input" maxlength="30" required data-counter="#t-count" placeholder="一句话说清主题"></label>' .
+        '<input class="input" name="title" id="title-input" maxlength="30" required data-counter="#t-count" value="' . e($dt) . '" placeholder="一句话说清主题"></label>' .
         '<label class="field"><span class="field-l">正文 <em class="cnt"><i id="c-count">0</i>/1500</em></span>' .
-        '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1500" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮==；@用户名 会通知对方"></textarea></label>' .
+        '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1500" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮==；@用户名 会通知对方">' . e($dc) . '</textarea></label>' .
         '<div class="form-foot"><span class="muted">两次发帖间隔不低于 ' . (int)cfg('post_interval', 30) . ' 秒</span>' .
         '<button class="btn btn-primary" type="submit">发布</button></div></form></div>';
     layout_footer();
@@ -315,6 +324,12 @@ function page_register(): void
         '<span class="code-msg muted"></span></div>' .
         '<label class="field"><span class="field-l">密码</span><input class="input" type="password" name="pass" required minlength="6" maxlength="60" autocomplete="new-password" placeholder="至少 6 位"></label>' .
         '<label class="field"><span class="field-l">确认密码</span><input class="input" type="password" name="pass2" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
+        /* v1.16.0：已启用协议时强制勾选 */
+        (doc_list() !== []
+            ? '<label class="check doc-agree"><input type="checkbox" name="doc_agree" value="1" required> 我已阅读并同意 ' .
+                implode('、', array_map(function ($d) { return '<a href="' . e(u('p=doc')) . '" target="_blank"><b>' . e($d['title']) . '</b></a>'; }, array_values(doc_list())))
+            . '</label>'
+            : '') .
         '<button class="btn btn-primary btn-block" type="submit">注册并登录</button></form>' .
         '<div class="auth-foot"><a href="' . e(u('p=login')) . '">已有账号？登录</a></div>' .
         '</div></div>';
@@ -414,6 +429,29 @@ function page_settings(): void
         '<label class="field"><span class="field-l">新密码</span><input class="input" type="password" name="pass" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
         '<label class="field"><span class="field-l">确认新密码</span><input class="input" type="password" name="pass2" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">修改密码</button></div></form></div>';
+
+    /* ---- v1.16.0：注销账号 ---- */
+    $armed = (int)($_SESSION['delete_armed'] ?? 0);
+    $left = $armed > 0 ? max(0, 10 - (time() - $armed)) : -1;
+    echo '<div class="card form-card danger-zone" id="delete"><h2 class="card-title">注销账号</h2>' .
+        '<p class="muted">注销后您的账号将无法登录，历史帖子保留、作者显示为「已注销」；用户名与邮箱会被释放，可被重新注册。<b>此操作不可恢复</b>，请谨慎操作。</p>' .
+        '<p class="muted">流程：发送邮箱验证码 → 输入验证码确认身份 → 等待 10 秒冷静期 → 点击「确认注销」。</p>' .
+        '<form method="post" action="' . e(u('a=account_delete')) . '">' . csrf_field() .
+        '<div class="field"><span class="field-l">注册邮箱</span><input class="input" type="email" id="del-email" value="' . e((string)$u['email']) . '" readonly></div>' .
+        '<div class="field"><span class="field-l">邮箱验证码</span>' .
+        '<div class="code-row"><input class="input" name="code" required maxlength="6" inputmode="numeric" placeholder="6 位数字">' .
+        '<button class="btn btn-ghost send-code" type="button" data-purpose="delete" data-email="#del-email">发送验证码</button></div>' .
+        '<span class="code-msg muted"></span></div>' .
+        '<div class="form-foot"><span></span><button class="btn danger" type="submit">验证身份</button></div></form>';
+    if ($left >= 0) {
+        echo '<form method="post" action="' . e(u('a=account_delete_confirm')) . '" class="delete-confirm">' . csrf_field() .
+            '<p class="muted">身份已验证。' . ($left > 0
+                ? '请在下方倒计时结束后确认（冷静期 <b id="del-count">' . $left . '</b> 秒）'
+                : '冷静期已结束，确认后立即生效且不可恢复') . '</p>' .
+            '<button class="btn danger" type="submit" id="del-go"' . ($left > 0 ? ' disabled' : '') . ' data-wait="' . $left . '">确认注销（10 秒后可点击）</button>' .
+            '</form>';
+    }
+    echo '</div>';
     layout_footer();
 }
 
@@ -624,6 +662,30 @@ function page_search(): void
         '<div class="code-row"><input class="input" type="search" name="q" maxlength="50" value="' . e($q) . '" placeholder="输入关键词，如：茶馆">' .
         '<button class="btn btn-primary" type="submit">搜索</button></div></form></div>';
     if ($q !== '') {
+        /* v1.16.0：用户搜索（用户名 / 签名 / 简介） */
+        $uhits = [];
+        foreach (user_all() as $uu) {
+            if (!empty($uu['deleted']) || !empty($uu['banned'])) {
+                continue;
+            }
+            if (txt_contains((string)($uu['name'] ?? ''), $q) || txt_contains((string)($uu['sig'] ?? ''), $q) || txt_contains((string)($uu['bio'] ?? ''), $q)) {
+                $uhits[] = $uu;
+                if (count($uhits) >= 20) {
+                    break;
+                }
+            }
+        }
+        if ($uhits) {
+            echo '<div class="list-head"><span class="muted">找到 ' . count($uhits) . ' 位相关用户</span></div><div class="thread-list">';
+            foreach ($uhits as $uu) {
+                echo '<a class="thread-card" href="' . e(u('p=user&id=' . (int)$uu['id'])) . '"><div class="tc-main"><b>' . e((string)$uu['name']) . '</b>' .
+                    '<span class="badge' . (!empty($uu['admin']) ? ' badge-accent' : '') . '">' . e(role_name($uu)) . '</span>' .
+                    '<span class="muted">发帖 ' . (int)($uu['threads'] ?? 0) . ' · 回复 ' . (int)($uu['replies'] ?? 0) . '</span></div>' .
+                    ((string)($uu['bio'] ?? '') !== '' || (string)($uu['sig'] ?? '') !== '' ? '<div class="tc-sub muted">' . e((string)($uu['bio'] ?? $uu['sig'])) . '</div>' : '') .
+                    '</a>';
+            }
+            echo '</div>';
+        }
         $hits = search_threads($q);
         $scan = min(500, count(threads_visible(thread_index())));
         echo '<div class="list-head"><span class="muted">在最近 ' . $scan . ' 帖中找到 ' . count($hits) . ' 条结果</span></div>';
@@ -679,4 +741,88 @@ function page_404(): void
     echo '<div class="card notice-card"><b>404 · 页面不存在</b><p>内容可能已被删除，或链接有误。</p>' .
         '<a class="btn btn-primary btn-sm" href="' . e(u('p=home')) . '">返回首页</a></div>';
     layout_footer();
+}
+
+
+/* ---------------- 协议（v1.16.0） ---------------- */
+
+/** 协议门禁页：未同意协议的访客访问任何页面时先看到这里，不同意无法继续 */
+function page_doc_gate(): void
+{
+    $next = '';
+    if (isset($_GET['p']) && preg_match('/^[a-z_]{1,20}$/', (string)$_GET['p'])) {
+        $next = 'p=' . (string)$_GET['p'];
+        if (isset($_GET['id']) && (int)$_GET['id'] > 0) {
+            $next .= '&id=' . (int)$_GET['id'];
+        }
+    }
+    layout_header('请先确认并同意协议', 0);
+    echo page_head('请确认并同意以下协议', '同意后即可继续浏览（一年内无需重复确认；协议更新后会再次提示）。不同意将无法进入本站。');
+    foreach (doc_list() as $d) {
+        echo '<div class="card form-card"><h2 class="card-title">' . e($d['title']) . '</h2><div class="md doc-body">' . md_render($d['body']) . '</div></div>';
+    }
+    echo '<div class="card form-card doc-agree-card"><form method="post" action="' . e(u('a=doc_agree')) . '">' . csrf_field() .
+        '<input type="hidden" name="next" value="' . e($next) . '">' .
+        '<label class="check"><input type="checkbox" name="agree" value="1" required> <b>我已仔细阅读并同意以上全部协议</b></label>' .
+        '<div class="form-foot"><span class="muted">点击「确认并继续」即代表您已理解并接受全部条款</span>' .
+        '<button class="btn btn-primary" type="submit">确认并继续</button></div></form></div>';
+    layout_footer();
+}
+
+/** 协议查看页：p=doc&type=terms|privacy|disclaimer；不带 type 时列出全部已启用协议 */
+function page_doc(): void
+{
+    $type = (string)($_GET['type'] ?? '');
+    if (!preg_match('/^[a-z]{1,16}$/', $type) || !isset(doc_defs()[$type])) {
+        $type = '';
+    }
+    $list = doc_list();
+    layout_header($type !== '' && isset($list[$type]) ? $list[$type]['title'] : '网站协议', 0);
+    if ($type !== '' && isset($list[$type])) {
+        echo page_head($list[$type]['title'], '协议内容由站点管理员维护，如有疑问请联系管理员');
+        echo '<div class="card form-card"><div class="md doc-body">' . md_render($list[$type]['body']) . '</div></div>';
+    } else {
+        echo page_head('网站协议', '以下为本站已启用的全部协议');
+        if (!$list) {
+            echo '<div class="card form-card">' . empty_state('站长还没有启用任何协议') . '</div>';
+        }
+        foreach ($list as $k => $d) {
+            echo '<div class="card form-card"><h2 class="card-title"><a href="' . e(u('p=doc&type=' . $k)) . '">' . e($d['title']) . '</a></h2><div class="md doc-body">' . md_render($d['body']) . '</div></div>';
+        }
+    }
+    if ($list && (int)cfg('doc_gate', 0) === 1 && !doc_gate_passed()) {
+        echo '<div class="card form-card doc-agree-card"><form method="post" action="' . e(u('a=doc_agree')) . '">' . csrf_field() .
+            '<label class="check"><input type="checkbox" name="agree" value="1" required> <b>我已仔细阅读并同意以上协议</b></label>' .
+            '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">确认并继续浏览</button></div></form></div>';
+    }
+    layout_footer();
+}
+
+/** @ 提及补全数据源（v1.16.0）：登录用户可用，按关键词过滤用户名，JSON 输出 */
+function page_mention_api(): void
+{
+    header('Content-Type: application/json; charset=utf-8');
+    if (!current_user() || !feat_on('mention')) {
+        json_response(['ok' => false, 'users' => []]);
+    }
+    $q = trim((string)($_GET['q'] ?? ''));
+    $q = cut_str($q, 20);
+    $out = [];
+    foreach (user_all() as $uu) {
+        if (!empty($uu['deleted']) || !empty($uu['banned'])) {
+            continue;
+        }
+        $n = (string)($uu['name'] ?? '');
+        if ($n === '') {
+            continue;
+        }
+        if ($q !== '' && !txt_contains($n, $q)) {
+            continue;
+        }
+        $out[] = $n;
+        if (count($out) >= 20) {
+            break;
+        }
+    }
+    json_response(['ok' => true, 'users' => $out]);
 }

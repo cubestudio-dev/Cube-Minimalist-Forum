@@ -722,9 +722,157 @@ function report_status_label(string $s): string
     return $map[$s] ?? $s;
 }
 
+/** 队列当前待审条数 */
+function queue_length(): int
+{
+    $q = Store::read('queue.php', []);
+    return is_array($q) ? count($q) : 0;
+}
+
 /**
- * AI 审核队列：每次调用只处理一条（先进先出），带非阻塞锁 + 调用间隔保护
- * 页面访问时自动触发（register_shutdown_function），后台也可手动触发
+ * 队列单条审核结果落盘（v1.16.0 从 ai_process_queue 抽出，单条 / 并行火力共用）：
+ * 失败 → ai_failed + 通知管理员；违规 → ai_bad 保持隐藏 + 通知双方（可申诉）；通过 → ai_ok 恢复展示。
+ * @return string 人读提示
+ */
+function ai_queue_settle(int $rid, array $rep, bool $ok, string $verdict, string $note, string $used): string
+{
+    $isThread = ($rep['type'] === 'thread');
+    $tTitle = cut_str((string)(thread_get((int)$rep['tid'])['title'] ?? ''), 40);
+    $no = $isThread ? '帖子《' . $tTitle . '》' : '帖子《' . $tTitle . '》中的回复';
+
+    if (!$ok) {
+        // 全部模型重试仍失败：保持隐藏，通知管理员人工处理
+        report_update($rid, ['status' => 'ai_failed', 'note' => cut_str($note, 200), 'handled' => time()]);
+        log_action('ai_failed', '举报 #' . $rid . '（' . $no . '）：' . cut_str($used . '：' . $note, 160) . '；内容保持隐藏，已通知管理员', 0, '系统');
+        foreach (user_all() as $au) {
+            if (!empty($au['admin'])) {
+                notify_add((int)$au['id'], 'ai_admin', 'AI 审核失败', '举报 #' . $rid . '（' . $no . '）审核失败：' . cut_str($note, 120) . '。内容保持隐藏，请到后台「AI 待审队列」处理。', 'p=admin&tab=queue');
+            }
+        }
+        return 'AI 调用失败：' . cut_str($note, 80) . '（内容保持隐藏，已通知管理员）';
+    }
+    if ($verdict === 'violation') {
+        // 有问题：保持隐藏，通知被举报人（可申诉），同步告知举报人
+        report_update($rid, ['status' => 'ai_bad', 'note' => cut_str($note, 200), 'handled' => time()]);
+        log_action('ai_bad', '举报 #' . $rid . '：' . $no . ' 判定违规（' . cut_str($note, 80) . '），内容保持隐藏' . ($used !== '' ? '，审核方：' . $used : ''), 0, '系统');
+        $reason = (string)($rep['reason'] ?? '');
+        notify_add(
+            (int)$rep['author'], 'ai_bad',
+            '您的内容被举报，AI 审核判定违规',
+            $no . ' 被举报（理由：' . ($reason !== '' ? $reason : '未填写') . '），AI 审核认为存在违规，内容已隐藏。如您认为审核有误，可在本条通知下方点击「申诉」，申诉后将由管理员人工复核。',
+            'p=thread&id=' . (int)$rep['tid'], $rid, true
+        );
+        notify_add(
+            (int)$rep['reporter'], 'report_result', '举报处理结果',
+            '您举报的' . $no . '经 AI 审核判定违规，内容已隐藏，将等待用户申诉或管理员人工复核。感谢您的监督。',
+            'p=thread&id=' . (int)$rep['tid']
+        );
+        return '审核完成：判定违规，内容保持隐藏，已通知被举报人';
+    }
+    // 没问题：恢复内容
+    report_update($rid, ['status' => 'ai_ok', 'note' => cut_str($note, 200), 'handled' => time()]);
+    report_target_set_hidden($rep, false);
+    log_action('ai_ok', '举报 #' . $rid . '：' . $no . ' 未发现违规，已恢复展示' . ($used !== '' ? '，审核方：' . $used : ''), 0, '系统');
+    notify_add(
+        (int)$rep['reporter'], 'report_result', '举报处理结果',
+        '您举报的' . $no . '经 AI 审核未发现违规，内容已恢复展示。感谢您的监督。',
+        'p=thread&id=' . (int)$rep['tid']
+    );
+    return '审核完成：未发现违规，内容已恢复展示';
+}
+
+/** 并行火力失败计数统一结算：成功模型清零（顺带自动恢复），失败模型累计 */
+function ai_multi_fail_settle(array $results, array $jobs): void
+{
+    $st = ai_state_read();
+    $fail = $st['fail'];
+    $limit = ai_fail_limit();
+    foreach ($results as $i => $r) {
+        $m = $jobs[$i]['model'] ?? null;
+        if (!$m) {
+            continue;
+        }
+        $id = (int)$m['id'];
+        $label = ai_model_label($m);
+        if (!empty($r['ok'])) {
+            $wasTripped = (int)($fail[$id] ?? 0) >= $limit;
+            $fail[$id] = 0;
+            if ($wasTripped) {
+                log_action('ai_model_recover', '模型「' . $label . '」审核成功，已从故障中自动恢复');
+            }
+            if ((int)$st['active'] === 0) {
+                $st['active'] = $id;
+            }
+        } else {
+            ai_fail_bump($fail, $id, $label, $limit);
+        }
+    }
+    $st['fail'] = $fail;
+    $st['last'] = time();
+    ai_state_write($st);
+}
+
+/**
+ * 并行火力队列处理（v1.16.0）：一次从队列取出 K 条（K = min(启用模型数, 队列长度)），
+ * K 个模型通过 curl_multi 同刻并发、各审一条，吞吐提升 K 倍；结果逐条走同一套落盘/通知逻辑。
+ * 前置条件：调用方已持有 ai 锁、已过间隔保护；至少 2 条待审 + 2 个启用模型才会进入本路径。
+ */
+function ai_process_queue_parallel($lk, array $models, bool $manual): array
+{
+    $jobs = [];
+    for ($i = 0; $i < count($models); $i++) {
+        $rid = queue_shift();
+        if ($rid === null) {
+            break;
+        }
+        $rep = report_get($rid);
+        if (!$rep || $rep['status'] !== 'pending') {
+            continue;
+        }
+        $gone = false;
+        $content = report_target_content($rep, $gone);
+        if ($gone) {
+            report_update($rid, ['status' => 'gone', 'handled' => time()]);
+            continue;
+        }
+        $jobs[] = ['rid' => $rid, 'rep' => $rep, 'content' => $content, 'model' => $models[$i % count($models)]];
+    }
+    if (!$jobs) {
+        Store::unlock($lk);
+        return [false, $manual ? '当前队列为空' : ''];
+    }
+    if (count($jobs) === 1) {
+        /* 仅凑到 1 条：退回标准单条审核，不浪费并行通道 */
+        $j = $jobs[0];
+        $verdict = '';
+        $note = '';
+        $used = '';
+        $ok = ai_moderate($j['content'], $verdict, $note, [], $used);
+        $msg = ai_queue_settle((int)$j['rid'], $j['rep'], $ok, $verdict, $note, $used);
+        Store::unlock($lk);
+        return [true, $msg];
+    }
+    $calls = [];
+    foreach ($jobs as $j) {
+        $calls[] = ['model' => $j['model'], 'content' => $j['content']];
+    }
+    $results = ai_call_multi($calls);
+    ai_multi_fail_settle($results, $jobs);
+    foreach ($jobs as $i => $j) {
+        $r = $results[$i];
+        $used = !empty($r['ok'])
+            ? '模型「' . $r['label'] . '」（并行火力）'
+            : '并行火力 · 模型「' . $r['label'] . '」调用失败';
+        ai_queue_settle((int)$j['rid'], $j['rep'], !empty($r['ok']), (string)$r['verdict'], (string)$r['note'], $used);
+    }
+    Store::unlock($lk);
+    $okN = count(array_filter($results, function ($r) { return !empty($r['ok']); }));
+    return [true, '并行火力：本次同时审核 ' . count($jobs) . ' 条内容（' . $okN . ' 个模型成功返回）'];
+}
+
+/**
+ * AI 审核队列：页面访问 / 后台手动触发（非阻塞锁防并发 + 调用间隔保护）。
+ * v1.16.0：并行火力模式下一次并发审核 K 条（K = 启用模型数），其余模式每次处理一条。
  * @return array [bool 是否处理了任务, string 提示]
  */
 function ai_process_queue(bool $manual = false): array
@@ -741,6 +889,14 @@ function ai_process_queue(bool $manual = false): array
         if (!$manual && time() - (int)($state['last'] ?? 0) < 3) {
             Store::unlock($lk);
             return [false, ''];
+        }
+        /* 并行火力：队列 ≥2 条 + 模型 ≥2 个 → K 条同刻并发 */
+        $models = ai_models_enabled();
+        if (ai_mode() === 'parallel' && count($models) >= 2) {
+            $k = min(count($models), queue_length());
+            if ($k >= 2) {
+                return ai_process_queue_parallel($lk, $models, $manual);
+            }
         }
         $rid = queue_shift();
         if ($rid === null) {
@@ -764,52 +920,9 @@ function ai_process_queue(bool $manual = false): array
         $note = '';
         $used = '';
         $ok = ai_moderate($content, $verdict, $note, [], $used); // 审核状态（last/active/fail）由 ai_moderate 内部落盘
-        $isThread = ($rep['type'] === 'thread');
-        $tTitle = cut_str((string)(thread_get((int)$rep['tid'])['title'] ?? ''), 40);
-        $no = $isThread ? '帖子《' . $tTitle . '》' : '帖子《' . $tTitle . '》中的回复';
-
-        if (!$ok) {
-            // 全部模型重试仍失败：保持隐藏，通知管理员人工处理
-            report_update($rid, ['status' => 'ai_failed', 'note' => cut_str($note, 200), 'handled' => time()]);
-            log_action('ai_failed', '举报 #' . $rid . '（' . $no . '）：' . cut_str($used . '：' . $note, 160) . '；内容保持隐藏，已通知管理员', 0, '系统');
-            foreach (user_all() as $au) {
-                if (!empty($au['admin'])) {
-                    notify_add((int)$au['id'], 'ai_admin', 'AI 审核失败', '举报 #' . $rid . '（' . $no . '）审核失败：' . cut_str($note, 120) . '。内容保持隐藏，请到后台「AI 待审队列」处理。', 'p=admin&tab=queue');
-                }
-            }
-            Store::unlock($lk);
-            return [true, 'AI 调用失败：' . cut_str($note, 80) . '（内容保持隐藏，已通知管理员）'];
-        }
-        if ($verdict === 'violation') {
-            // 有问题：保持隐藏，通知被举报人（可申诉），同步告知举报人
-            report_update($rid, ['status' => 'ai_bad', 'note' => cut_str($note, 200), 'handled' => time()]);
-            log_action('ai_bad', '举报 #' . $rid . '：' . $no . ' 判定违规（' . cut_str($note, 80) . '），内容保持隐藏' . ($used !== '' ? '，审核方：' . $used : ''), 0, '系统');
-            $reason = (string)($rep['reason'] ?? '');
-            notify_add(
-                (int)$rep['author'], 'ai_bad',
-                '您的内容被举报，AI 审核判定违规',
-                $no . ' 被举报（理由：' . ($reason !== '' ? $reason : '未填写') . '），AI 审核认为存在违规，内容已隐藏。如您认为审核有误，可在本条通知下方点击「申诉」，申诉后将由管理员人工复核。',
-                'p=thread&id=' . (int)$rep['tid'], $rid, true
-            );
-            notify_add(
-                (int)$rep['reporter'], 'report_result', '举报处理结果',
-                '您举报的' . $no . '经 AI 审核判定违规，内容已隐藏，将等待用户申诉或管理员人工复核。感谢您的监督。',
-                'p=thread&id=' . (int)$rep['tid']
-            );
-            Store::unlock($lk);
-            return [true, '审核完成：判定违规，内容保持隐藏，已通知被举报人'];
-        }
-        // 没问题：恢复内容
-        report_update($rid, ['status' => 'ai_ok', 'note' => cut_str($note, 200), 'handled' => time()]);
-        report_target_set_hidden($rep, false);
-        log_action('ai_ok', '举报 #' . $rid . '：' . $no . ' 未发现违规，已恢复展示' . ($used !== '' ? '，审核方：' . $used : ''), 0, '系统');
-        notify_add(
-            (int)$rep['reporter'], 'report_result', '举报处理结果',
-            '您举报的' . $no . '经 AI 审核未发现违规，内容已恢复展示。感谢您的监督。',
-            'p=thread&id=' . (int)$rep['tid']
-        );
+        $msg = ai_queue_settle($rid, $rep, $ok, $verdict, $note, $used);
         Store::unlock($lk);
-        return [true, '审核完成：未发现违规，内容已恢复展示'];
+        return [true, $msg];
     } catch (Throwable $ex) {
         Store::unlock($lk);
         return [false, '审核异常：' . $ex->getMessage()];
@@ -1323,4 +1436,64 @@ function backup_prune(int $keep = 5): void
     foreach (array_slice($fs, 0, count($fs) - $keep) as $f) {
         @unlink(Store::path('backup/' . $f));
     }
+}
+
+/* ================= 协议管理（v1.16.0） ================= */
+
+/** 三份协议定义：key => [标题, 配置键]；body 为空 = 未启用 */
+function doc_defs(): array
+{
+    return [
+        'terms'      => ['用户协议', 'doc_terms'],
+        'privacy'    => ['隐私政策', 'doc_privacy'],
+        'disclaimer' => ['免责声明', 'doc_disclaimer'],
+    ];
+}
+
+/** 已填写内容的协议列表：key => ['title'=>..,'body'=>..]（保持定义顺序） */
+function doc_list(): array
+{
+    $out = [];
+    foreach (doc_defs() as $k => [$title, $key]) {
+        $body = trim((string)cfg($key, ''));
+        if ($body !== '') {
+            $out[$k] = ['title' => $title, 'body' => $body];
+        }
+    }
+    return $out;
+}
+
+/** 协议内容指纹：任一协议内容变更后，已同意的 cookie 自动失效，需重新确认 */
+function doc_fingerprint(): string
+{
+    $all = [];
+    foreach (doc_defs() as $k => [$title, $key]) {
+        $all[$k] = (string)cfg($key, '');
+    }
+    return md5((string)json_encode($all, JSON_UNESCAPED_UNICODE));
+}
+
+/** 当前访客是否已同意当前版本的协议（会话或一年期 cookie，内容指纹比对） */
+function doc_gate_passed(): bool
+{
+    $fp = doc_fingerprint();
+    return (isset($_SESSION['doc_agreed']) && (string)$_SESSION['doc_agreed'] === $fp)
+        || (isset($_COOKIE['mf_doc']) && (string)$_COOKIE['mf_doc'] === $fp);
+}
+
+/** 协议门禁是否生效：后台开关开启 + 至少一份协议已填写 + 当前访客尚未同意（管理员豁免，避免把自己锁在门外） */
+function doc_gate_required(string $p): bool
+{
+    if ((int)cfg('doc_gate', 0) !== 1 || doc_list() === []) {
+        return false;
+    }
+    $me = current_user();
+    if ($me && !empty($me['admin'])) {
+        return false;
+    }
+    if (doc_gate_passed()) {
+        return false;
+    }
+    /* 登录 / 注册 / 找回密码 / 协议页 / 图标资源 / 登出 不做拦截（否则用户无法完成同意流程） */
+    return !in_array($p, ['doc', 'login', 'register', 'forgot', 'icon', 'logout'], true);
 }
