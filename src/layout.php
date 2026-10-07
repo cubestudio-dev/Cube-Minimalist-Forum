@@ -174,6 +174,10 @@ function layout_footer(): void
             $docLinks[] = '<a href="' . e(u('p=doc&type=' . $k)) . '">' . e($d['title']) . '</a>';
         }
     }
+    /* v1.19.0：开放 API 入口（API 开启时自动显示，客户端开发者从这里进文档） */
+    if ((int)($c['api_enabled'] ?? 0) === 1) {
+        $docLinks[] = '<a href="' . e(u('p=api_docs')) . '">开放 API</a>';
+    }
     ?>
     </main>
   </div>

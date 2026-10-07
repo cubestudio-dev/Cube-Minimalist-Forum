@@ -74,6 +74,10 @@ function route_action(string $a): void
         case 'account_delete':         act_account_delete(); return;
         case 'account_delete_confirm': act_account_delete_confirm(); return;
         case 'doc_agree':              act_doc_agree(); return;
+        case 'api_token_new':         act_api_token_new(); return;
+        case 'api_token_revoke':      act_api_token_revoke(); return;
+        case 'admin_save_api':         admin_tab_guard(); act_admin_save_api(); return;
+        case 'admin_api_revoke':       admin_tab_guard(); act_admin_api_revoke(); return;
         case 'admin_save_docs':    admin_tab_guard(); act_admin_save_docs(); return;
         case 'admin_data_compress': admin_tab_guard(); act_admin_data_compress(); return;
         case 'admin_save_basic': admin_tab_guard(); act_admin_save_basic(); return;
@@ -228,6 +232,72 @@ function act_admin_save_docs(): void
     }
     flash('ok', $msg);
     admin_redirect('p=admin&tab=docs');
+}
+
+/** 后台保存开放 API 设置（v1.19.0）：总开关 / 访客调用 / 限速 / CORS / 条款 / 端点开关 / 调用日志 */
+function act_admin_save_api(): void
+{
+    $me = admin_tab_guard();
+    $kv = [
+        'api_enabled' => !empty($_POST['api_enabled']) ? 1 : 0,
+        'api_guest'   => !empty($_POST['api_guest']) ? 1 : 0,
+        'api_log'     => !empty($_POST['api_log']) ? 1 : 0,
+        'api_rate_token' => min(10000, max(0, (int)post_str('api_rate_token', 6))),
+        'api_rate_guest' => min(10000, max(0, (int)post_str('api_rate_guest', 6))),
+        'api_terms'   => post_str('api_terms', 20000),
+    ];
+    /* CORS：空=同源；*=全部；其余原样保存（使用时逐个比对来源） */
+    $cors = post_str('api_cors', 500);
+    if ($cors === '*' || $cors === '') {
+        $kv['api_cors'] = $cors;
+    } else {
+        $parts = [];
+        foreach (preg_split('/[\s，,;；]+/u', $cors) ?: [] as $o) {
+            $o = strtolower(rtrim(trim((string)$o), '/'));
+            if ($o !== '' && preg_match('#^https?://[a-z0-9.\-]+(:\d+)?$#', $o)) {
+                $parts[] = $o;
+            }
+        }
+        $kv['api_cors'] = implode(',', array_unique($parts));
+    }
+    /* 全部端点开关：未出现在表单里的视为关闭（isset 语义，防旧表单漏保存） */
+    $on = 0;
+    foreach (api_defs()['endpoints'] as $ep => $def) {
+        $k = api_ep_key((string)$ep);
+        $v = !empty($_POST[$k]) ? 1 : 0;
+        $kv[$k] = $v;
+        $on += $v;
+    }
+    cfg_update($kv);
+    $total = count(api_defs()['endpoints']);
+    $msg = 'API 设置已保存：' . ($kv['api_enabled'] ? '开放中（' . $on . '/' . $total . ' 个端点）' : '已整体关闭')
+        . '；访客调用 ' . ($kv['api_guest'] ? '允许' : '禁止')
+        . '，限速 令牌' . $kv['api_rate_token'] . '/分钟、访客' . $kv['api_rate_guest'] . '/分钟';
+    log_action('admin_save_api', $msg, (int)$me['id']);
+    if (is_ajax()) {
+        json_response(['ok' => true, 'msg' => $msg]);
+    }
+    flash('ok', $msg);
+    admin_redirect('p=admin&tab=api');
+}
+
+/** 后台撤销某用户的 API 令牌（v1.19.0） */
+function act_admin_api_revoke(): void
+{
+    $me = admin_tab_guard();
+    $uid = (int)($_POST['uid'] ?? 0);
+    $u = $uid > 0 ? user_by_id($uid) : null;
+    if (!$u) {
+        act_err('用户不存在');
+    }
+    api_token_revoke($uid);
+    log_action('admin_api_revoke', '撤销了用户「' . (string)$u['name'] . '」的 API 令牌', (int)$me['id']);
+    notify_add($uid, 'system', '您的 API 令牌已被管理员撤销', '出于站点安全管理，管理员撤销了您的开放 API 令牌。如非本人请求或需继续使用，请重新阅读条款后自行签发。', '');
+    if (is_ajax()) {
+        json_response(['ok' => true, 'msg' => '已撤销「' . (string)$u['name'] . '」的 API 令牌']);
+    }
+    flash('ok', '已撤销「' . (string)$u['name'] . '」的 API 令牌');
+    admin_redirect('p=admin&tab=api');
 }
 
 /** 后台一键压缩存量数据文件（v1.16.0）：把仍是明文 JSON 的数据文件重写为 gzip 格式 */
@@ -416,6 +486,39 @@ function act_doc_agree(): void
         redirect(u($next));
     }
     redirect(u('p=home'));
+}
+
+/* ================= 开放 API 令牌（v1.19.0） ================= */
+
+/** 用户签发 / 重置自己的 API 令牌：必须先阅读并同意使用条款；明文仅在跳回设置页后一次性展示 */
+function act_api_token_new(): void
+{
+    $u = require_login('p=settings');
+    if ((int)cfg('api_enabled', 0) !== 1) {
+        act_err('本站当前未开放 API，无法签发令牌');
+    }
+    $reissue = api_token_of((int)$u['id']) !== null; // 已有令牌 = 重置（旧令牌立即失效）
+    if (empty($_POST['agree'])) {
+        act_err('请先阅读并勾选同意《开放 API 使用条款》，再签发令牌');
+    }
+    $plain = api_token_issue((int)$u['id'], api_terms_fp());
+    $_SESSION['api_token_show'] = $plain; // 仅展示一次：读取后立即销毁
+    log_action('api_token_' . ($reissue ? 'reset' : 'new'), ($reissue ? '重置' : '签发') . '了开放 API 令牌（条款版本 ' . api_terms_fp() . '）', (int)$u['id']);
+    flash('ok', $reissue ? '令牌已重置，旧令牌已立即失效' : '令牌已签发，请立即复制保存（仅显示这一次）');
+    redirect(u('p=settings#api'));
+}
+
+/** 用户撤销自己的 API 令牌 */
+function act_api_token_revoke(): void
+{
+    $u = require_login('p=settings');
+    if (api_token_of((int)$u['id']) === null) {
+        act_err('您尚未签发 API 令牌');
+    }
+    api_token_revoke((int)$u['id']);
+    log_action('api_token_revoke', '撤销了自己的开放 API 令牌', (int)$u['id']);
+    flash('ok', 'API 令牌已撤销，使用该令牌的客户端将立即失去访问权');
+    redirect(u('p=settings#api'));
 }
 
 function act_send_code(): void

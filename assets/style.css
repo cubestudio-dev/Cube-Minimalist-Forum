@@ -815,3 +815,30 @@ a .mention, .mention a { text-decoration: none; }
   body { background: #fff; }
   .doc-sheet, .doc-card { box-shadow: none; border-color: #ddd; }
 }
+
+/* ================= v1.19.0：开放 API ================= */
+/* 后台 · 端点开放范围分组 */
+.api-ep-group { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px 2px; margin: 10px 0; }
+.api-ep-group-name { display: block; font-size: 13px; color: var(--muted); letter-spacing: .06em; margin-bottom: 4px; }
+.api-ep { margin: 2px 0 8px; align-items: flex-start; flex-wrap: wrap; row-gap: 2px; }
+.api-ep code { font-size: 12.5px; }
+.api-ep .badge { flex: none; }
+/* 开发者文档页 */
+.api-status-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.api-group-title { font-size: 14.5px; margin: 16px 0 6px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.api-group-title::before { content: ''; display: inline-block; width: 4px; height: 13px; border-radius: 2px; background: var(--accent); margin-right: 8px; }
+.api-doc-row { align-items: flex-start; }
+.api-doc-row code { font-size: 13px; margin-right: 6px; }
+.api-doc-row .badge { vertical-align: 1px; }
+.api-code { display: inline-block; max-width: 100%; overflow-x: auto; white-space: nowrap; background: var(--hover); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-size: 12.5px; line-height: 1.7; }
+/* 条款折叠（设置页 / 文档页共用） */
+.api-terms { border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0 12px; background: var(--hover); }
+.api-terms summary { cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: 13.5px; list-style: none; display: flex; align-items: center; gap: 8px; }
+.api-terms summary::-webkit-details-marker { display: none; }
+.api-terms summary::before { content: '▸'; color: var(--muted); transition: transform .15s; }
+.api-terms[open] summary::before { transform: rotate(90deg); }
+.api-terms .md { padding: 0 14px 14px; font-size: 13.5px; line-height: 1.85; max-height: 420px; overflow-y: auto; }
+/* 令牌一次性展示框 */
+.api-token-box { border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 8%, transparent); border-radius: var(--radius); padding: 12px 14px; margin: 10px 0 14px; font-size: 13.5px; }
+.api-token-box b { display: block; margin-bottom: 8px; }
+.api-token-box code { display: block; word-break: break-all; font-size: 14px; font-weight: 700; padding: 10px 12px; background: var(--card); border: 1px dashed var(--border); border-radius: 8px; margin-bottom: 8px; user-select: all; }

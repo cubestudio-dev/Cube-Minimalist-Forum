@@ -1,104 +1,11 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-local-*
-.claude
-.z-ai-config
-*.log
-dev.log
-dev.out.log
-test
-prompt
-
-server.log
-# Skills directory
-/skills/
-
-# ---------- 内部记录与运行时（绝不入库） ----------
-# 工作日志 / 任务记录
-worklog.md
-# 演示站运行数据（会话、日志、用户数据）
-/demo/
-# 门户页 Next.js 工程与全部平台内部代码（绝不入库：仓库只放论坛交付物）
-/src/
-/public/
-/db/
-/prisma/
-/instrumentation.ts
-/package.json
-/bun.lock
-/tsconfig.json
-/tailwind.config.ts
-/postcss.config.mjs
-/next.config.ts
-/eslint.config.mjs
-/components.json
-/seed-demo.php
-# 沙箱基础设施与工具缓存
-Caddyfile
-.zscripts/
-tool-results/
-agent-ctx/
-mini-services/
-examples/
-# 临时与误提交防护
---full-page
-cj.txt
-cookies*
-*.sess
-minimal-forum_tmp/
-# 源码包快照目录（只保留 releases/*.zip 发布物）
-/releases/v*/
-# 根级散落的论坛副本与沙箱脚本（防误入：正本只在 php-forum/ 与 releases/）
-/assets/
+# ---------- 论坛仓库忽略规则 ----------
+# 运行时数据（安装与运行自动生成，绝不入库）
 /data/
-/download/
-/tests/
-/index.php
-/install.php
-/robots.txt
-/CHANGELOG.md
-/.htaccess
-
-# 开发期测试脚本（本地保留，不入交付仓库）
-tests-fw/
-/tests-md/
+# 系统与编辑器杂物
+.DS_Store
+Thumbs.db
+*.log
+# 本地开发临时文件
+*.sess
+cookies*
+local-*

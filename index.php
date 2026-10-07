@@ -32,6 +32,15 @@ if (isset($_GET['a'])) {
     handle_action((string)$a);
 }
 
+/* v1.19.0 开放 API：独立出站通道（自管令牌认证 / 限流 / CORS / JSON），
+   在页面路由、私密模式与协议门禁之前处理——客户端不走浏览器会话，
+   访客可见性由 api_handle() 按与前台完全相同的规则自行判定 */
+if (isset($_GET['api']) && is_string($_GET['api']) && $_GET['api'] !== '') {
+    require_once __DIR__ . '/src/api.php';
+    api_handle(substr(preg_replace('/[^a-z0-9_.]/', '', strtolower((string)$_GET['api'])), 0, 60));
+    exit; /* api_handle 内部必出站，此处防御性兜底 */
+}
+
 /* 页面访问日志（后台可开关，记录所有人含游客；仅记录真实页面导航，AJAX 轮询与业务动作不计）
    v1.15.0：写清浏览了什么页面与具体名称（首页 / 帖子《标题》 / 版块《名称》 / 用户「名」的个人主页 / 后台 · 标签页） */
 if ((int)cfg('log_views', 0) === 1 && !isset($_GET['a'])) {
@@ -92,6 +101,7 @@ switch ($p === '' ? 'home' : $p) {
     case 'notifications': page_announcements(); break;
     case 'announcements': page_announcements(); break;
     case 'doc':           page_doc(); break;
+    case 'api_docs':      page_api_docs(); break;
     case 'mention_api':   page_mention_api(); break;
     case 'ping':          page_ping(); break; /* 已在上方资源段先行出站，此处仅为兜底 */
     case 'asset':         page_asset(); break; /* 已在上方资源段先行出站，此处仅为兜底 */

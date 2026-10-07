@@ -578,6 +578,8 @@ function view_page_name(array $vs): string
         case 'mention_api':
         case 'live':
             return ''; // 图标 / 延迟探测 / 静态资源 / AJAX 端点，不记录
+        case 'api_docs':
+            return '开放 API · 开发者文档页';
         case 'admin':
             $titles = function_exists('admin_tab_titles') ? admin_tab_titles() : [];
             $tn = $titles[$tab] ?? '';

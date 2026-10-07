@@ -452,6 +452,44 @@ function page_settings(): void
             '</form>';
     }
     echo '</div>';
+
+    /* ---- v1.19.0：开放 API 令牌 ---- */
+    $apiOn = (int)cfg('api_enabled', 0) === 1;
+    $tokRec = api_token_of((int)$u['id']);
+    $showTok = '';
+    if (!empty($_SESSION['api_token_show']) && is_string($_SESSION['api_token_show'])) {
+        $showTok = (string)$_SESSION['api_token_show'];
+        unset($_SESSION['api_token_show']); // 明文仅展示一次
+    }
+    echo '<div class="card form-card" id="api"><h2 class="card-title">开放 API</h2>';
+    if (!$apiOn) {
+        echo '<p class="muted">本站暂未开放 API。开放后你可以在这里签发自己的访问令牌，用于第三方客户端、机器人或自定义界面。<a href="' . e(u('p=api_docs')) . '">了解开放 API</a></p>';
+    } else {
+        echo '<p class="muted">签发个人访问令牌（Token）后，即可用你的账号身份通过开放 API 开发客户端 / 机器人 / 自定义界面——发帖、回复、点赞、通知等能力与网页端完全一致。' .
+            '<a href="' . e(u('p=api_docs')) . '">查看开发者文档与全部端点</a></p>';
+        if ($showTok !== '') {
+            echo '<div class="api-token-box"><b>你的令牌（仅显示这一次，请立即复制保存）</b>' .
+                '<code id="api-token-val">' . e($showTok) . '</code>' .
+                '<button class="btn btn-ghost btn-sm" type="button" id="api-token-copy">复制令牌</button>' .
+                '<p class="hint">它是你的账号身份：不要公开、不要写进代码仓库；泄露请立即在下方「重置令牌」。</p></div>';
+        }
+        if ($tokRec) {
+            echo '<p class="hint">当前状态：已签发（<code>••••••</code>出于安全不明文展示）· 签发于 ' . fmt_dt((int)($tokRec['created'] ?? 0)) .
+                ' · 同意条款 ' . fmt_dt((int)($tokRec['agree'] ?? 0)) . '（条款版本 ' . e((string)($tokRec['agree_fp'] ?? '')) . '）</p>' .
+                '<p class="hint">为安全起见令牌明文不再展示，只存哈希；忘记就重置，旧令牌立即失效。</p>';
+        }
+        echo '<form method="post" action="' . e(u('a=api_token_new')) . '">' . csrf_field() .
+            '<details class="api-terms"' . ($tokRec ? '' : ' open') . '><summary>《开放 API 使用条款》（版本 ' . e(api_terms_fp()) . '）</summary>' .
+            '<div class="md">' . md_render((string)cfg('api_terms', '') !== '' ? (string)cfg('api_terms', '') : api_terms_template()) . '</div></details>' .
+            '<label class="check"><input type="checkbox" name="agree" value="1" required> 我已阅读并同意《开放 API 使用条款》，知晓令牌等同账号身份、须妥善保管</label>' .
+            '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . ($tokRec ? '重置令牌（旧令牌立即失效）' : '签发令牌') . '</button></div></form>';
+        if ($tokRec) {
+            echo '<form method="post" action="' . e(u('a=api_token_revoke')) . '" data-confirm="确认撤销 API 令牌？使用该令牌的客户端将立即失去访问权。">' . csrf_field() .
+                '<div class="form-foot"><span></span><button class="btn btn-ghost btn-sm danger" type="submit">撤销令牌</button></div></form>';
+        }
+    }
+    echo '</div>';
+
     layout_footer();
 }
 
@@ -966,6 +1004,127 @@ function page_doc(): void
         echo doc_agree_form('p=doc', '确认并继续浏览');
     }
     doc_layout_footer();
+}
+
+/* ---------------- v1.19.0：开放 API · 开发者文档页 ----------------
+ * 面向想给论坛做客户端 / 机器人 / 第三方前端的用户：全部端点、认证方式、
+ * 限速规则、错误码与使用条款都在这一页，且自动反映后台的实时开放状态。 */
+function page_api_docs(): void
+{
+    layout_header('开放 API · 开发者文档', 0);
+    $me = current_user();
+    $on = (int)cfg('api_enabled', 0) === 1;
+    $defs = api_defs();
+
+    if (!$on) {
+        echo page_head('开放 API · 开发者文档');
+        echo '<div class="card form-card">' . empty_state('本站暂未开放 API，敬请期待');
+        if ($me && !empty($me['admin'])) {
+            echo '<p class="hint" style="text-align:center">管理员可到 <a href="' . e(u('p=admin&tab=api')) . '">后台 · 开放 API</a> 开启并配置开放范围</p>';
+        }
+        echo '</div>';
+        layout_footer();
+        return;
+    }
+
+    $base = trim((string)cfg('site_url', ''));
+    if ($base === '') {
+        $https = app_is_https();
+        $base = ($https ? 'https://' : 'http://') . (string)($_SERVER['HTTP_HOST'] ?? 'your-forum.example.com');
+    }
+    $base = rtrim($base, '/');
+    $guestOk = (int)cfg('api_guest', 0) === 1;
+    $rateTok = (int)cfg('api_rate_token', 120);
+    $rateGuest = (int)cfg('api_rate_guest', 30);
+    $terms = (string)cfg('api_terms', '');
+    if ($terms === '') {
+        $terms = api_terms_template();
+    }
+
+    echo page_head('开放 API · 开发者文档', '用一套 HTTP 接口，把' . (string)cfg('site_name', '论坛') . '装进你自己的客户端、机器人或自定义界面');
+
+    /* 状态速览 */
+    echo '<div class="card form-card"><h2 class="card-title">当前状态</h2><div class="api-status-row">' .
+        '<span class="badge badge-accent">API 开放中</span>' .
+        '<span class="badge">访客' . ($guestOk ? '可' : '不可') . '免令牌调用</span>' .
+        '<span class="badge">令牌 ' . ($rateTok > 0 ? $rateTok . ' 次/分钟' : '不限速') . '</span>' .
+        '<span class="badge">访客 ' . ($rateGuest > 0 ? $rateGuest . ' 次/分钟' : '不限速') . '</span>' .
+        '<span class="badge">条款版本 ' . e(api_terms_fp()) . '</span>' .
+        '</div>' .
+        '<p class="hint">接口地址：<code>' . e($base) . '/index.php?api=<b>端点名</b></code> · 开放范围由站长随时调整，本文档实时反映最新状态。</p></div>';
+
+    /* 快速开始 */
+    echo '<div class="card form-card"><h2 class="card-title">快速开始</h2>' .
+        '<p class="muted">三步接入：① 在<a href="' . e(u('p=settings#api')) . '">个人设置 → 开放 API</a> 阅读条款并签发令牌（仅显示一次，请保存好）→ ② 携带令牌调用接口 → ③ 用返回的 JSON 渲染你自己的界面。</p>' .
+        '<p class="hint" style="line-height:2">读取帖子列表（访客可调时无需令牌）：<br>' .
+        '<code class="api-code">curl "' . e($base) . '/index.php?api=threads.list&amp;per_page=10"</code><br>' .
+        '携带令牌发帖（JSON 或表单均可）：<br>' .
+        '<code class="api-code">curl -X POST "' . e($base) . '/index.php?api=threads.create" \<br>' .
+        '&nbsp;&nbsp;-H "Authorization: Bearer <b>mf_你的令牌</b>" -H "Content-Type: application/json" \<br>' .
+        '&nbsp;&nbsp;-d \'{"board":1,"title":"来自客户端","content":"**Markdown** 也支持"}\'</code></p>' .
+        '<p class="hint">发帖 / 回复与网页端走完全相同的流程：发言间隔、AI 审核（违规自动隐藏并可申诉）、操作日志、@ 通知一应俱全；响应中的 <code>moderation:"queued"</code> 表示已进入后台审核。</p></div>';
+
+    /* 认证 */
+    echo '<div class="card form-card"><h2 class="card-title">认证方式</h2>' .
+        '<p class="muted">令牌等同于你的账号身份，推荐用请求头携带（三种方式按优先级依次尝试）：</p>' .
+        '<p class="hint" style="line-height:2">' .
+        '① <code>Authorization: Bearer mf_xxxx</code>（推荐，任何 HTTP 库都支持）<br>' .
+        '② <code>X-API-Token: mf_xxxx</code>（自定义头）<br>' .
+        '③ <code>?token=mf_xxxx</code>（仅调试用：会进服务器日志与浏览器历史，不建议生产使用）</p>' .
+        '<p class="hint">· 令牌在服务端只保存 SHA-256 哈希，泄露后请在「个人设置」重置（旧令牌立即失效）<br>' .
+        '· 账号被封禁 / 注销后令牌即刻失效；管理员也可在后台撤销某个令牌<br>' .
+        '· 令牌认证不走浏览器会话，没有 CSRF 风险，也不受「保持登录」影响</p></div>';
+
+    /* 响应与错误 */
+    echo '<div class="card form-card"><h2 class="card-title">响应格式与错误码</h2>' .
+        '<p class="hint" style="line-height:2">成功：<code>{"ok": true, "data": { ... }}</code>（HTTP 200）<br>' .
+        '失败：<code>{"ok": false, "error": {"code": "…", "message": "…"}}</code><br>' .
+        '每次响应都携带 <code>X-RateLimit-Limit / Remaining / Reset</code> 头，超限返回 429 并附 <code>Retry-After</code>。</p>' .
+        '<div class="admin-list">' .
+        '<div class="admin-row"><code>api_disabled</code><span class="muted">503 · 本站未开放 API</span></div>' .
+        '<div class="admin-row"><code>token_required</code><span class="muted">401 · 需要令牌（未带 / 端点非公开 / 私密论坛）</span></div>' .
+        '<div class="admin-row"><code>invalid_token</code><span class="muted">401 · 令牌无效或账号状态异常</span></div>' .
+        '<div class="admin-row"><code>endpoint_disabled</code><span class="muted">403 · 该端点被站长关闭</span></div>' .
+        '<div class="admin-row"><code>unknown_endpoint</code><span class="muted">404 · 端点不存在</span></div>' .
+        '<div class="admin-row"><code>method_not_allowed</code><span class="muted">405 · 请求方法不符（GET/POST）</span></div>' .
+        '<div class="admin-row"><code>rate_limited</code><span class="muted">429 · 触发限速，按 Retry-After 等待</span></div>' .
+        '<div class="admin-row"><code>agreement_required</code><span class="muted">403 · 站点开启协议门禁，先调 docs.agree</span></div>' .
+        '<div class="admin-row"><code>flood_control</code><span class="muted">429 · 发言间隔中（与网页端同一条规则）</span></div>' .
+        '<div class="admin-row"><code>muted</code><span class="muted">403 · 账号被禁言</span></div>' .
+        '<div class="admin-row"><code>validation</code><span class="muted">400 · 参数缺失 / 超长 / 非法（API 不静默截断）</span></div>' .
+        '<div class="admin-row"><code>not_found</code><span class="muted">404 · 内容不存在（含他人不可见的审核中内容）</span></div>' .
+        '<div class="admin-row"><code>forbidden</code><span class="muted">403 · 无权操作该内容</span></div>' .
+        '<div class="admin-row"><code>server_error</code><span class="muted">500 · 服务器内部错误</span></div>' .
+        '</div></div>';
+
+    /* 端点全表（按分组） */
+    echo '<div class="card form-card"><h2 class="card-title">端点清单（' . count($defs['endpoints']) . ' 个）</h2>' .
+        '<p class="hint">标记 <span class="badge badge-warn">✎ 写入</span> 的端点需要令牌，且在开启协议门禁的站点上需先调用 <code>docs.agree</code>；其余端点为只读公开端点（访客可用性见上方状态）。被站长关闭的端点在此标记为「未开放」。</p>';
+    foreach ($defs['groups'] as $gk => $gname) {
+        echo '<h3 class="api-group-title">' . e($gname) . '</h3><div class="admin-list">';
+        foreach ($defs['endpoints'] as $ep => $d) {
+            if ($d[0] !== $gk) {
+                continue;
+            }
+            $write = (int)$d[4] === 1;
+            $st = api_ep_on((string)$ep)
+                ? ($write ? '<span class="badge badge-warn">✎ 写入 · 需令牌</span>' : '<span class="badge badge-accent">开放</span>')
+                : '<span class="badge">未开放</span>';
+            echo '<div class="admin-row api-doc-row"><span class="api-doc-main"><code>' . e($ep) . '</code> <span class="badge">' . e($d[1]) . '</span> ' . $st .
+                '<br><span class="muted">' . e($d[3]) . '</span></span></div>';
+        }
+        echo '</div>';
+    }
+    echo '</div>';
+
+    /* 条款 */
+    echo '<div class="card form-card" id="terms"><h2 class="card-title">开放 API 使用条款</h2>' .
+        '<p class="muted">签发令牌前需阅读并同意以下条款（版本 ' . e(api_terms_fp()) . '）：</p>' .
+        '<details class="api-terms"><summary>展开阅读全文</summary><div class="md">' . md_render($terms) . '</div></details>' .
+        ($me ? '<p class="hint">还没有令牌？到 <a href="' . e(u('p=settings#api')) . '">个人设置 → 开放 API</a> 一键签发。</p>'
+             : '<p class="hint"><a href="' . e(u('p=login')) . '">登录</a> 后即可在「个人设置」签发令牌。</p>') .
+        '</div>';
+    layout_footer();
 }
 
 /** @ 提及补全数据源（v1.16.0）：登录用户可用，按关键词过滤用户名，JSON 输出 */

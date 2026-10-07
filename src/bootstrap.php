@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.18.0');
+    define('MF_VERSION', '1.19.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -38,6 +38,7 @@ require_once __DIR__ . '/update.php';
 require_once __DIR__ . '/sysmon.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/content.php';
+require_once __DIR__ . '/api.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/actions.php';
 require_once __DIR__ . '/pages.php';

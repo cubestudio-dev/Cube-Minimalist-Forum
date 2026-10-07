@@ -773,4 +773,29 @@
       toast('内置模板已填入，可先修改再点「保存协议设置」生效');
     });
   });
+
+  /* ---------- v1.19.0：API 令牌一键复制（设置页，明文仅展示一次） ---------- */
+  var copyBtn = document.getElementById('api-token-copy');
+  var tokVal = document.getElementById('api-token-val');
+  if (copyBtn && tokVal) {
+    copyBtn.addEventListener('click', function () {
+      var txt = tokVal.textContent || '';
+      var done = function () { toast('令牌已复制到剪贴板'); copyBtn.textContent = '已复制 ✓'; setTimeout(function () { copyBtn.textContent = '复制令牌'; }, 2000); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(done, function () { fallbackCopy(txt, done); });
+      } else {
+        fallbackCopy(txt, done);
+      }
+    });
+  }
+  function fallbackCopy(txt, done) {
+    var ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败，请手动选择复制'); }
+    document.body.removeChild(ta);
+  }
 })();

@@ -39,6 +39,7 @@ function page_admin(): void
         case 'anns': admin_tab_anns(); break;
         case 'theme': admin_tab_theme(); break;
         case 'docs': admin_tab_docs(); break;
+        case 'api': admin_tab_api(); break;
         case 'logs': admin_tab_logs(); break;
         case 'security': admin_tab_security(); break;
         case 'monitor': admin_tab_monitor(); break;
@@ -81,7 +82,7 @@ function admin_tab_titles(): array
     return [
         'basic' => '基本', 'feat' => '功能', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
-        'anns' => '公告', 'theme' => '主题', 'docs' => '协议', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
+        'anns' => '公告', 'theme' => '主题', 'docs' => '协议', 'api' => '开放 API', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
 }
 
@@ -293,6 +294,87 @@ function admin_tab_docs(): void
         echo '<script type="text/plain" id="doc-tpl-' . e($key) . '" hidden>' . e($tpl) . '</script>';
     }
     echo '</div>';
+}
+
+/* ---------------- 开放 API（v1.19.0） ---------------- */
+function admin_tab_api(): void
+{
+    $defs = api_defs();
+    $termsVal = (string)cfg('api_terms', '');
+    $termsEmpty = $termsVal === '';
+    if ($termsEmpty) {
+        $termsVal = api_terms_template(); // 从未保存过 → 预填内置模板，保存即固化
+    }
+    echo '<div class="card form-card"><h2 class="card-title">开放 API</h2>' .
+        '<p class="muted">把论坛的能力开放给第三方：用户可在「个人设置 → 开放 API」阅读条款后签发自己的访问令牌，用它开发客户端、机器人或自定义界面。您在这里决定开放与否、开放哪些能力与限速额度；写入类端点与网页端接受<b>完全相同</b>的校验链（功能开关、禁言、发言间隔、字数上限、AI 审核、操作日志）。</p>' .
+        '<p class="hint">开发者文档（自动反映下方开放状态）：<a href="' . e(u('p=api_docs')) . '">' . e(u('p=api_docs')) . '</a>。建议把该页链接发给想做客户端的用户。行为审计：「日志」页检索 <code>api_call</code>（写入类调用）与 <code>api_token</code>（签发 / 重置 / 撤销）。</p>' .
+        '<form method="post" action="' . e(u('a=admin_save_api')) . '" data-ajax="1">' . csrf_field();
+
+    echo '<label class="check"><input type="hidden" name="api_enabled" value="0"><input type="checkbox" name="api_enabled" value="1"' . ((int)cfg('api_enabled', 0) === 1 ? ' checked' : '') . '> <b>开放 API</b> —— 总开关。关闭后所有 API 请求返回 503，已签发的令牌保留（重新开启即恢复）</label>' .
+        '<label class="check"><input type="hidden" name="api_guest" value="0"><input type="checkbox" name="api_guest" value="1"' . ((int)cfg('api_guest', 0) === 1 ? ' checked' : '') . '> <b>允许访客免令牌调用公开端点</b> —— 关闭时只有持令牌的注册用户能调用 API（更严格；私密论坛模式下此开关无效，一律要求令牌）</label>' .
+        '<label class="check"><input type="hidden" name="api_log" value="0"><input type="checkbox" name="api_log" value="1"' . ((int)cfg('api_log', 0) === 1 ? ' checked' : '') . '> <b>记录写入类调用日志</b> —— 通过 API 发帖 / 回复 / 点赞 / 删除时写入「日志」（api_call）；读取类不记，防止日志爆量。认证失败一律记录（api_deny 由无效令牌触发，见日志页）</label>' .
+        '<div class="grid3">' .
+        '<label class="field"><span class="field-l">令牌限速（次 / 分钟）</span><input class="input" name="api_rate_token" type="number" min="0" max="10000" value="' . (int)cfg('api_rate_token', 120) . '"></label>' .
+        '<label class="field"><span class="field-l">访客限速（次 / 分钟）</span><input class="input" name="api_rate_guest" type="number" min="0" max="10000" value="' . (int)cfg('api_rate_guest', 30) . '"></label>' .
+        '<label class="field"><span class="field-l">跨域来源（CORS，可选）</span><input class="input" name="api_cors" maxlength="500" placeholder="留空=同源；*=全部" value="' . e((string)cfg('api_cors', '')) . '"></label>' .
+        '</div>' .
+        '<p class="hint">限速填 0 = 不限制（不推荐）。CORS 供浏览器内运行的第三方前端调用：留空=仅同源可用（最安全）；填 <code>*</code> 允许任意网页调用；填具体来源如 <code>https://app.example.com</code>（多个用逗号分隔），只对这些站点的浏览器放行。</p>';
+
+    echo '<h2 class="card-title" style="margin-top:18px">端点开放范围（' . count($defs['endpoints']) . ' 个端点）</h2>' .
+        '<p class="hint">取消勾选 = 关闭该端点（调用返回 403）。写入类（标记 ✎）需要令牌；其余端点同时受「允许访客调用」开关约束。</p>';
+    foreach ($defs['groups'] as $gk => $gname) {
+        echo '<div class="api-ep-group"><b class="api-ep-group-name">' . e($gname) . '</b>';
+        foreach ($defs['endpoints'] as $ep => $d) {
+            if ($d[0] !== $gk) {
+                continue;
+            }
+            $k = api_ep_key((string)$ep);
+            echo '<label class="check api-ep"><input type="checkbox" name="' . $k . '" value="1"' . (api_ep_on((string)$ep) ? ' checked' : '') . '> ' .
+                '<code>' . e($ep) . '</code> <span class="badge">' . e($d[1]) . '</span>' . ((int)$d[4] === 1 ? ' <span class="badge badge-warn" title="需要令牌且与网页端同规则">✎ 写入</span>' : '') .
+                ' <span class="muted">' . e($d[2]) . ' — ' . e($d[3]) . '</span></label>';
+        }
+        echo '</div>';
+    }
+
+    echo '<h2 class="card-title" style="margin-top:18px">开放 API 使用条款</h2>' .
+        '<p class="hint">用户在「个人设置」签发令牌前必须阅读并勾选同意本条款；签发时记录同意时间与条款版本指纹。' . ($termsEmpty ? '当前展示的是内置模板（尚未保存过），可直接修改或原样保存生效。' : '条款文本更新不会自动影响已签发的令牌；如需收紧政策，可在此说明并撤销相关令牌。') . '</p>' .
+        '<label class="field"><textarea class="input" name="api_terms" rows="12" style="min-height:220px">' . e($termsVal) . '</textarea></label>' .
+        '<div class="form-foot"><span class="muted">保存后立即生效，无需重启</span><button class="btn btn-primary" type="submit">保存 API 设置</button></div>' .
+        '</form></div>';
+
+    /* 已签发令牌（审计与管控） */
+    $toks = api_tokens_all();
+    ksort($toks);
+    echo '<div class="card form-card"><h2 class="card-title">已签发的令牌（' . count($toks) . '）</h2>';
+    if (!$toks) {
+        echo empty_state('还没有用户签发 API 令牌');
+    } else {
+        echo '<div class="admin-list">';
+        foreach ($toks as $tid => $rec) {
+            $tu = user_by_id((int)$tid);
+            $tname = $tu ? (string)$tu['name'] : ('已注销 #' . (int)$tid);
+            echo '<div class="admin-row"><span><b>' . e($tname) . '</b> <span class="muted">· 签发于 ' . fmt_dt((int)($rec['created'] ?? 0)) .
+                ' · 同意条款 ' . fmt_dt((int)($rec['agree'] ?? 0)) . '（条款版本 ' . e((string)($rec['agree_fp'] ?? '')) . '）' .
+                ($tu && !empty($tu['banned']) ? ' · <span class="badge badge-warn">已封禁</span>' : '') . '</span></span>' .
+                '<form method="post" action="' . e(u('a=admin_api_revoke')) . '" class="inline" data-confirm="确认撤销「' . e($tname) . '」的 API 令牌？其客户端将立即失去访问权。">' .
+                '<input type="hidden" name="uid" value="' . (int)$tid . '">' . csrf_field() .
+                '<button class="btn btn-ghost btn-sm danger" type="submit">撤销</button></form></div>';
+        }
+        echo '</div>';
+        echo '<p class="hint">服务端只保存令牌的 SHA-256 哈希，明文仅签发时向用户展示一次；用户可在「个人设置」自助重置 / 撤销，此处撤销适用于安全处置。</p>';
+    }
+    echo '</div>';
+
+    /* 快速接入示例 */
+    $base = trim((string)cfg('site_url', ''));
+    if ($base === '') {
+        $base = 'https://' . (string)($_SERVER['HTTP_HOST'] ?? 'your-forum.example.com');
+    }
+    $base = rtrim($base, '/');
+    echo '<div class="card form-card"><h2 class="card-title">客户端接入示例</h2>' .
+        '<p class="hint" style="font-size:13px;line-height:1.8">curl "' . e($base) . '/index.php?api=threads.list&amp;per_page=10"<br>' .
+        'curl -H "Authorization: Bearer mf_你的令牌" -X POST -H "Content-Type: application/json" -d \'{"board":1,"title":"来自客户端","content":"你好"}\' "' . e($base) . '/index.php?api=threads.create"</p>' .
+        '<p class="hint">完整端点文档、参数、错误码与限速规则见 <a href="' . e(u('p=api_docs')) . '">开发者文档</a>（前台对登录用户开放）。</p></div>';
 }
 
 /* ---------------- 板块 ---------------- */
