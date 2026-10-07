@@ -153,7 +153,7 @@ function admin_tab_ai(): void
 
     /* ---- 卡片 1：审核模型（多 API 密钥 / 多模型 + 自动切换状态） ---- */
     echo '<div class="card form-card"><h2 class="card-title">审核模型（' . count($list) . '）</h2>' .
-        '<p class="hint">可自由添加多个 API 密钥与模型（OpenAI 兼容）。审核按列表顺序调用：某模型连续失败达到「自动切换阈值」后，后续审核自动换下一个模型；所有模型都失败才转入人工审核。勾选下方「全火力全开」后，每条内容会同时交给所有启用的模型一起审核。</p>' .
+        '<p class="hint">可自由添加多个 API 密钥与模型（OpenAI 兼容）。审核模式三选一：标准（按列表顺序调用，某模型连续失败达到「自动切换阈值」后自动换下一个模型，全部失败才转人工审核）；并行火力（多个模型同刻并发、各审队列中不同的一条，吞吐成倍提升）；全火力全开（每条内容同时交给所有启用的模型一起审核，任一违规即违规）。</p>' .
         '<details class="ai-model-add"' . ($list ? '' : ' open') . '><summary>' . ($list ? '＋ 添加模型' : '＋ 添加第一个模型') . '</summary>' .
         '<form method="post" action="' . e(u('a=admin_model_new')) . '" class="ai-model-form">' . csrf_field() .
         '<div class="grid2">' .
