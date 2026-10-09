@@ -76,6 +76,10 @@ function user_update(int $id, array $fields): void
 function user_delete(int $id): void
 {
     user_update($id, ['deleted' => 1, 'pass' => '', 'email' => '', 'sig' => '', 'remember' => '']);
+    /* v1.20.0：顺带清空该用户的全部设备登记与踢出黑名单 */
+    dev_write(function (array &$all) use ($id): void {
+        unset($all['d'][$id], $all['k'][$id]);
+    });
 }
 
 /** 计数器增减（被赞数/被回复数/帖子数） */
@@ -148,6 +152,12 @@ function current_user(): ?array
     }
     $u = null;
     if (!empty($_SESSION['uid'])) {
+        /* v1.20.0 踢出双保险之一：sid 在黑名单（设备被下线）→ 无论会话文件状态如何立即终止 */
+        if (dev_sid_killed((int)$_SESSION['uid'])) {
+            auth_logout();
+            flash('err', '该设备已被下线，如非本人操作请及时修改密码');
+            return null;
+        }
         $cand = user_by_id((int)$_SESSION['uid']);
         if ($cand && !empty($cand['banned'])) {
             auth_logout();
@@ -161,9 +171,17 @@ function current_user(): ?array
         foreach (user_all() as $cand) {
             if (!empty($cand['remember']) && hash_equals((string)$cand['remember'], $hash)) {
                 if (empty($cand['banned'])) {
+                    /* v1.20.0 踢出双保险之二：指纹在黑名单的设备不可借助「保持登录」静默重登；
+                       仅清本设备 Cookie，不影响其他正常在线设备 */
+                    if (dev_is_kicked((int)$cand['id'], dev_fingerprint())) {
+                        setcookie('mf_remember', '', ['expires' => time() - 3600, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => app_is_https()]);
+                        break;
+                    }
+                    $isNew = !dev_known((int)$cand['id'], dev_fingerprint());
                     $u = $cand;
                     $_SESSION['uid'] = (int)$cand['id'];
                     session_cookie_persist(30); // 浏览器重启后恢复登录：会话 Cookie 一并续为 30 天，双保险
+                    dev_login_register((int)$cand['id'], $cand, fw_ip(), false); // 恢复也登记（新设备照发提醒；不强制邮箱验证）
                 }
                 break;
             }

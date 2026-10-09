@@ -57,6 +57,11 @@ function route_action(string $a): void
         case 'register':         act_register(); return;
         case 'login':            act_login(); return;
         case 'logout':           act_logout(); return;
+        case 'dev_verify':       act_dev_verify(); return;
+        case 'dev_cancel':       act_dev_cancel(); return;
+        case 'dev_kick':         act_dev_kick(); return;
+        case 'dev_kick_others':  act_dev_kick_others(); return;
+        case 'dev_verify_toggle': act_dev_verify_toggle(); return;
         case 'forgot':           act_forgot(); return;
         case 'change_pass':      act_change_pass(); return;
         case 'profile_save':     act_profile_save(); return;
@@ -82,6 +87,7 @@ function route_action(string $a): void
         case 'admin_data_compress': admin_tab_guard(); act_admin_data_compress(); return;
         case 'admin_save_basic': admin_tab_guard(); act_admin_save_basic(); return;
         case 'admin_save_feat':  admin_tab_guard(); act_admin_save_feat(); return;
+        case 'admin_save_security': admin_tab_guard(); act_admin_save_security(); return;
         case 'admin_icon_upload': admin_tab_guard(); act_admin_icon_upload(); return;
         case 'admin_icon_del':    admin_tab_guard(); act_admin_icon_del(); return;
         case 'admin_save_mail':  admin_tab_guard(); act_admin_save_mail(); return;
@@ -415,6 +421,7 @@ function act_logout(): void
     if ($u) {
         log_action('logout', '用户 ' . (string)$u['name'] . ' 退出登录');
     }
+    unset($_SESSION['dev_pending']); // v1.20.0：退出时顺带清理未完成的新设备验证会话
     auth_logout();
     flash('ok', '已退出登录');
     redirect(u('p=home'));
@@ -524,10 +531,24 @@ function act_api_token_revoke(): void
 function act_send_code(): void
 {
     $purpose = post_str('purpose', 10);
-    if (!in_array($purpose, ['register', 'reset', 'delete'], true)) {
+    if (!in_array($purpose, ['register', 'reset', 'delete', 'devverify'], true)) {
         $purpose = 'reset';
     }
-    if ($purpose === 'delete') {
+    if ($purpose === 'devverify') {
+        /* v1.20.0 新设备登录验证码：只发给待验证会话的账号邮箱（忽略表单传入，防骚扰他人） */
+        $p = $_SESSION['dev_pending'] ?? null;
+        if (!is_array($p) || time() - (int)($p['time'] ?? 0) > 600) {
+            act_err('没有待验证的登录，请重新登录', true);
+        }
+        $pu = user_by_id((int)($p['uid'] ?? 0));
+        if (!$pu || !empty($pu['banned'])) {
+            act_err('账号状态异常，请重新登录', true);
+        }
+        $email = strtolower(trim((string)($pu['email'] ?? '')));
+        if (!valid_email($email)) {
+            act_err('该账号未绑定有效邮箱，无法完成新设备验证，请联系管理员', true);
+        }
+    } elseif ($purpose === 'delete') {
         /* 注销账号验证码：仅限已登录用户，且只能发到自己绑定的邮箱（不接受外部邮箱，防骚扰） */
         $me = current_user();
         if (!$me) {
@@ -556,7 +577,7 @@ function act_send_code(): void
         act_err($err, true);
     }
     $_SESSION['code_sent_at'] = time();
-    $lbl = ['register' => '注册', 'reset' => '找回密码', 'delete' => '注销账号'][$purpose] ?? '验证';
+    $lbl = ['register' => '注册', 'reset' => '找回密码', 'delete' => '注销账号', 'devverify' => '新设备登录'][$purpose] ?? '验证';
     log_action('code_send', $lbl . '验证码 → ' . $email);
     json_response(['ok' => true, 'msg' => '验证码已发送，请查收邮箱（注意垃圾箱）']);
 }
@@ -639,8 +660,30 @@ function act_login(): void
         flash('err', '该账号已被封禁，无法登录');
         redirect(u('p=login'));
     }
+
+    /* v1.20.0 新设备二次验证：未知设备 + 功能开启 + 邮箱可用 → 先发验证码，验证通过才建立会话。
+       回归设备（指纹在踢出黑名单内用密码重登）视为本人操作，直接放行。 */
+    $fp = dev_fingerprint();
+    $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+    $ip = fw_ip();
+    $kickedHere = dev_is_kicked((int)$u['id'], $fp);
+    $known = dev_known((int)$u['id'], $fp);
+    if (!$known && !$kickedHere && dev_verify_on($u) && valid_email((string)($u['email'] ?? ''))) {
+        $err = '';
+        if (code_send((string)$u['email'], 'devverify', $err)) {
+            $_SESSION['dev_pending'] = ['uid' => (int)$u['id'], 'remember' => $remember ? 1 : 0, 'time' => time()];
+            log_action('dev_verify_sent', '新设备登录验证码已发送：「' . dev_ua_name($ua) . '」（IP ' . $ip . '）', (int)$u['id'], (string)$u['name']);
+            clear_old();
+            flash('ok', '检测到新设备登录，验证码已发送至注册邮箱 ' . dev_mask_email((string)$u['email']) . '，请输入验证码完成登录');
+            redirect(u('p=login&dev=1'));
+        }
+        /* 邮件发送失败（如站点未配置 SMTP）降级放行，日志留痕——安全功能不可把用户挡在门外 */
+        log_action('dev_verify_skip', '新设备二次验证邮件发送失败，已降级放行：' . $err, (int)$u['id'], (string)$u['name']);
+    }
+
     auth_login($u, $remember);
-    log_action('login', '用户 ' . (string)$u['name'] . '（#' . (int)$u['id'] . '）登录成功' . ($remember ? '，保持登录 30 天' : ''), (int)$u['id'], (string)$u['name']);
+    dev_login_register((int)$u['id'], $u, $ip, $kickedHere); // 登记设备（新设备自动发提醒；超出并发上限自动下线最早设备）
+    log_action('login', '用户 ' . (string)$u['name'] . '（#' . (int)$u['id'] . '）登录成功' . ($remember ? '，保持登录 30 天' : '') . '（' . dev_ua_name($ua) . ' · IP ' . $ip . '）', (int)$u['id'], (string)$u['name']);
     clear_old();
     flash('ok', '欢迎回来，' . (string)$u['name']);
     $next = (string)($_POST['next'] ?? '');
@@ -648,6 +691,100 @@ function act_login(): void
         redirect(u($next));
     }
     redirect(u('p=home'));
+}
+
+/** v1.20.0：新设备邮箱验证码校验，通过后正式建立会话（验证码本身由 code_send/code_verify 全程管理） */
+function act_dev_verify(): void
+{
+    $p = $_SESSION['dev_pending'] ?? null;
+    if (!is_array($p) || time() - (int)($p['time'] ?? 0) > 600) {
+        unset($_SESSION['dev_pending']);
+        flash('err', '验证会话已超时，请重新登录');
+        redirect(u('p=login'));
+    }
+    $u = user_by_id((int)($p['uid'] ?? 0));
+    if (!$u || !empty($u['deleted']) || !empty($u['banned'])) {
+        unset($_SESSION['dev_pending']);
+        flash('err', '账号状态异常，请重新登录');
+        redirect(u('p=login'));
+    }
+    $code = post_str('code', 6);
+    $err = '';
+    if (!code_verify((string)$u['email'], 'devverify', $code, $err)) {
+        flash('err', $err);
+        redirect(u('p=login&dev=1'));
+    }
+    $remember = !empty($p['remember']);
+    unset($_SESSION['dev_pending']);
+    auth_login($u, $remember);
+    dev_login_register((int)$u['id'], $u, fw_ip(), false);
+    log_action('dev_verified', '用户 ' . (string)$u['name'] . ' 通过新设备邮箱验证并登录（' . dev_ua_name((string)($_SERVER['HTTP_USER_AGENT'] ?? '')) . ' · IP ' . fw_ip() . '）', (int)$u['id'], (string)$u['name']);
+    clear_old();
+    flash('ok', '设备验证通过，欢迎回来，' . (string)$u['name']);
+    redirect(u('p=home'));
+}
+
+/** v1.20.0：放弃本次新设备验证，返回普通登录 */
+function act_dev_cancel(): void
+{
+    unset($_SESSION['dev_pending']);
+    redirect(u('p=login'));
+}
+
+/** v1.20.0：下线指定设备（个人设置 → 登录设备） */
+function act_dev_kick(): void
+{
+    $u = require_login('p=settings');
+    $fp = post_str('fp', 64);
+    if ($fp === '') {
+        flash('err', '参数缺失');
+        redirect(u('p=settings#devices'));
+    }
+    if (hash_equals(dev_fingerprint(), $fp)) {
+        flash('err', '当前设备不能自行下线，请使用顶部菜单「退出登录」');
+        redirect(u('p=settings#devices'));
+    }
+    $entry = null;
+    if (dev_kick_fp((int)$u['id'], $fp, $entry)) {
+        log_action('device_kick', '用户主动下线设备「' . (string)($entry['name'] ?? '?') . '」（IP ' . (string)($entry['ip'] ?? '-') . '）', (int)$u['id'], (string)$u['name']);
+        flash('ok', '设备「' . (string)($entry['name'] ?? '?') . '」已下线');
+    } else {
+        flash('err', '设备不存在或已下线');
+    }
+    redirect(u('p=settings#devices'));
+}
+
+/** v1.20.0：一键下线除当前设备外的全部设备 */
+function act_dev_kick_others(): void
+{
+    $u = require_login('p=settings');
+    $n = dev_kick_others((int)$u['id']);
+    log_action('device_kick', '用户一键下线其他全部设备（' . $n . ' 台）', (int)$u['id'], (string)$u['name']);
+    flash('ok', $n > 0 ? '已下线 ' . $n . ' 台其他设备' : '没有其他在线设备');
+    redirect(u('p=settings#devices'));
+}
+
+/** v1.20.0：个人「新设备二次验证」开关（与后台总闸相互独立，任一开启即生效） */
+function act_dev_verify_toggle(): void
+{
+    $u = require_login('p=settings');
+    $on = !empty($_POST['on']) ? 1 : 0;
+    user_update((int)$u['id'], ['dev_verify' => $on]);
+    log_action('dev_verify_toggle', '用户' . ($on ? '开启' : '关闭') . '了新设备二次验证', (int)$u['id'], (string)$u['name']);
+    flash('ok', $on ? '已开启：新设备登录需输入邮箱验证码' : '已关闭：新设备登录不再需要验证码');
+    redirect(u('p=settings#devices'));
+}
+
+/** v1.20.0：后台「安全防护」页 · 账号安全设置（二次验证总闸 + 同时在线设备上限） */
+function act_admin_save_security(): void
+{
+    admin_tab_guard();
+    $max = max(1, min(50, (int)($_POST['sess_max'] ?? 10)));
+    /* checkbox 用 hidden(0)+checkbox(1) 组合提交：未勾选=标量'0'（empty→关），勾选=数组（non-empty→开） */
+    $verify = array_key_exists('dev_verify', $_POST) ? (!empty($_POST['dev_verify']) ? 1 : 0) : 0;
+    cfg_update(['dev_verify' => $verify, 'sess_max' => $max]);
+    log_action('admin_save_security', '账号安全设置已保存（新设备二次验证总闸：' . ($verify ? '开' : '关') . ' · 同时在线设备上限：' . $max . ' 台）');
+    act_ok('账号安全设置已保存', u('p=admin&tab=security'));
 }
 
 function act_forgot(): void

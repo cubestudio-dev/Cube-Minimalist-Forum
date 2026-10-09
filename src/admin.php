@@ -1051,6 +1051,18 @@ function admin_tab_update(): void
 /** 安全防护总览（防火墙 / 限流 / 策略 / 危险 IP 库 / 访问统计 / 封禁 / 事件日志） */
 function admin_tab_security(): void
 {
+    /* ================= v1.20.0：账号安全（登录设备 / 二次验证 / 并发上限） ================= */
+    echo '<div class="card form-card"><h2 class="card-title">账号安全 · 登录设备管理</h2>' .
+        '<form data-admin-save="security">' .
+        '<b class="ai-sub">新设备登录防护与同时在线设备数量</b>' .
+        '<label class="check"><input type="hidden" name="dev_verify" value="0"><input type="checkbox" name="dev_verify" value="1"' . ((int)cfg('dev_verify', 0) === 1 ? ' checked' : '') . '> <b>新设备二次验证（全站总闸）</b> —— 开启后，所有用户在新设备登录时都必须先输入邮箱验证码（发送至注册邮箱，5 分钟有效）；关闭时用户仍可在「个人设置 → 登录设备」自行开启。验证码邮件无法发送时（如 SMTP 未配置）自动降级放行并留痕，不会把用户挡在门外</label>' .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">同一账号同时在线设备上限（台）</span><input class="input" name="sess_max" type="number" min="1" max="50" value="' . dev_cfg_max() . '"><span class="hint">1-50，默认 10；超出时最早登录的设备被自动下线，当前正在使用的设备永远保留</span></label>' .
+        '</div>' .
+        '<p class="hint">每次登录都会记录设备名称、IP 与归属地（用户可在「个人设置 → 登录设备」查看并一键下线任意设备）；新设备登录成功后系统自动发送站内提醒，引导用户修改密码与下线设备。被下线的设备 30 天内无法借助「保持登录」静默重登，但用密码主动登录视为本人操作。</p>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="button" data-admin-save="security">保存账号安全设置</button></div>' .
+        '<span class="test-msg muted"></span></form></div>';
+
     /* ================= v1.16.0：AI 自主防护（严全面模式）—— 从「AI」页移入本页（本质是安全防护功能） ================= */
     echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">AI 自主防护（严全面模式）</h2>' .
         '<form>' .

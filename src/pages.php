@@ -291,6 +291,33 @@ function page_login(): void
 {
     layout_header('登录', 0);
     $next = (string)($_GET['next'] ?? '');
+
+    /* v1.20.0：新设备二次验证步骤（待验证会话存在且明确进入 dev 流程时展示） */
+    $pend = $_SESSION['dev_pending'] ?? null;
+    if (is_array($pend) && ($_GET['dev'] ?? '') === '1') {
+        $pu = user_by_id((int)($pend['uid'] ?? 0));
+        if (!$pu || !empty($pu['banned']) || !empty($pu['deleted'])) {
+            unset($_SESSION['dev_pending']);
+            flash('err', '账号状态异常，请重新登录');
+            redirect(u('p=login'));
+        }
+        $left = 600 - (time() - (int)($pend['time'] ?? 0));
+        echo '<div class="auth-wrap"><div class="card auth-card">';
+        echo page_head('新设备验证', '为保护账号安全，请输入邮箱验证码确认是本人操作');
+        echo '<div class="field"><span class="field-l">验证码已发送至</span><input class="input" type="email" id="dv-email" value="' . e((string)$pu['email']) . '" readonly></div>' .
+            '<form method="post" action="' . e(u('a=dev_verify')) . '">' . csrf_field() .
+            '<div class="field"><span class="field-l">邮箱验证码</span>' .
+            '<div class="code-row"><input class="input" name="code" required maxlength="6" inputmode="numeric" placeholder="6 位数字" autofocus>' .
+            '<button class="btn btn-ghost send-code" type="button" data-purpose="devverify" data-email="#dv-email">重新发送</button></div>' .
+            '<span class="code-msg muted"></span></div>' .
+            '<p class="hint">验证码 5 分钟内有效，' . max(0, $left) . ' 秒内完成验证；错误 5 次将作废本次验证码。</p>' .
+            '<button class="btn btn-primary btn-block" type="submit">验证并登录</button></form>' .
+            '<div class="auth-foot"><a href="' . e(u('a=dev_cancel')) . '">返回重新登录</a><a href="' . e(u('p=forgot')) . '">无法收到验证码？</a></div>' .
+            '</div></div>';
+        layout_footer();
+        return;
+    }
+
     echo '<div class="auth-wrap"><div class="card auth-card">';
     echo page_head('登录', '用户名或邮箱 + 密码');
     echo '<form method="post" action="' . e(u('a=login')) . '">' .
@@ -429,6 +456,60 @@ function page_settings(): void
         '<label class="field"><span class="field-l">新密码</span><input class="input" type="password" name="pass" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
         '<label class="field"><span class="field-l">确认新密码</span><input class="input" type="password" name="pass2" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">修改密码</button></div></form></div>';
+
+    /* ---- v1.20.0：登录设备管理 ---- */
+    $curFp = dev_fingerprint();
+    $myDevs = dev_of((int)$u['id']);
+    $verifyGlobal = (int)cfg('dev_verify', 0) === 1;
+    $verifySelf = !empty($u['dev_verify']);
+    echo '<div class="card form-card" id="devices"><h2 class="card-title">登录设备</h2>' .
+        '<p class="muted">系统会记录每一次登录的设备（名称、IP 与地点）。发现陌生设备？立即下线它。'
+        . '本站允许同一账号同时在线 <b>' . dev_cfg_max() . '</b> 台设备，超出时最早登录的设备会被自动下线。</p>';
+
+    echo '<form method="post" action="' . e(u('a=dev_verify_toggle')) . '" class="dev-verify-row">' . csrf_field();
+    if ($verifyGlobal) {
+        echo '<label class="check"><input type="checkbox" checked disabled> <b>新设备二次验证</b> —— 管理员已为全站开启（所有用户新设备登录均需邮箱验证码）</label>';
+    } else {
+        echo '<label class="check"><input type="checkbox" name="on" value="1" class="js-dev-toggle"' . ($verifySelf ? ' checked' : '') . '> ' .
+            '<b>新设备二次验证</b> —— 开启后，任何陌生设备登录您的账号都需要先输入邮箱验证码</label>';
+    }
+    echo '</form>';
+
+    if ($myDevs) {
+        echo '<div class="dev-list">';
+        foreach ($myDevs as $d) {
+            $isCur = ($d['fp'] ?? '') === $curFp;
+            echo '<div class="dev-item' . ($isCur ? ' current' : '') . '"><div class="dev-info">' .
+                '<div class="dev-name"><b>' . e((string)($d['name'] ?? '未知设备')) . '</b>' .
+                ($isCur ? '<span class="badge badge-ok">当前设备</span>' : '') . '</div>' .
+                '<div class="dev-meta muted">IP ' . e((string)($d['ip'] ?? '-')) . ' · ' . e((string)($d['loc'] ?? '未知地区')) . '</div>' .
+                '<div class="dev-meta muted">最后活跃 ' . e(fmt_time((int)($d['last'] ?? 0))) . ' · 首次登录 ' . e(fmt_dt((int)($d['created'] ?? 0))) . '</div>' .
+                '</div><div class="dev-ops">';
+            if ($isCur) {
+                echo '<span class="hint">就是您正在使用的设备</span>';
+            } else {
+                echo '<form method="post" action="' . e(u('a=dev_kick')) . '" class="inline" data-confirm="确认下线设备「' . e((string)($d['name'] ?? '?')) . '」？该设备将被强制退出登录。">' .
+                    '<input type="hidden" name="fp" value="' . e((string)($d['fp'] ?? '')) . '">' . csrf_field() .
+                    '<button class="btn btn-ghost btn-sm danger" type="submit">下线</button></form>';
+            }
+            echo '</div></div>';
+        }
+        echo '</div>';
+        $others = 0;
+        foreach ($myDevs as $d) {
+            if (($d['fp'] ?? '') !== $curFp) {
+                $others++;
+            }
+        }
+        if ($others > 0) {
+            echo '<form method="post" action="' . e(u('a=dev_kick_others')) . '" data-confirm="确认下线除当前设备外的全部 ' . $others . ' 台设备？">' . csrf_field() .
+                '<div class="form-foot"><span class="hint">共 ' . count($myDevs) . ' 台设备在线，其中 ' . $others . ' 台非当前设备</span>' .
+                '<button class="btn btn-ghost btn-sm danger" type="submit">一键下线其他设备</button></div></form>';
+        }
+    } else {
+        echo empty_state('暂无登录记录，下次登录后这里会显示设备清单');
+    }
+    echo '</div>';
 
     /* ---- v1.16.0：注销账号 ---- */
     $armed = (int)($_SESSION['delete_armed'] ?? 0);

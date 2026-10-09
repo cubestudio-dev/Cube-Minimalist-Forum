@@ -798,4 +798,8 @@
     try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败，请手动选择复制'); }
     document.body.removeChild(ta);
   }
+  /* v1.20.0：新设备二次验证个人开关——勾选即提交 */
+  $$('.js-dev-toggle').forEach(function (cb) {
+    cb.addEventListener('change', function () { if (cb.form) cb.form.submit(); });
+  });
 })();

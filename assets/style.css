@@ -842,3 +842,16 @@ a .mention, .mention a { text-decoration: none; }
 .api-token-box { border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 8%, transparent); border-radius: var(--radius); padding: 12px 14px; margin: 10px 0 14px; font-size: 13.5px; }
 .api-token-box b { display: block; margin-bottom: 8px; }
 .api-token-box code { display: block; word-break: break-all; font-size: 14px; font-weight: 700; padding: 10px 12px; background: var(--card); border: 1px dashed var(--border); border-radius: 8px; margin-bottom: 8px; user-select: all; }
+
+/* ================= v1.20.0 登录设备管理 ================= */
+.dev-verify-row { border-top: 1px dashed var(--border); margin-top: 14px; padding-top: 12px; }
+.dev-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; max-height: 420px; overflow-y: auto; padding-right: 2px; }
+.dev-list::-webkit-scrollbar { width: 6px; }
+.dev-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.dev-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; background: var(--bg, transparent); }
+.dev-item.current { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 6%, transparent); }
+.dev-item .dev-info { min-width: 0; }
+.dev-item .dev-name { display: flex; align-items: center; gap: 8px; font-size: 14px; flex-wrap: wrap; }
+.dev-item .dev-meta { font-size: 12.5px; margin-top: 2px; word-break: break-all; }
+.dev-item .dev-ops { flex-shrink: 0; }
+.dev-item .dev-ops .hint { font-size: 12px; }
