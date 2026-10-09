@@ -208,16 +208,16 @@ function fmt_time(int $ts): string
     }
     $d = time() - $ts;
     if ($d < 60) {
-        return '刚刚';
+        return t('刚刚');
     }
     if ($d < 3600) {
-        return floor($d / 60) . ' 分钟前';
+        return t('{0} 分钟前', [(int)floor($d / 60)]);
     }
     if ($d < 86400) {
-        return floor($d / 3600) . ' 小时前';
+        return t('{0} 小时前', [(int)floor($d / 3600)]);
     }
     if ($d < 172800) {
-        return '昨天 ' . date('H:i', $ts);
+        return t('昨天') . ' ' . date('H:i', $ts);
     }
     if (date('Y', $ts) === date('Y')) {
         return date('m-d H:i', $ts);

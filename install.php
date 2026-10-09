@@ -7,7 +7,7 @@ define('APP', 1);
 require __DIR__ . '/src/bootstrap.php';
 
 /* ---------- 安装锁检查 ---------- */
-if (Store::exists('lock/install.lock')) {
+if (FileStore::exists('lock/install.lock')) {
     http_response_code(403);
     echo '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>已安装</title>' .
         '<link rel="stylesheet" href="' . e(ua('assets/style.css?v=' . MF_VERSION)) . '"></head>' .

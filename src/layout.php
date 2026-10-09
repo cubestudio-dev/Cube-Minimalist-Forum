@@ -44,12 +44,45 @@ function layout_head_common(string $title = '', bool $forceInlineCss = false): v
     if (!preg_match('/^#[0-9a-fA-F]{3,8}$/', $accent)) {
         $accent = '#0f766e';
     }
+    /* v1.21.0 SEO：标题模板 / 描述 / 关键词 / 收录策略 / OG / 自定义 head */
+    $seoDesc = trim((string)($c['seo_description'] ?? ''));
+    if ($seoDesc === '') {
+        $seoDesc = trim((string)($c['site_desc'] ?? ''));
+    }
+    $tpl = trim((string)($c['seo_title_tpl'] ?? ''));
+    if ($tpl === '') {
+        $tpl = '{page} · {site}';
+    }
+    $pageTitle = $title !== '' ? str_replace(['{page}', '{site}'], [$title, $siteName], $tpl) : $siteName;
+    $siteIcon = (string)($c['site_icon'] ?? '');
 ?>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="csrf" content="<?= e(csrf_token()) ?>">
-<title><?= e($title !== '' ? $title . ' · ' . $siteName : $siteName) ?></title>
-<?php $siteIcon = (string)($c['site_icon'] ?? '');
+<title><?= e($pageTitle) ?></title>
+<?php if ($seoDesc !== ''): ?><meta name="description" content="<?= e(cut_str($seoDesc, 160)) ?>">
+<?php endif;
+if (trim((string)($c['seo_keywords'] ?? '')) !== ''): ?><meta name="keywords" content="<?= e(trim((string)$c['seo_keywords'])) ?>">
+<?php endif;
+if (trim((string)($c['seo_robots'] ?? '')) !== ''): ?><meta name="robots" content="<?= e(trim((string)$c['seo_robots'])) ?>">
+<?php endif;
+if ((int)($c['seo_og'] ?? 1) === 1): ?>
+<meta property="og:site_name" content="<?= e($siteName) ?>">
+<meta property="og:title" content="<?= e($pageTitle) ?>">
+<?php if ($seoDesc !== ''): ?><meta property="og:description" content="<?= e(cut_str($seoDesc, 160)) ?>">
+<?php endif; ?>
+<meta property="og:type" content="website">
+<?php $siteUrl = rtrim(trim((string)($c['site_url'] ?? '')), '/');
+if ($siteUrl !== '' && preg_match('#^https?://#i', $siteUrl)):
+    $ogReq = (string)($_SERVER['REQUEST_URI'] ?? '/');
+    if ($ogReq === '' || $ogReq[0] !== '/') {
+        $ogReq = '/';
+    } ?>
+<meta property="og:url" content="<?= e($siteUrl . e($ogReq)) ?>">
+<?php if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '/upload/' . $siteIcon)): ?>
+<meta property="og:image" content="<?= e($siteUrl . '/' . u('p=icon&v=' . (int)@filemtime(DATA_DIR . '/upload/' . $siteIcon))) ?>">
+<?php endif; endif; endif;
+if (trim((string)($c['seo_extra_head'] ?? '')) !== ''): echo trim((string)$c['seo_extra_head']) . "\n"; endif;
 if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '/upload/' . $siteIcon)):
     $iv = (int)@filemtime(DATA_DIR . '/upload/' . $siteIcon);
     $iext = strtolower(pathinfo($siteIcon, PATHINFO_EXTENSION)); ?>
@@ -89,7 +122,7 @@ function layout_header(string $title = '', int $boardId = 0): void
     $pingInt = max(0, min(300, (int)cfg('ping_interval', 15)));
     ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="<?= e(lang_html()) ?>" data-theme="light">
 <head>
 <?php layout_head_common($title); ?>
 <meta name="live-interval" content="<?= $liveInt ?>">
@@ -101,31 +134,31 @@ function layout_header(string $title = '', int $boardId = 0): void
 <div class="shell">
   <header class="topbar">
     <div class="topbar-in">
-      <button class="icon-btn nav-toggle" id="navToggle" aria-label="板块导航" aria-expanded="false">☰</button>
+      <button class="icon-btn nav-toggle" id="navToggle" aria-label="<?= e(t('板块导航')) ?>" aria-expanded="false">☰</button>
       <a class="brand" href="<?= e(u('p=home')) ?>"><span class="logo" aria-hidden="true"></span><b><?= e($siteName) ?></b></a>
       <span class="brand-desc"><?= e($siteDesc) ?></span>
       <nav class="top-links">
-        <a class="nav-link" href="<?= e(u('p=announcements')) ?>">公告<span class="dot" id="notifyDot"<?= $unread > 0 ? '' : ' hidden' ?> title="<?= $unread ?> 条未读通知" aria-label="<?= $unread ?> 条未读通知"></span></a>
+        <a class="nav-link" href="<?= e(u('p=announcements')) ?>"><?= e(t('公告')) ?><span class="dot" id="notifyDot"<?= $unread > 0 ? '' : ' hidden' ?> title="<?= $unread ?> 条未读通知" aria-label="<?= $unread ?> 条未读通知"></span></a>
       </nav>
       <div class="flex1"></div>
-      <button class="icon-btn" id="themeToggle" title="切换深色 / 浅色模式" aria-label="切换深色模式">◐</button>
+      <button class="icon-btn" id="themeToggle" title="<?= e(t('切换深色 / 浅色模式')) ?>" aria-label="<?= e(t('切换深色模式')) ?>">◐</button>
       <?php if ($u): ?>
         <a class="nav-link" href="<?= e(u('p=user&id=' . (int)$u['id'])) ?>"><?= e((string)$u['name']) ?></a>
-        <?php if (!empty($u['admin'])): ?><a class="nav-link" href="<?= e(u('p=admin')) ?>">后台</a><?php endif; ?>
-        <a class="nav-link hide-sm" href="<?= e(u('p=settings')) ?>">个人设置</a>
-        <form method="post" action="<?= e(u('a=logout')) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-ghost btn-sm" type="submit">退出</button></form>
+        <?php if (!empty($u['admin'])): ?><a class="nav-link" href="<?= e(u('p=admin')) ?>"><?= e(t('后台')) ?></a><?php endif; ?>
+        <a class="nav-link hide-sm" href="<?= e(u('p=settings')) ?>"><?= e(t('个人设置')) ?></a>
+        <form method="post" action="<?= e(u('a=logout')) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-ghost btn-sm" type="submit"><?= e(t('退出')) ?></button></form>
       <?php else: ?>
-        <a class="btn btn-ghost btn-sm" href="<?= e(u('p=login')) ?>">登录</a>
-        <?php if (feat_on('register')): ?><a class="btn btn-primary btn-sm" href="<?= e(u('p=register')) ?>">注册</a><?php endif; ?>
+        <a class="btn btn-ghost btn-sm" href="<?= e(u('p=login')) ?>"><?= e(t('登录')) ?></a>
+        <?php if (feat_on('register')): ?><a class="btn btn-primary btn-sm" href="<?= e(u('p=register')) ?>"><?= e(t('注册')) ?></a><?php endif; ?>
       <?php endif; ?>
     </div>
   </header>
   <div class="wrap">
     <aside class="sidebar" id="sidebar">
       <div class="side-block">
-        <div class="side-title">板块</div>
+        <div class="side-title"><?= e(t('板块')) ?></div>
         <a class="side-item<?= $boardId === 0 ? ' on' : '' ?>" href="<?= e(u('p=home')) ?>">
-          <span class="side-name">全部帖子</span><span class="side-desc">最新帖与最新回复</span>
+          <span class="side-name"><?= e(t('全部帖子')) ?></span><span class="side-desc"><?= e(t('最新帖与最新回复')) ?></span>
         </a>
         <?php foreach (board_all() as $b): ?>
           <a class="side-item<?= $boardId === (int)$b['id'] ? ' on' : '' ?>" href="<?= e(u('p=board&id=' . (int)$b['id'])) ?>">
@@ -139,11 +172,11 @@ function layout_header(string $title = '', int $boardId = 0): void
       <form method="get" action="index.php" role="search">
         <input type="hidden" name="p" value="search">
         <?php if (demo_port() !== ''): ?><input type="hidden" name="XTransformPort" value="<?= e(demo_port()) ?>"><?php endif; ?>
-        <input class="input input-sm" type="search" name="q" maxlength="50" placeholder="搜索帖子…" aria-label="站内搜索">
+        <input class="input input-sm" type="search" name="q" maxlength="50" placeholder="<?= e(t('搜索帖子…')) ?>" aria-label="<?= e(t('站内搜索')) ?>">
       </form>
     </div>
     <?php endif; ?>
-      <div class="side-block side-online"><?php if (feat_on('online')): ?><a class="online-link" href="<?= e(u('p=online')) ?>" title="查看在线名单"><span class="live-dot" aria-hidden="true"></span><b id="onlineNum"><?= (int)$online ?></b>&nbsp;人在线<span class="online-more" aria-hidden="true">›</span></a><?php else: ?><span class="online-link"><span class="live-dot" aria-hidden="true"></span><b><?= (int)$online ?></b>&nbsp;人在线</span><?php endif; ?></div>
+      <div class="side-block side-online"><?php if (feat_on('online')): ?><a class="online-link" href="<?= e(u('p=online')) ?>" title="<?= e(t('查看在线名单')) ?>"><span class="live-dot" aria-hidden="true"></span><b id="onlineNum"><?= (int)$online ?></b>&nbsp;<?= e(t('人在线')) ?><span class="online-more" aria-hidden="true">›</span></a><?php else: ?><span class="online-link"><span class="live-dot" aria-hidden="true"></span><b><?= (int)$online ?></b>&nbsp;<?= e(t('人在线')) ?></span><?php endif; ?></div>
       <div class="side-block side-ping"<?php if ($pingInt > 0): ?> title="浏览器到服务器的往返延迟（每 <?= $pingInt ?> 秒自动测量，后台可调）"<?php else: ?> hidden<?php endif; ?>><span class="online-link"><span class="live-dot" aria-hidden="true"></span>Ping&nbsp;<b id="pingVal">--</b><span class="muted">&nbsp;ms</span></span></div>
     </aside>
     <div class="side-mask" id="sideMask" hidden></div>
@@ -165,7 +198,8 @@ function layout_footer(): void
     }
     $note = trim((string)($c['footer_note'] ?? ''));
     if ($note === '') {
-        $note = '纯文字 · 文件存储 · 无数据库';
+        /* v1.21.0：默认文案随存储引擎变化（不再固定宣称「无数据库」） */
+        $note = Store::engine() === 'db' ? '纯文字 · 数据库存储 · 高性能' : '纯文字 · 文件存储 · 零依赖';
     }
     /* v1.16.0：页脚协议入口（后台「协议」页开关） */
     $docLinks = [];
@@ -176,7 +210,7 @@ function layout_footer(): void
     }
     /* v1.19.0：开放 API 入口（API 开启时自动显示，客户端开发者从这里进文档） */
     if ((int)($c['api_enabled'] ?? 0) === 1) {
-        $docLinks[] = '<a href="' . e(u('p=api_docs')) . '">开放 API</a>';
+        $docLinks[] = '<a href="' . e(u('p=api_docs')) . '">' . e(t('开放 API')) . '</a>';
     }
     ?>
     </main>
@@ -205,7 +239,7 @@ function doc_layout_header(string $title, string $sub = ''): void
     $u = current_user();
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="<?= e(lang_html()) ?>" data-theme="light">
 <head>
 <?php layout_head_common($title, true); ?>
 </head>

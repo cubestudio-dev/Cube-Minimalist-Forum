@@ -13,7 +13,7 @@ if (!ob_start('ob_gzhandler')) {
 }
 
 /* 未安装 → 安装向导 */
-if (!Store::exists('lock/install.lock')) {
+if (!FileStore::exists('lock/install.lock')) {
     redirect(ua('install.php'));
 }
 
@@ -68,6 +68,10 @@ if ($p === 'ping') {
 }
 if ($p === 'icon') {
     page_icon();
+}
+/* v1.21.0 SEO 站点地图：资源级端点，先于私密模式与协议门禁出站（仅含公开内容，后台可开关） */
+if ($p === 'sitemap') {
+    page_sitemap();
 }
 
 /* 私密论坛模式（v1.14.0）：后台关闭「游客可浏览」时，未登录仅允许 登录 / 注册 / 找回密码 /

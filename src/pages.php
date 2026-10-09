@@ -289,7 +289,7 @@ function page_new(): void
 /* ---------------- 登录 ---------------- */
 function page_login(): void
 {
-    layout_header('登录', 0);
+    layout_header(t('登录'), 0);
     $next = (string)($_GET['next'] ?? '');
 
     /* v1.20.0：新设备二次验证步骤（待验证会话存在且明确进入 dev 流程时展示） */
@@ -319,15 +319,15 @@ function page_login(): void
     }
 
     echo '<div class="auth-wrap"><div class="card auth-card">';
-    echo page_head('登录', '用户名或邮箱 + 密码');
+    echo page_head(t('登录'), t('用户名或邮箱 + 密码'));
     echo '<form method="post" action="' . e(u('a=login')) . '">' .
         csrf_field() .
         '<input type="hidden" name="next" value="' . e($next) . '">' .
-        '<label class="field"><span class="field-l">用户名或邮箱</span><input class="input" name="id" required maxlength="60" value="' . old('id') . '" autocomplete="username"></label>' .
-        '<label class="field"><span class="field-l">密码</span><input class="input" type="password" name="pass" required autocomplete="current-password"></label>' .
-        '<label class="check"><input type="checkbox" name="remember" value="1"> 保持登录 30 天</label>' .
-        '<button class="btn btn-primary btn-block" type="submit">登录</button></form>' .
-        '<div class="auth-foot"><a href="' . e(u('p=register')) . '">没有账号？注册</a><a href="' . e(u('p=forgot')) . '">忘记密码？</a></div>' .
+        '<label class="field"><span class="field-l">' . e(t('用户名或邮箱')) . '</span><input class="input" name="id" required maxlength="60" value="' . old('id') . '" autocomplete="username"></label>' .
+        '<label class="field"><span class="field-l">' . e(t('密码')) . '</span><input class="input" type="password" name="pass" required autocomplete="current-password"></label>' .
+        '<label class="check"><input type="checkbox" name="remember" value="1"> ' . e(t('保持登录 30 天')) . '</label>' .
+        '<button class="btn btn-primary btn-block" type="submit">' . e(t('登录')) . '</button></form>' .
+        '<div class="auth-foot"><a href="' . e(u('p=register')) . '">' . e(t('没有账号？注册')) . '</a><a href="' . e(u('p=forgot')) . '">' . e(t('忘记密码？')) . '</a></div>' .
         '</div></div>';
     layout_footer();
 }
@@ -339,26 +339,26 @@ function page_register(): void
         flash('err', '本站已关闭新用户注册');
         redirect(u('p=login'));
     }
-    layout_header('注册', 0);
+    layout_header(t('注册'), 0);
     echo '<div class="auth-wrap"><div class="card auth-card">';
-    echo page_head('注册账号', '用户名 / 邮箱均需唯一，邮箱验证码 5 分钟内有效');
+    echo page_head(t('注册账号'), t('用户名 / 邮箱均需唯一，邮箱验证码 5 分钟内有效'));
     echo '<form method="post" action="' . e(u('a=register')) . '">' . csrf_field() .
-        '<label class="field"><span class="field-l">用户名</span><input class="input" name="name" required maxlength="20" value="' . old('name') . '" placeholder="2-20 位：中文、字母、数字、下划线"></label>' .
-        '<label class="field"><span class="field-l">邮箱</span><input class="input" type="email" name="email" id="reg-email" required maxlength="60" value="' . old('email') . '" placeholder="用于接收验证码，登录也可使用"></label>' .
-        '<div class="field"><span class="field-l">邮箱验证码</span>' .
+        '<label class="field"><span class="field-l">' . e(t('用户名')) . '</span><input class="input" name="name" required maxlength="20" value="' . old('name') . '" placeholder="2-20 位：中文、字母、数字、下划线"></label>' .
+        '<label class="field"><span class="field-l">' . e(t('邮箱')) . '</span><input class="input" type="email" name="email" id="reg-email" required maxlength="60" value="' . old('email') . '" placeholder="用于接收验证码，登录也可使用"></label>' .
+        '<div class="field"><span class="field-l">' . e(t('邮箱验证码')) . '</span>' .
         '<div class="code-row"><input class="input" name="code" required maxlength="6" inputmode="numeric" placeholder="6 位数字">' .
-        '<button class="btn btn-ghost send-code" type="button" data-purpose="register" data-email="#reg-email">发送验证码</button></div>' .
+        '<button class="btn btn-ghost send-code" type="button" data-purpose="register" data-email="#reg-email">' . e(t('发送验证码')) . '</button></div>' .
         '<span class="code-msg muted"></span></div>' .
-        '<label class="field"><span class="field-l">密码</span><input class="input" type="password" name="pass" required minlength="6" maxlength="60" autocomplete="new-password" placeholder="至少 6 位"></label>' .
-        '<label class="field"><span class="field-l">确认密码</span><input class="input" type="password" name="pass2" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
+        '<label class="field"><span class="field-l">' . e(t('密码')) . '</span><input class="input" type="password" name="pass" required minlength="6" maxlength="60" autocomplete="new-password" placeholder="至少 6 位"></label>' .
+        '<label class="field"><span class="field-l">' . e(t('确认密码')) . '</span><input class="input" type="password" name="pass2" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
         /* v1.16.0：已启用协议时强制勾选 */
         (doc_list() !== []
-            ? '<label class="check doc-agree"><input type="checkbox" name="doc_agree" value="1" required> 我已阅读并同意 ' .
+            ? '<label class="check doc-agree"><input type="checkbox" name="doc_agree" value="1" required> ' . e(t('我已阅读并同意')) . ' ' .
                 implode('、', array_map(function ($d) { return '<a href="' . e(u('p=doc')) . '" target="_blank"><b>' . e($d['title']) . '</b></a>'; }, array_values(doc_list())))
             . '</label>'
             : '') .
-        '<button class="btn btn-primary btn-block" type="submit">注册并登录</button></form>' .
-        '<div class="auth-foot"><a href="' . e(u('p=login')) . '">已有账号？登录</a></div>' .
+        '<button class="btn btn-primary btn-block" type="submit">' . e(t('注册并登录')) . '</button></form>' .
+        '<div class="auth-foot"><a href="' . e(u('p=login')) . '">' . e(t('已有账号？登录')) . '</a></div>' .
         '</div></div>';
     layout_footer();
 }
@@ -366,19 +366,19 @@ function page_register(): void
 /* ---------------- 忘记 / 重置密码 ---------------- */
 function page_forgot(): void
 {
-    layout_header('找回密码', 0);
+    layout_header(t('找回密码'), 0);
     echo '<div class="auth-wrap"><div class="card auth-card">';
-    echo page_head('找回密码', '通过注册邮箱验证码设置新密码');
+    echo page_head(t('找回密码'), t('通过注册邮箱验证码设置新密码'));
     echo '<form method="post" action="' . e(u('a=forgot')) . '">' . csrf_field() .
-        '<label class="field"><span class="field-l">注册邮箱</span><input class="input" type="email" name="email" id="fp-email" required maxlength="60" value="' . old('email') . '"></label>' .
-        '<div class="field"><span class="field-l">邮箱验证码</span>' .
+        '<label class="field"><span class="field-l">' . e(t('注册邮箱')) . '</span><input class="input" type="email" name="email" id="fp-email" required maxlength="60" value="' . old('email') . '"></label>' .
+        '<div class="field"><span class="field-l">' . e(t('邮箱验证码')) . '</span>' .
         '<div class="code-row"><input class="input" name="code" required maxlength="6" inputmode="numeric" placeholder="6 位数字">' .
-        '<button class="btn btn-ghost send-code" type="button" data-purpose="reset" data-email="#fp-email">发送验证码</button></div>' .
+        '<button class="btn btn-ghost send-code" type="button" data-purpose="reset" data-email="#fp-email">' . e(t('发送验证码')) . '</button></div>' .
         '<span class="code-msg muted"></span></div>' .
-        '<label class="field"><span class="field-l">新密码</span><input class="input" type="password" name="pass" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
-        '<label class="field"><span class="field-l">确认新密码</span><input class="input" type="password" name="pass2" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
-        '<button class="btn btn-primary btn-block" type="submit">重置密码</button></form>' .
-        '<div class="auth-foot"><a href="' . e(u('p=login')) . '">返回登录</a></div>' .
+        '<label class="field"><span class="field-l">' . e(t('新密码')) . '</span><input class="input" type="password" name="pass" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
+        '<label class="field"><span class="field-l">' . e(t('确认新密码')) . '</span><input class="input" type="password" name="pass2" required minlength="6" maxlength="60" autocomplete="new-password"></label>' .
+        '<button class="btn btn-primary btn-block" type="submit">' . e(t('重置密码')) . '</button></form>' .
+        '<div class="auth-foot"><a href="' . e(u('p=login')) . '">' . e(t('返回登录')) . '</a></div>' .
         '</div></div>';
     layout_footer();
 }
@@ -445,6 +445,21 @@ function page_settings(): void
             : '') .
         '<div class="form-foot"><span class="muted">注册邮箱：' . e((string)$u['email']) . '（不可修改）</span>' .
         '<button class="btn btn-primary" type="submit">保存</button></div></form></div>';
+
+    /* ---- v1.21.0：界面语言（长期保存在个人资料，优先于 IP 自动判断） ---- */
+    $curLang = (string)($u['lang'] ?? '');
+    if ($curLang === '' || !is_lang($curLang)) {
+        $curLang = i18n_active();
+    }
+    $langOpts = '';
+    foreach (MF_LANGS as $code => $name) {
+        $langOpts .= '<option value="' . e($code) . '"' . ($curLang === $code ? ' selected' : '') . '>' . e($name) . '</option>';
+    }
+    echo '<div class="card form-card"><h2 class="card-title">界面语言</h2>' .
+        '<form method="post" action="' . e(u('a=save_lang')) . '">' . csrf_field() .
+        '<label class="field"><span class="field-l">选择界面语言</span><select class="input" name="lang">' . $langOpts . '</select>' .
+        '<span class="hint">前台核心界面即时切换；未翻译的条目自动以简体中文显示。选择后长期保存，优先于按 IP 自动判断</span></label>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存语言</button></div></form></div>';
 
     echo '<div class="card form-card"><h2 class="card-title">修改密码</h2><p class="muted">修改密码需要邮箱验证码（发送至注册邮箱），修改成功后建议重新登录。</p>' .
         '<form method="post" action="' . e(u('a=change_pass')) . '">' . csrf_field() .
@@ -1235,4 +1250,64 @@ function page_mention_api(): void
         }
     }
     json_response(['ok' => true, 'users' => $out]);
+}
+
+/* ================= v1.21.0 SEO：XML 站点地图 ================= */
+
+/**
+ * 站点地图（index.php?p=sitemap）：后台「基本 → SEO」可开关。
+ * 属于「资源级端点」，与 CSS/Ping 一样先于私密模式与协议门禁出站；
+ * 仅输出公开可浏览的内容（私密论坛模式 / 隐藏帖自动排除），上限后台可配。
+ */
+function page_sitemap(): void
+{
+    header('Content-Type: application/xml; charset=utf-8');
+    header('X-Robots-Tag: noindex');
+    $empty = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>';
+    if ((int)cfg('seo_sitemap', 0) !== 1) {
+        echo $empty;
+        exit;
+    }
+    /* 站点根地址：优先后台配置，否则按当前请求域名尽力拼接 */
+    $base = rtrim(trim((string)cfg('site_url', '')), '/');
+    if ($base === '' || !preg_match('#^https?://#i', $base)) {
+        $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+        $base = $host !== '' ? (app_is_https() ? 'https' : 'http') . '://' . preg_replace('/[^a-z0-9.\-:]/i', '', $host) : '';
+    }
+    if ($base === '') {
+        echo $empty;
+        exit;
+    }
+    $limit = min(5000, max(10, (int)cfg('seo_sitemap_limit', 500)));
+    $entries = [];
+    $entries[] = ['loc' => $base . '/', 'lastmod' => 0];
+    foreach (board_all() as $b) {
+        $entries[] = ['loc' => $base . '/index.php?p=board&id=' . (int)$b['id'], 'lastmod' => 0];
+        if (count($entries) >= $limit) {
+            break;
+        }
+    }
+    /* 帖子按最后活跃倒序，优先收录新内容；隐藏帖与私密模式自动排除 */
+    if (feat_on('guest_browse') || current_user()) {
+        $threads = threads_home('reply');
+        foreach ($threads as $th) {
+            if (count($entries) >= $limit) {
+                break;
+            }
+            $entries[] = [
+                'loc'     => $base . '/index.php?p=thread&id=' . (int)$th['id'],
+                'lastmod' => (int)($th['last_reply'] ?? ($th['created'] ?? 0)),
+            ];
+        }
+    }
+    $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+    foreach ($entries as $en) {
+        $xml .= "  <url>\n    <loc>" . e($en['loc']) . "</loc>\n";
+        if ($en['lastmod'] > 0) {
+            $xml .= '    <lastmod>' . gmdate('Y-m-d\TH:i:s\Z', $en['lastmod']) . "</lastmod>\n";
+        }
+        $xml .= "  </url>\n";
+    }
+    echo $xml . '</urlset>';
+    exit;
 }

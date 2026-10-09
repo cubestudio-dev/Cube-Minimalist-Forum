@@ -1726,7 +1726,7 @@ function fw_guard(): void
         return;
     }
     fw_security_headers();
-    if (!Store::exists('lock/install.lock')) {
+    if (!FileStore::exists('lock/install.lock')) {
         return; // 安装向导不设防
     }
     $ip = fw_ip();

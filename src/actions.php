@@ -141,6 +141,17 @@ function route_action(string $a): void
         case 'admin_logs_export':     admin_tab_guard(); act_admin_logs_export(); return;
         case 'admin_save_attack':     admin_tab_guard(); act_admin_save_attack(); return;
         case 'admin_test_attack':     admin_tab_guard(); act_admin_test_attack(); return;
+        case 'admin_save_seo':        admin_tab_guard(); act_admin_save_seo(); return;
+        case 'admin_save_lang':       admin_tab_guard(); act_admin_save_lang(); return;
+        case 'admin_save_storage':    admin_tab_guard(); act_admin_save_storage(); return;
+        case 'admin_test_db':         require_admin(); act_admin_test_db(); return;
+        case 'admin_storage_migrate': admin_tab_guard(); act_admin_storage_migrate(); return;
+        case 'admin_storage_backup':  admin_tab_guard(); act_admin_storage_backup(); return;
+        case 'admin_storage_optimize': admin_tab_guard(); act_admin_storage_optimize(); return;
+        case 'admin_storage_check':   admin_tab_guard(); act_admin_storage_check(); return;
+        case 'admin_daemon_start':    admin_tab_guard(); act_admin_daemon_start(); return;
+        case 'admin_daemon_stop':     admin_tab_guard(); act_admin_daemon_stop(); return;
+        case 'save_lang':             act_save_lang(); return;
         default:
             redirect(u('p=home'));
     }
@@ -2395,4 +2406,344 @@ function act_admin_fw_geo_batch(): void
         $out[$ip] = fw_geo_label($g);
     }
     json_response(['ok' => true, 'geo' => $out, 'msg' => (string)($r['msg'] ?? '')]);
+}
+
+/* ================= v1.21.0 存储引擎 / SEO / 语言 / 巡逻器控制 ================= */
+
+/** 保存 SEO 设置（搜索引擎展示：标题模板 / 描述 / 关键词 / 收收 / Sitemap / OG / 自定义 head） */
+function act_admin_save_seo(): void
+{
+    $me = admin_tab_guard();
+    $robotsOk = ['', 'noindex, follow', 'index, nofollow', 'noindex, nofollow'];
+    $robots = post_str('seo_robots', 30);
+    if (!in_array($robots, $robotsOk, true)) {
+        $robots = '';
+    }
+    $head = post_str('seo_extra_head', 2000);
+    /* 自定义 head 仅防「提前闭合 head」的布局破坏；内容本身与自定义 CSS 同级信任（仅管理员可写） */
+    $head = str_ireplace('</head', '', $head);
+    $kv = [
+        'seo_title_tpl'     => post_str('seo_title_tpl', 100),
+        'seo_description'   => post_str('seo_description', 200),
+        'seo_keywords'      => post_str('seo_keywords', 200),
+        'seo_robots'        => $robots,
+        'seo_sitemap'       => !empty($_POST['seo_sitemap']) ? 1 : 0,
+        'seo_sitemap_limit' => min(5000, max(10, (int)post_str('seo_sitemap_limit', 6))),
+        'seo_og'            => !empty($_POST['seo_og']) ? 1 : 0,
+        'seo_extra_head'    => $head,
+    ];
+    cfg_update($kv);
+    log_action('admin_save_seo', 'SEO 设置已保存：收录 ' . ($robots !== '' ? $robots : '默认')
+        . '，Sitemap ' . ($kv['seo_sitemap'] ? '开' : '关'), (int)$me['id']);
+    act_ok('SEO 设置已保存');
+}
+
+/** 保存界面语言设置（默认语言 / 按 IP 自动切换） */
+function act_admin_save_lang(): void
+{
+    $me = admin_tab_guard();
+    $def = (string)($_POST['lang_default'] ?? 'zh-cn');
+    if (!is_lang($def)) {
+        $def = 'zh-cn';
+    }
+    $kv = [
+        'lang_default' => $def,
+        'lang_auto_ip' => !empty($_POST['lang_auto_ip']) ? 1 : 0,
+    ];
+    cfg_update($kv);
+    log_action('admin_save_lang', '语言设置已保存：默认 ' . $def . '，IP 自动切换 ' . ($kv['lang_auto_ip'] ? '开' : '关'), (int)$me['id']);
+    act_ok('语言设置已保存');
+}
+
+/** 用户自助保存界面语言（个人设置 / 语言切换）：写入资料 + 会话 + Cookie（三处长期生效） */
+function act_save_lang(): void
+{
+    $u = require_login();
+    $lang = (string)($_POST['lang'] ?? ($_GET['lang'] ?? ''));
+    if (!is_lang($lang)) {
+        act_err('不支持的语言');
+    }
+    user_update((int)$u['id'], ['lang' => $lang]);
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        $_SESSION['lang'] = $lang;
+    }
+    if (!headers_sent()) {
+        setcookie('mf_lang', $lang, ['expires' => time() + 31536000, 'path' => '/', 'samesite' => 'Lax', 'httponly' => true]);
+    }
+    log_action('lang_save', '界面语言切换为 ' . $lang, (int)$u['id']);
+    act_ok('界面语言已保存：' . (MF_LANGS[$lang] ?? $lang));
+}
+
+/** 保存数据库连接信息（永远写文件侧 config；绝不改动 storage_engine 引擎键） */
+function act_admin_save_storage(): void
+{
+    $me = admin_tab_guard();
+    $driver = strtolower(post_str('db_driver', 10));
+    if (!in_array($driver, ['sqlite', 'mysql', 'pgsql'], true)) {
+        $driver = 'sqlite';
+    }
+    $pfx = strtolower(post_str('db_prefix', 32));
+    if ($pfx !== '' && !preg_match('/^[a-z0-9_]{1,32}$/', $pfx)) {
+        act_err('表前缀仅限字母、数字、下划线');
+    }
+    $path = post_str('db_sqlite_path', 200);
+    if (strpos($path, '..') !== false || $path !== '' && !preg_match('#^[a-z0-9_\-./]{1,200}$#i', $path)) {
+        act_err('SQLite 路径不合法（相对 data/ 填写，如 db/forum.sqlite）');
+    }
+    $port = preg_replace('/[^0-9]/', '', post_str('db_port', 5));
+    $kv = [
+        'db_driver'       => $driver,
+        'db_sqlite_path'  => $path,
+        'db_host'         => post_str('db_host', 120),
+        'db_port'         => $port,
+        'db_name'         => post_str('db_name', 64),
+        'db_user'         => post_str('db_user', 64),
+        'db_pass'         => (string)($_POST['db_pass'] ?? ''),
+        'db_prefix'       => $pfx !== '' ? $pfx : 'mf_',
+    ];
+    /* 连接信息必须存文件侧（引擎引导发生在读库之前）；DB 模式下也同步进库一份供展示 */
+    $lk = FileStore::lock('config');
+    $c = FileStore::read('config.php', []);
+    if (!is_array($c)) {
+        $c = [];
+    }
+    foreach ($kv as $k => $v) {
+        $c[$k] = $v;
+    }
+    FileStore::write('config.php', $c);
+    FileStore::unlock($lk);
+    foreach ($kv as $k => $v) {
+        $GLOBALS['CFG'][$k] = $v;
+    }
+    log_action('admin_save_storage', '数据库连接信息已保存：' . $driver
+        . ($driver === 'sqlite' ? ' / ' . ($path !== '' ? $path : 'db/forum.sqlite') : ' / ' . $kv['db_host'] . '/' . $kv['db_name']), (int)$me['id']);
+    act_ok('数据库连接信息已保存（引擎切换请使用下方「迁移」）');
+}
+
+/** 测试数据库连接（AJAX，表单内当前值优先于已保存值） */
+function act_admin_test_db(): void
+{
+    require_admin();
+    if (!csrf_ok()) {
+        json_response(['ok' => false, 'msg' => '页面已过期，请刷新后重试']);
+    }
+    $saved = db_conf();
+    $conf = [
+        'db_driver'      => strtolower(post_str('db_driver', 10)) ?: ($saved['db_driver'] ?: 'sqlite'),
+        'db_sqlite_path' => post_str('db_sqlite_path', 200) !== '' ? post_str('db_sqlite_path', 200) : $saved['db_sqlite_path'],
+        'db_host'        => post_str('db_host', 120) !== '' ? post_str('db_host', 120) : $saved['db_host'],
+        'db_port'        => post_str('db_port', 5) !== '' ? post_str('db_port', 5) : $saved['db_port'],
+        'db_name'        => post_str('db_name', 64) !== '' ? post_str('db_name', 64) : $saved['db_name'],
+        'db_user'        => post_str('db_user', 64) !== '' ? post_str('db_user', 64) : $saved['db_user'],
+        'db_pass'        => isset($_POST['db_pass']) && (string)$_POST['db_pass'] !== '' ? (string)$_POST['db_pass'] : $saved['db_pass'],
+        'db_prefix'      => post_str('db_prefix', 32) !== '' ? post_str('db_prefix', 32) : ($saved['db_prefix'] ?: 'mf_'),
+    ];
+    if (!DbStore::connect($conf)) {
+        json_response(['ok' => false, 'msg' => '连接失败：' . DbStore::lastConnError()]);
+    }
+    $st = DbStore::stats();
+    $names = ['sqlite' => 'SQLite', 'mysql' => 'MySQL / MariaDB', 'pgsql' => 'PostgreSQL'];
+    json_response(['ok' => true, 'msg' => '连接成功：' . ($names[$conf['db_driver']] ?? $conf['db_driver'])
+        . ' ' . DbStore::serverInfo() . ' · 数据表 ' . DbStore::table() . ' 已就绪（' . number_format($st['rows']) . ' 行数据）']);
+}
+
+/** 存储引擎迁移（文件 ⇄ 数据库，自动备份 + 校验 + 切换引擎） */
+function act_admin_storage_migrate(): void
+{
+    $me = admin_tab_guard();
+    $dir = (string)($_POST['direction'] ?? '');
+    $curFile = (string)cfg('storage_engine', 'file') !== 'db';
+    if ($dir === 'to_db') {
+        if (!$curFile) {
+            act_err('当前已是数据库存储模式');
+        }
+        $migLk = Store::tryLock('storage_migrate');
+        if (!$migLk) {
+            act_err('已有一次迁移正在进行，请稍候');
+        }
+        $conf = db_conf();
+        if (!DbStore::connect($conf)) {
+            Store::unlock($migLk);
+            act_err('数据库连接失败：' . DbStore::lastConnError() . '（请先到上方保存并测试连接信息）');
+        }
+        $log = DbStore::migrateFromFiles();
+        Store::unlock($migLk);
+        $msg = '迁移完成：' . $log['done'] . '/' . $log['total'] . ' 个数据文件已入库（备份：' . $log['backup'] . '）';
+        if (!$log['ok']) {
+            $detail = implode('；', array_slice($log['errors'], 0, 5));
+            act_err('迁移未完全成功（引擎未切换）：' . $detail . ($log['done'] > 0 ? '。已迁移 ' . $log['done'] . ' 条可重试续迁。' : ''));
+        }
+        /* 切换引擎：引擎键只写文件侧 config（引导决策键） */
+        $lk = FileStore::lock('config');
+        $c = FileStore::read('config.php', []);
+        if (!is_array($c)) {
+            $c = [];
+        }
+        $c['storage_engine'] = 'db';
+        FileStore::write('config.php', $c);
+        FileStore::unlock($lk);
+        $GLOBALS['CFG']['storage_engine'] = 'db';
+        log_action('admin_storage_migrate', '存储引擎 文件 → 数据库（' . DbStore::kind() . '）：' . $log['done'] . ' 个文件，备份 ' . $log['backup'], (int)$me['id']);
+        act_ok($msg . '，已切换为数据库存储');
+    } elseif ($dir === 'to_file') {
+        if ($curFile) {
+            act_err('当前已是文件存储模式');
+        }
+        if (!DbStore::ok()) {
+            act_err('数据库未连接（异常状态，请检查连接）');
+        }
+        $log = DbStore::migrateToFiles();
+        $msg = '迁移完成：' . $log['done'] . '/' . $log['total'] . ' 行已写回文件（备份：' . $log['backup'] . '）';
+        if (!$log['ok']) {
+            act_err('迁移未完全成功（引擎未切换）：' . implode('；', array_slice($log['errors'], 0, 5)));
+        }
+        $lk = FileStore::lock('config');
+        $c = FileStore::read('config.php', []);
+        if (!is_array($c)) {
+            $c = [];
+        }
+        $c['storage_engine'] = 'file';
+        FileStore::write('config.php', $c);
+        FileStore::unlock($lk);
+        $GLOBALS['CFG']['storage_engine'] = 'file';
+        log_action('admin_storage_migrate', '存储引擎 数据库 → 文件：' . $log['done'] . ' 行，备份 ' . $log['backup'], (int)$me['id']);
+        act_ok($msg . '，已切换为文件存储');
+    } else {
+        act_err('未知的迁移方向');
+    }
+}
+
+/** 数据库备份导出（zip：全部数据行原文 + 恢复说明，保留最近 5 份） */
+function act_admin_storage_backup(): void
+{
+    $me = admin_tab_guard();
+    if (!DbStore::ok()) {
+        act_err('当前不是数据库存储模式或数据库未连接');
+    }
+    $keys = array_values(array_filter(DbStore::keysAll(), function ($k) {
+        return is_string($k) && substr($k, -4) === '.php';
+    }));
+    if (!$keys) {
+        act_err('数据库中没有数据行');
+    }
+    $files = [];
+    foreach ($keys as $k) {
+        $v = DbStore::rawJson($k);
+        if ($v !== null) {
+            $files[] = [$k, $v];
+        }
+    }
+    $name = 'db-' . date('Ymd-His') . '.zip';
+    $files[] = ['__manifest.txt', "Cube Minimalist Forum 数据库备份\r\n时间：" . date('Y-m-d H:i:s')
+        . "\r\n数据行：" . count($files) . "\r\n来源：" . strtoupper(DbStore::kind()) . ' / 表 ' . DbStore::table()
+        . "\r\n\r\n恢复方式：后台「存储」切回文件模式时可直接使用，或解包后按「文件名 => JSON 原文」写回 data/ 目录。"];
+    if (!MiniZip::create(FileStore::path('backup/' . $name), $files)) {
+        act_err('备份包创建失败（data/backup/ 不可写？）');
+    }
+    /* 保留最近 5 份 db-*.zip */
+    $zips = array_values(array_filter(Store::scan('backup'), function ($f) {
+        return strpos($f, 'db-') === 0 && substr($f, -4) === '.zip';
+    }));
+    sort($zips);
+    while (count($zips) > 5) {
+        @unlink(FileStore::path('backup/' . array_shift($zips)));
+    }
+    log_action('admin_storage_backup', '数据库备份：' . $name . '（' . count($keys) . ' 行）', (int)$me['id']);
+    act_ok('数据库备份完成：' . $name, u('p=admin&tab=storage'));
+}
+
+/** 数据库维护优化（VACUUM / OPTIMIZE TABLE / VACUUM ANALYZE） */
+function act_admin_storage_optimize(): void
+{
+    $me = admin_tab_guard();
+    if (!DbStore::ok()) {
+        act_err('当前不是数据库存储模式或数据库未连接');
+    }
+    $msg = DbStore::optimize();
+    log_action('admin_storage_optimize', $msg, (int)$me['id']);
+    act_ok($msg, u('p=admin&tab=storage'));
+}
+
+/** 数据库完整性检查 */
+function act_admin_storage_check(): void
+{
+    require_admin();
+    if (!DbStore::ok()) {
+        act_err('当前不是数据库存储模式或数据库未连接');
+    }
+    act_ok(DbStore::integrityCheck(), u('p=admin&tab=storage'));
+}
+
+/** 一键启动常驻巡逻器（尝试在本机后台拉起 daemon.php） */
+function act_admin_daemon_start(): void
+{
+    $me = admin_tab_guard();
+    $bin = trim((string)($_POST['php_bin'] ?? ''));
+    if ($bin !== '') {
+        /* 仅允许常规路径字符，杜绝命令注入；同时持久化到文件侧配置供下次使用 */
+        if (!preg_match('#^[A-Za-z0-9_\-./:\\\\ ]{1,200}$#', $bin)) {
+            act_err('PHP 路径含非常规字符，请检查');
+        }
+        $lk = FileStore::lock('config');
+        $c = FileStore::read('config.php', []);
+        if (!is_array($c)) {
+            $c = [];
+        }
+        $c['daemon_php_bin'] = $bin;
+        FileStore::write('config.php', $c);
+        FileStore::unlock($lk);
+        $GLOBALS['CFG']['daemon_php_bin'] = $bin;
+    }
+    if ($bin === '') {
+        $bin = (string)cfg('daemon_php_bin', '');
+    }
+    if ($bin === '') {
+        $bin = defined('PHP_BINARY') && PHP_BINARY !== '' ? PHP_BINARY : 'php';
+    }
+    if (ai_daemon_alive()) {
+        act_ok('巡逻器已在线，无需重复启动', u('p=admin&tab=security'));
+    }
+    if (!function_exists('proc_open') && !function_exists('shell_exec')) {
+        act_err('主机未开放 proc_open / shell_exec，无法从后台启动。请在 SSH 手动执行：nohup ' . $bin . ' daemon.php >/dev/null 2>&1 &');
+    }
+    $root = dirname(DATA_DIR);
+    $isWin = DIRECTORY_SEPARATOR === '\\';
+    $cmd = $isWin
+        ? 'start /B "" ' . escapeshellarg($bin) . ' daemon.php'
+        : '(cd ' . escapeshellarg($root) . ' && nohup ' . escapeshellarg($bin) . ' daemon.php > /dev/null 2>&1 &)';
+    $started = false;
+    if (function_exists('proc_open')) {
+        $spec = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'e']];
+        $pipes = [];
+        $proc = @proc_open($cmd, $spec, $pipes, $isWin ? $root : null);
+        if (is_resource($proc)) {
+            foreach ($pipes as $pp) {
+                @fclose($pp);
+            }
+            @proc_close($proc); // 命令以 & 结尾，立即返回
+            $started = true;
+        }
+    }
+    if (!$started && function_exists('shell_exec')) {
+        @shell_exec($cmd);
+        $started = true;
+    }
+    log_action('admin_daemon_start', '尝试启动常驻巡逻器（PHP：' . $bin . '）', (int)$me['id']);
+    if ($started) {
+        act_ok('启动命令已发出。巡逻器每 60 秒写一次心跳，约 1 分钟后本页会显示「在线」；若未上线请检查 PHP 路径或查看 data/logs/error.log', u('p=admin&tab=security'));
+    }
+    act_err('启动失败：主机可能禁止创建常驻进程。请在 SSH 手动执行：nohup ' . $bin . ' daemon.php >/dev/null 2>&1 &');
+}
+
+/** 停止常驻巡逻器（写入信号文件，daemon 30 秒内优雅退出并自行删除信号） */
+function act_admin_daemon_stop(): void
+{
+    $me = admin_tab_guard();
+    if (!ai_daemon_alive()) {
+        @unlink(DATA_DIR . '/daemon.stop'); // 清理可能残留的旧信号
+        act_ok('巡逻器当前不在线', u('p=admin&tab=security'));
+    }
+    @file_put_contents(DATA_DIR . '/daemon.stop', (string)time());
+    log_action('admin_daemon_stop', '发送巡逻器停止信号', (int)$me['id']);
+    act_ok('已发送停止信号，巡逻器将在 30 秒内优雅退出', u('p=admin&tab=security'));
 }

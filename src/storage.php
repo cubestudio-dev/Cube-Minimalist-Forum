@@ -1,27 +1,52 @@
 <?php
 /**
- * 极简论坛 · 文件存储引擎
- * - 全部数据以 JSON 形式存于 data/ 目录（扩展名 .php，带守卫前缀，即使被 Web 直接访问也不会泄露内容）
- * - 原子写入：先写临时文件再 rename，避免写一半导致数据损坏
- * - 临界区：命名文件锁（flock），用于读-改-写
+ * 极简论坛 · 存储层
+ *
+ * v1.21.0 架构：
+ *  - FileStore：文件存储引擎原语（数据以 JSON 形式存于 data/ 目录，扩展名 .php，带守卫前缀，
+ *    即使被 Web 直接访问也不会泄露内容；原子写入 + 命名文件锁）
+ *  - DbStore：数据库存储引擎（见 src/dbstore.php，SQLite / MySQL / PostgreSQL，键值与文件一一对应）
+ *  - Store：对全站暴露的门面（与 v1.20.0 及之前完全相同的静态接口），
+ *    按配置把「数据」路由到当前引擎；文件锁 / 会话 / 目录管理始终由文件系统承载，
+ *    保证跨进程互斥的可靠性，与所选引擎无关。
+ *
+ * 安全设计（v1.21.0 加固）：
+ *  - 所有相对路径经 cleanRel() 归一化：拒绝绝对路径 / 上级目录（..）/ 控制字符 / NUL，
+ *    纵深防御任何调用侧拼接出的危险路径；
+ *  - 写入前 fflush + fsync（函数可用时），掉电 / 进程崩溃不落半截数据；
+ *  - data/.htaccess 拒绝一切 Web 访问（bootstrap 自动补建，nginx 用户由 README 指引拦截）。
  */
 defined('APP') or exit('Forbidden');
 
 /** 数据文件守卫前缀：直接访问时仅输出 Forbidden 并终止 */
 const DATA_GUARD = "<?php exit('Forbidden'); ?>\n";
 
-class Store
+class FileStore
 {
     /** 本次请求最后一次写入失败的描述（相对路径 + 原因），成功写入后不清除；null 表示尚无失败 */
     public static $lastWriteError = null;
     /** 本次请求累计写入失败次数（用于启动自检与友好错误提示） */
     public static $writeFailures = 0;
-    /** v1.17.0 请求级读取缓存：rel => 数据；write() 成功后自动同步，取锁时全部失效（保证锁内读到最新落盘值） */
-    private static array $memo = [];
+
+    /** 相对路径防御性归一化：仅允许站内生成的安全相对路径（反斜杠统一为斜杠） */
+    private static function cleanRel(string $rel): string
+    {
+        $rel = str_replace('\\', '/', $rel);
+        if ($rel === '' || $rel === '.') {
+            return $rel;
+        }
+        if ($rel[0] === '/'
+            || strpos($rel, '..') !== false
+            || preg_match('/[\x00-\x1f\x7f]/', $rel)
+            || preg_match('#^[a-z]:#i', $rel)) {
+            return "\x00"; /* 不可能存在的路径：后续 is_file 等恒 false，写入恒失败并被记录 */
+        }
+        return $rel;
+    }
 
     public static function path(string $rel): string
     {
-        return DATA_DIR . '/' . $rel;
+        return DATA_DIR . '/' . self::cleanRel($rel);
     }
 
     public static function ensureDir(string $rel): void
@@ -198,37 +223,23 @@ class Store
         return is_file(self::path($rel));
     }
 
-    /**
-     * v1.17.0 请求级缓存读取：同一请求内对同一文件只做一次磁盘读 + gz 解压 + JSON 解析。
-     * 页面渲染时 user_all()/board_all()/thread_get() 等热点读会在单页内重复几十次，
-     * 此前每次都完整走一遍文件 IO，是列表页卡顿的主因之一。
-     * 一致性由两个钩子保证：write() 成功后同步更新缓存；lock()/tryLock() 取锁时清空全部缓存
-     * （所有“读-改-写”临界区都先取锁，因此锁内读到的必然是磁盘最新值，不会回写旧数据）。
-     */
-    public static function readMemo(string $rel, $def = null)
-    {
-        if (!array_key_exists($rel, self::$memo)) {
-            self::$memo[$rel] = self::read($rel, $def);
-        }
-        return self::$memo[$rel];
-    }
-
-    public static function read(string $rel, $def = null)
+    /** 读原始载荷字符串（守卫前缀剥离 + gzip 自动解压，不做 JSON 解码）；文件不存在 / 损坏返回 null */
+    private static function readPayload(string $rel): ?string
     {
         $p = self::path($rel);
         if (!is_file($p)) {
-            return $def;
+            return null;
         }
         $fp = @fopen($p, 'rb');
         if (!$fp) {
-            return $def;
+            return null;
         }
         @flock($fp, LOCK_SH);
         $raw = stream_get_contents($fp);
         @flock($fp, LOCK_UN);
         fclose($fp);
         if (!is_string($raw) || $raw === '') {
-            return $def;
+            return null;
         }
         if (strpos($raw, DATA_GUARD) === 0) {
             $raw = substr($raw, strlen(DATA_GUARD));
@@ -238,9 +249,24 @@ class Store
         if (strlen($raw) > 2 && substr($raw, 0, 2) === "\x1f\x8b") {
             $dec = @gzdecode($raw);
             if (!is_string($dec)) {
-                return $def;
+                return null;
             }
             $raw = $dec;
+        }
+        return $raw;
+    }
+
+    /** v1.21.0 无损迁移用：读取文件内 JSON 字符串原文（不解码 / 不重编码，字节级原样） */
+    public static function rawJson(string $rel): ?string
+    {
+        return self::readPayload($rel);
+    }
+
+    public static function read(string $rel, $def = null)
+    {
+        $raw = self::readPayload($rel);
+        if ($raw === null) {
+            return $def;
         }
         $v = json_decode($raw, true);
         return json_last_error() === JSON_ERROR_NONE ? $v : $def;
@@ -259,7 +285,7 @@ class Store
         return $short !== '' ? $short : $m;
     }
 
-    /** 单次完整写入（临时文件 + 原子 rename）；失败时通过 $err 返回人话原因 */
+    /** 单次完整写入（临时文件 + fflush/fsync + 原子 rename）；失败时通过 $err 返回人话原因 */
     private static function writeTmp(string $tmp, string $payload, string $p, string &$err): bool
     {
         $err = '';
@@ -271,6 +297,14 @@ class Store
         }
         @flock($fp, LOCK_EX);
         $w = fwrite($fp, $payload);
+        /* v1.21.0 持久化加固：fflush + fsync（PHP >= 8.1），确保数据在返回成功前已落盘，
+           掉电 / 宿主异常崩溃不会留下「写成功标记但内容半截」的文件 */
+        if ($w !== false) {
+            @fflush($fp);
+            if (function_exists('fsync')) {
+                @fsync($fp);
+            }
+        }
         @flock($fp, LOCK_UN);
         fclose($fp);
         if ($w === false) {
@@ -306,14 +340,10 @@ class Store
         $payload = DATA_GUARD . (is_string($bin) && $bin !== '' ? $bin : $json);
         $err = '';
         $ok = self::writeTmp($tmp, $payload, $p, $err);
-        if ($ok) {
-            self::$memo[$rel] = $data; // v1.17.0：写后同步缓存，同请求内后续读免 IO
-        }
         if (!$ok) {
             // 首次失败：先尝试目录自愈（建目录 / 修权限 / 重建空目录），再重试一次
             $firstErr = $err;
             if (self::repairDir(dirname($rel)) && self::writeTmp($tmp, $payload, $p, $err)) {
-                self::$memo[$rel] = $data;
                 return true;
             }
             @unlink($tmp);
@@ -331,6 +361,29 @@ class Store
             return false;
         }
         return true;
+    }
+
+    /**
+     * v1.21.0 无损迁移用：把「JSON 字符串原文」直接写入数据文件（不重新编码），
+     * 与 rawJson() 配对实现 文件 ⇄ 数据库 的字节级无损往返。
+     */
+    public static function writeRaw(string $rel, string $json): bool
+    {
+        self::ensureDir(dirname($rel));
+        $p = self::path($rel);
+        $tmp = $p . '.' . (getmypid() ?: 'x') . '.tmp';
+        $bin = @gzencode($json, 6);
+        $payload = DATA_GUARD . (is_string($bin) && $bin !== '' ? $bin : $json);
+        $err = '';
+        if (self::writeTmp($tmp, $payload, $p, $err)) {
+            return true;
+        }
+        if (self::repairDir(dirname($rel)) && self::writeTmp($tmp, $payload, $p, $err)) {
+            return true;
+        }
+        @unlink($tmp);
+        self::recordWriteError($rel, $err !== '' ? $err : '写入失败');
+        return false;
     }
 
     /** 记录写失败详情：供发帖 / 回复等操作给出可读错误，而非静默丢失 */
@@ -353,19 +406,12 @@ class Store
         if (is_file($p)) {
             @unlink($p);
         }
-        unset(self::$memo[$rel]);
     }
 
-    /** v1.17.0：清空请求级缓存（取锁时调用——进入临界区后必须读磁盘最新值） */
-    public static function memoFlushAll(): void
-    {
-        self::$memo = [];
-    }
-
-    /** 阻塞式命名锁（带超时），返回锁句柄或 false（锁不可用时降级放行，不阻断业务） */
+    /** 阻塞式命名锁（带超时），返回锁句柄或 false（锁不可用时降级放行，不阻断业务）
+     *  v1.21.0：重试加入随机抖动，多进程同时等待同一把锁时避免「惊群」空转 */
     public static function lock(string $name, int $timeout = 5)
     {
-        self::memoFlushAll(); // v1.17.0：进入临界区前弃缓存，保证锁内读到最新落盘值
         self::ensureDir('locks');
         $fp = @fopen(self::path('locks/' . $name . '.lock'), 'c');
         if (!$fp) {
@@ -380,7 +426,7 @@ class Store
                 fclose($fp);
                 return false;
             }
-            usleep(50000);
+            usleep(50000 + mt_rand(0, 30000));
         }
     }
 
@@ -395,7 +441,6 @@ class Store
     /** 非阻塞尝试锁：拿到返回句柄，拿不到立即返回 false */
     public static function tryLock(string $name)
     {
-        self::memoFlushAll();
         self::ensureDir('locks');
         $fp = @fopen(self::path('locks/' . $name . '.lock'), 'c');
         if ($fp && @flock($fp, LOCK_EX | LOCK_NB)) {
@@ -422,6 +467,50 @@ class Store
         }
         sort($out);
         return $out;
+    }
+
+    /**
+     * v1.21.0：数据文件清单（递归，跳过会话 / 锁 / 日志 / 备份 / 上传 / 数据库等文件系统专属目录）。
+     * 仅收录 .php 数据文件 —— 论坛全部业务数据（帖子 / 用户 / 配置等）均为 .php 守卫文件；
+     * 非数据文件（index.html、lock/install.lock 安装标记等）始终属于文件系统。
+     * 返回 [相对路径 => ['size'=>字节,'mtime'=>时间戳]]，供存储引擎迁移与统计使用。
+     */
+    public static function inventory(array $skipDirs = ['sessions', 'locks', 'logs', 'backup', 'upload', 'db']): array
+    {
+        $out = [];
+        $walk = function (string $dir, string $relPrefix) use (&$walk, &$out, $skipDirs): void {
+            foreach ((@scandir(DATA_DIR . ($dir === '' ? '' : '/' . $dir)) ?: []) as $f) {
+                if ($f === '.' || $f === '..' || $f[0] === '.') {
+                    continue;
+                }
+                $rel = $dir === '' ? $f : $dir . '/' . $f;
+                $full = DATA_DIR . '/' . $rel;
+                if (is_dir($full)) {
+                    if (!in_array($rel, $skipDirs, true) && strpos($rel, '.broken-') !== 0) {
+                        $walk($rel, $relPrefix);
+                    }
+                    continue;
+                }
+                if (is_file($full) && substr($f, -4) === '.php') {
+                    $out[$rel] = ['size' => (int)@filesize($full), 'mtime' => (int)@filemtime($full)];
+                }
+            }
+        };
+        $walk('', '');
+        ksort($out);
+        return $out;
+    }
+
+    /** v1.21.0：数据体积汇总（['files'=>N,'bytes'=>B]），跳过文件系统专属目录 */
+    public static function stats(array $skipDirs = ['sessions', 'locks', 'logs', 'backup', 'upload', 'db']): array
+    {
+        $files = 0;
+        $bytes = 0;
+        foreach (self::inventory($skipDirs) as $i) {
+            $files++;
+            $bytes += (int)$i['size'];
+        }
+        return ['files' => $files, 'bytes' => $bytes];
     }
 }
 
@@ -478,5 +567,181 @@ class MiniZip
             @mkdir($dir, 0755, true);
         }
         return (bool)@file_put_contents($outPath, $local . $central . $eocd);
+    }
+}
+
+/* ================================================================
+ * v1.21.0 全站存储门面：与 v1.20.0 及之前完全一致的静态接口。
+ * 数据读写按当前引擎路由（file / db）；文件锁、目录管理与 scan 恒走文件系统
+ * （会话、锁、备份、上传与日志始终存放于文件系统，与所选引擎无关）。
+ * ================================================================ */
+class Store
+{
+    /** 当前数据引擎：'file' | 'db'（bootstrap 按配置初始化；DB 连接失败自动回退 file） */
+    public static string $drv = 'file';
+
+    /** 兼容旧代码的写失败信息（来自当前引擎驱动） */
+    public static $lastWriteError = null;
+    public static $writeFailures = 0;
+
+    /** 请求级读取缓存：rel => 数据；write() 成功后自动同步，取锁时全部失效 */
+    private static array $memo = [];
+
+    /* ---------- 引擎切换（bootstrap 调用） ---------- */
+
+    /**
+     * 尝试启用数据库引擎：连接成功返回 true 并把 $drv 置为 'db'；
+     * 失败返回 false（$drv 保持 'file'，错误原因在 DbStore::lastErr()）。
+     */
+    public static function useDb(array $conf): bool
+    {
+        if (!class_exists('DbStore')) {
+            return false;
+        }
+        if (DbStore::connect($conf)) {
+            self::$drv = 'db';
+            return true;
+        }
+        return false;
+    }
+
+    /** 数据库引擎是否在线（文件引擎恒 true） */
+    public static function dbReady(): bool
+    {
+        return self::$drv === 'db' && DbStore::ok();
+    }
+
+    /** 引擎内部名（file / db），供后台展示 */
+    public static function engine(): string
+    {
+        return self::$drv;
+    }
+
+    private static function syncDrvErrs(): void
+    {
+        if (self::$drv === 'db') {
+            self::$lastWriteError = DbStore::$lastWriteError;
+            self::$writeFailures = DbStore::$writeFailures;
+        } else {
+            self::$lastWriteError = FileStore::$lastWriteError;
+            self::$writeFailures = FileStore::$writeFailures;
+        }
+    }
+
+    /* ---------- 数据读写（按引擎路由，带请求级缓存） ---------- */
+
+    public static function readMemo(string $rel, $def = null)
+    {
+        if (!array_key_exists($rel, self::$memo)) {
+            self::$memo[$rel] = self::read($rel, $def);
+        }
+        return self::$memo[$rel];
+    }
+
+    public static function read(string $rel, $def = null)
+    {
+        $v = self::$drv === 'db' ? DbStore::read($rel, $def) : FileStore::read($rel, $def);
+        self::syncDrvErrs();
+        return $v;
+    }
+
+    public static function write(string $rel, $data): bool
+    {
+        $ok = self::$drv === 'db' ? DbStore::write($rel, $data) : FileStore::write($rel, $data);
+        self::syncDrvErrs();
+        if ($ok) {
+            self::$memo[$rel] = $data; // 写后同步缓存，同请求内后续读免 IO
+        }
+        return $ok;
+    }
+
+    public static function delete(string $rel): void
+    {
+        if (self::$drv === 'db') {
+            DbStore::delete($rel);
+        } else {
+            FileStore::delete($rel);
+        }
+        self::syncDrvErrs();
+        unset(self::$memo[$rel]);
+    }
+
+    public static function exists(string $rel): bool
+    {
+        return self::$drv === 'db' ? DbStore::exists($rel) : FileStore::exists($rel);
+    }
+
+    /** 清空请求级缓存（取锁时调用——进入临界区后必须读最新值） */
+    public static function memoFlushAll(): void
+    {
+        self::$memo = [];
+    }
+
+    /* ---------- 命名锁：恒走文件系统（跨进程互斥的可靠性不随引擎变化） ---------- */
+
+    public static function lock(string $name, int $timeout = 5)
+    {
+        self::memoFlushAll();
+        return FileStore::lock($name, $timeout);
+    }
+
+    public static function unlock($fp): void
+    {
+        FileStore::unlock($fp);
+    }
+
+    public static function tryLock(string $name)
+    {
+        self::memoFlushAll();
+        return FileStore::tryLock($name);
+    }
+
+    /* ---------- 文件系统专属操作：恒走文件系统 ---------- */
+
+    public static function path(string $rel): string
+    {
+        return FileStore::path($rel);
+    }
+
+    public static function ensureDir(string $rel): void
+    {
+        FileStore::ensureDir($rel);
+    }
+
+    public static function dirWritable(string $rel): bool
+    {
+        return FileStore::dirWritable($rel);
+    }
+
+    public static function repairDir(string $rel): bool
+    {
+        return FileStore::repairDir($rel);
+    }
+
+    public static function cleanupBrokenDirs(): array
+    {
+        return FileStore::cleanupBrokenDirs();
+    }
+
+    /** 文件名清单（恒走文件系统；现有全部调用点均为会话 / 日志 / 备份等 fs 目录） */
+    public static function scan(string $dirRel): array
+    {
+        return FileStore::scan($dirRel);
+    }
+
+    /** 存储整体健康：文件引擎=数据目录真实可写；数据库引擎=连接可用 */
+    public static function writable(): bool
+    {
+        return self::$drv === 'db' ? DbStore::ok() : FileStore::writable();
+    }
+
+    public static function recordWriteError(string $rel, string $why): void
+    {
+        if (self::$drv === 'db') {
+            DbStore::recordWriteError($rel, $why);
+        } else {
+            FileStore::recordWriteError($rel, $why);
+        }
+        self::syncDrvErrs();
     }
 }

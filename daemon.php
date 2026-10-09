@@ -59,6 +59,14 @@ while (true) {
     }
     $now = time();
 
+    /* v1.21.0 后台停止信号：后台「停止巡逻器」写入 data/daemon.stop，本进程 30 秒内检测到后
+       优雅退出并自行删除信号文件（无需 kill / SSH，虚拟主机亦可远程控制） */
+    if (is_file(DATA_DIR . '/daemon.stop')) {
+        @unlink(DATA_DIR . '/daemon.stop');
+        echo '[' . date('Y-m-d H:i:s') . "] 收到后台停止信号，巡逻器退出\n";
+        break;
+    }
+
     /* 心跳：每 60 秒一次（Web 端据此判断巡逻器是否在线） */
     if ($now - $lastBeat >= 60) {
         $lk = Store::tryLock('ai_patrol');

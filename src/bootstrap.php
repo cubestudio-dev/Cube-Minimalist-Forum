@@ -13,11 +13,18 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.20.0');
+    define('MF_VERSION', '1.21.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
 }
+/* v1.21.0 安全加固（幂等）：data/ 目录自带 Apache 拒绝一切 Web 访问规则；
+   nginx 用户按 README 拦截 /data/；数据文件本身另有 PHP 守卫前缀双保险 */
+$mfHt = DATA_DIR . '/.htaccess';
+if (!is_file($mfHt)) {
+    @file_put_contents($mfHt, "<IfModule mod_authz_core.c>\n  Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n  Order allow,deny\n  Deny from all\n</IfModule>\n");
+}
+unset($mfHt);
 /* 运行错误日志移入 data/logs/（与 .htaccess 保护范围一致，避免被 Web 直接读取泄露路径） */
 if (!is_dir(DATA_DIR . '/logs')) {
     @mkdir(DATA_DIR . '/logs', 0775, true);
@@ -28,6 +35,8 @@ date_default_timezone_set('Asia/Shanghai');
 /* 类库装载（顺序敏感） */
 require_once __DIR__ . '/util.php';
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/dbstore.php';
+require_once __DIR__ . '/i18n.php';
 require_once __DIR__ . '/markdown.php';
 require_once __DIR__ . '/mailer.php';
 require_once __DIR__ . '/ai.php';
@@ -71,6 +80,24 @@ if (!is_array($GLOBALS['CFG'])) {
     $GLOBALS['CFG'] = [];
 }
 
+/* v1.21.0 存储引擎引导：文件侧 config 的 storage_engine 是唯一决策键（
+   引擎键不入库，杜绝「库说该用库 / 文件说该用文件」的引导自锁）。
+   数据库连接失败时自动回退文件模式（读文件快照），并置全局醒目警告。 */
+if ((string)cfg('storage_engine', 'file') === 'db') {
+    if (Store::useDb((array)cfg())) {
+        $dbCfg = DbStore::read('config.php', null);
+        if (is_array($dbCfg) && $dbCfg) {
+            $dbCfg['storage_engine'] = 'db';
+            $GLOBALS['CFG'] = $dbCfg;
+        }
+    } else {
+        $GLOBALS['ENV_WARN'] = '数据库连接失败，已自动回退到文件存储模式（读写暂走 data/ 文件快照）。'
+            . '原因：' . DbStore::lastConnError() . '。'
+            . '请到后台「存储」检查连接设置；恢复后如文件快照期间有新发帖，请重新执行一次「文件 → 数据库」迁移以对齐两侧数据。';
+        error_log('[Storage] DB 引擎连接失败，回退文件模式：' . DbStore::lastConnError());
+    }
+}
+
 /* 绑定域名守卫：后台配置了授权域名时，其他域名（恶意解析 / 镜像站 / IP 直连）一律 301 跳转到授权域名 */
 bind_domain_guard();
 
@@ -82,6 +109,10 @@ if (!Store::writable()) {
     $GLOBALS['ENV_WARN'] = 'data/ 目录不可写：发帖、注册、设置保存等写入类功能将无法使用。'
         . '请到后台「监控 → 环境自检」点「一键修复目录权限」尝试自动修复；若无效，请通过 FTP 将 data/ 目录（含子目录）权限设为 755 或 775（Windows 主机请给 IIS 用户授权）。';
 }
+
+/* v1.21.0 多语言：解析当前语言（用户选择 > 资料偏好 > IP 自动判断 > 后台默认），
+   必须在会话启动与全部类库就绪后执行；t() 全程可用 */
+i18n_init();
 
 /** 当前请求是否为 HTTPS（含反代透传场景；auth.php 会话续期也用它保持 Secure 一致性） */
 function app_is_https(): bool

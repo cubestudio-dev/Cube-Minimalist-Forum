@@ -28,6 +28,7 @@ function page_admin(): void
 
     switch ($tab) {
         case 'feat': admin_tab_feat(); break;
+        case 'storage': admin_tab_storage(); break;
         case 'mail': admin_tab_mail(); break;
         case 'ai': admin_tab_ai(); break;
         case 'boards': admin_tab_boards(); break;
@@ -71,7 +72,63 @@ function admin_tab_basic(): void
         '<label class="field"><span class="field-l">Ping 测量间隔（秒）</span><input class="input" name="ping_interval" type="number" min="0" max="300" value="' . (int)cfg('ping_interval', 15) . '">' .
         '<span class="hint">侧栏「Ping」每 N 秒测量一次浏览器到服务器的往返延迟（绿 &lt;100ms / 琥珀 &lt;300ms / 红 ≥300ms）；设为 0 关闭整个 Ping 显示。间隔越短数据越实时，但心跳请求也越频繁（5-300 秒）</span></label>' .
         '</div>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存基本设置</button></div></form></div>';
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存基本设置</button></div></form></div>' .
+        admin_card_seo() .
+        admin_card_lang();
+}
+
+/* ---------------- v1.21.0 SEO（搜索引擎展示）卡片 ---------------- */
+function admin_card_seo(): string
+{
+    $robots = (string)cfg('seo_robots', '');
+    $robSel = function (string $v) use ($robots): string {
+        return '<option value="' . e($v) . '"' . ($robots === $v ? ' selected' : '') . '>' . e($v === '' ? '默认（index, follow）' : $v) . '</option>';
+    };
+    $smOn = (int)cfg('seo_sitemap', 0) === 1;
+    return '<div class="card form-card"><h2 class="card-title">SEO · 搜索引擎展示</h2>' .
+        '<form method="post" action="' . e(u('a=admin_save_seo')) . '" data-ajax="1">' . csrf_field() .
+        '<label class="field"><span class="field-l">标题模板</span><input class="input" name="seo_title_tpl" maxlength="100" placeholder="{page} · {site}" value="' . e((string)cfg('seo_title_tpl', '{page} · {site}')) . '">' .
+        '<span class="hint">{page} = 当前页面名，{site} = 论坛名称；首页仅显示 {site}。恢复默认请填 {page} · {site}</span></label>' .
+        '<label class="field"><span class="field-l">站点描述（搜索结果摘要）</span><textarea class="input" name="seo_description" rows="2" maxlength="200" placeholder="留空自动使用「论坛简介">' . e((string)cfg('seo_description', '')) . '</textarea></label>' .
+        '<label class="field"><span class="field-l">关键词</span><input class="input" name="seo_keywords" maxlength="200" placeholder="论坛, 社区, …（英文逗号分隔）" value="' . e((string)cfg('seo_keywords', '')) . '"></label>' .
+        '<div class="grid3">' .
+        '<label class="field"><span class="field-l">搜索引擎收录</span><select class="input" name="seo_robots">' . $robSel('') . $robSel('noindex, follow') . $robSel('index, nofollow') . $robSel('noindex, nofollow') . '</select>' .
+        '<span class="hint">noindex = 不收录；nofollow = 不顺着链接抓取</span></label>' .
+        '<label class="field"><span class="field-l">Sitemap 站点地图</span><select class="input" name="seo_sitemap"><option value="1"' . ($smOn ? ' selected' : '') . '>开启（index.php?p=sitemap）</option><option value="0"' . (!$smOn ? ' selected' : '') . '>关闭</option></select>' .
+        '<span class="hint">自动生成 XML 站点地图供搜索引擎提交；仅含公开可浏览内容</span></label>' .
+        '<label class="field"><span class="field-l">Sitemap 收录上限（条）</span><input class="input" name="seo_sitemap_limit" type="number" min="10" max="5000" value="' . (int)cfg('seo_sitemap_limit', 500) . '"></label>' .
+        '</div>' .
+        '<label class="check"><input type="hidden" name="seo_og" value="0"><input type="checkbox" name="seo_og" value="1"' . ((int)cfg('seo_og', 1) === 1 ? ' checked' : '') . '> 输出 Open Graph 社交分享标签（分享到微信 / QQ / X 等展示标题、描述与图标）</label>' .
+        '<label class="field"><span class="field-l">自定义 &lt;head&gt; 内容（可选）</span><textarea class="input" name="seo_extra_head" rows="3" maxlength="2000" placeholder="站点验证、搜索控制台、统计代码等">' . e((string)cfg('seo_extra_head', '')) . '</textarea>' .
+        '<span class="hint">原样插入每个页面 &lt;/head&gt; 之前；请只填写可信内容</span></label>' .
+        '<div class="form-foot"><span class="muted">别忘了同步服务器的 robots.txt（建议内容见下方）</span><button class="btn btn-primary" type="submit">保存 SEO 设置</button></div>' .
+        '<span class="test-msg muted"></span></form>' .
+        '<details><summary class="muted">robots.txt 建议内容（点击展开）</summary><pre class="code-hint">User-agent: *
+Disallow: /data/
+Disallow: /src/
+Sitemap: ' . e((string)cfg('site_url', 'https://你的域名')) . '/index.php?p=sitemap</pre></details></div>';
+}
+
+/* ---------------- v1.21.0 界面语言卡片 ---------------- */
+function admin_card_lang(): string
+{
+    $def = (string)cfg('lang_default', 'zh-cn');
+    $opts = '';
+    foreach (MF_LANGS as $code => $name) {
+        $opts .= '<option value="' . e($code) . '"' . ($def === $code ? ' selected' : '') . '>' . e($name) . '（' . e($code) . '）</option>';
+    }
+    $auto = (int)cfg('lang_auto_ip', 0) === 1;
+    return '<div class="card form-card"><h2 class="card-title">界面语言</h2>' .
+        '<form method="post" action="' . e(u('a=admin_save_lang')) . '" data-ajax="1">' . csrf_field() .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">默认论坛语言</span><select class="input" name="lang_default">' . $opts . '</select>' .
+        '<span class="hint">访客首次访问时的界面语言</span></label>' .
+        '<label class="field"><span class="field-l">按 IP 自动切换语言</span><select class="input" name="lang_auto_ip"><option value="1"' . ($auto ? ' selected' : '') . '>开启（按访客 IP 归属国家自动匹配）</option><option value="0"' . (!$auto ? ' selected' : '') . '>关闭（始终用默认语言）</option></select>' .
+        '<span class="hint">中国大陆 → 简中；港澳台 → 繁中；日本 → 日语；俄语区 → 俄语；其他 → 英语。用户主动选择的语言优先于自动判断；仅提交 IP 给免费归属地接口，结果缓存 30 天</span></label>' .
+        '</div>' .
+        '<p class="hint">前台核心界面（导航 / 登录注册 / 发帖回复 / 时间显示等）已支持五语切换；未翻译的深度条目自动以简体中文显示，用户可在「个人设置」长期保存自己的语言。后台管理界面保持中文。</p>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存语言设置</button></div>' .
+        '<span class="test-msg muted"></span></form></div>';
 }
 
 /* ---------------- 功能总开关（v1.14.0，v1.15.0 扩展 @ 提及与 AI 开关） ---------------- */
@@ -80,7 +137,7 @@ function admin_tab_basic(): void
 function admin_tab_titles(): array
 {
     return [
-        'basic' => '基本', 'feat' => '功能', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
+        'basic' => '基本', 'feat' => '功能', 'storage' => '存储', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
         'anns' => '公告', 'theme' => '主题', 'docs' => '协议', 'api' => '开放 API', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
@@ -123,6 +180,88 @@ function admin_tab_feat(): void
     }
     echo '<div class="form-foot"><span class="muted">数据安全不受影响：关闭任何开关都不会删除数据，重新勾选即恢复</span>' .
         '<button class="btn btn-primary" type="submit">保存功能开关</button></div></form></div>';
+}
+
+/* ---------------- v1.21.0 存储引擎（文件 ⇄ 数据库，双向无损迁移） ---------------- */
+function admin_tab_storage(): void
+{
+    $engine = (string)cfg('storage_engine', 'file');
+    $isDb = $engine === 'db' && Store::engine() === 'db';
+    $conf = db_conf();
+    $drvAvail = class_exists('PDO') ? PDO::getAvailableDrivers() : [];
+    $fstat = FileStore::stats();
+
+    /* ---- 卡片 1：当前状态 ---- */
+    echo '<div class="card form-card"><h2 class="card-title">存储引擎</h2>';
+    if ($isDb) {
+        $dstat = DbStore::stats();
+        echo '<p><span class="badge badge-ok">当前：数据库存储</span> <span class="muted">' . e(strtoupper(DbStore::kind()))
+            . ($dstat !== [] ? ' · ' . e(DbStore::serverInfo()) : '') . ' · 数据表 ' . e(DbStore::table()) . '</span></p>' .
+            '<p class="hint">数据行 ' . number_format($dstat['rows']) . ' 条 · 数据体积约 ' . e(fmt_bytes($dstat['bytes']))
+            . '。会话 / 命名锁 / 上传文件 / 日志 / 备份包始终存放于文件系统（跨进程互斥不依赖数据库，可靠性更高）。</p>';
+    } else {
+        echo '<p><span class="badge badge-ok">当前：文件存储</span> <span class="muted">数据位于 data/ 目录</span></p>' .
+            '<p class="hint">数据文件 ' . number_format($fstat['files']) . ' 个 · 占用约 ' . e(fmt_bytes($fstat['bytes']))
+            . '（不含会话 / 上传 / 备份）。全部数据为带守卫前缀的 gzip 压缩 JSON，原子写入 + 文件锁。</p>';
+    }
+    echo '<p class="hint">两种引擎完全兼容：帖子、回复、用户、板块、公告、配置、防火墙规则、设备记录等全部业务数据可随时<b>无损双向迁移</b>（迁移前自动把源数据完整备份到 data/backup/）；引擎切换即时生效，随时可切回。</p></div>';
+
+    /* ---- 卡片 2：数据库连接 ---- */
+    $drvOpts = '';
+    foreach ([['sqlite', 'SQLite（零配置，单文件库）'], ['mysql', 'MySQL / MariaDB'], ['pgsql', 'PostgreSQL']] as [$dv, $dn]) {
+        $ok = in_array($dv, $drvAvail, true);
+        $drvOpts .= '<option value="' . $dv . '"' . (($conf['db_driver'] ?: 'sqlite') === $dv ? ' selected' : '') . (!$ok ? ' disabled' : '') . '>'
+            . e($dn . (!$ok ? '（PHP 未启用 pdo_' . $dv . ' 扩展）' : '')) . '</option>';
+    }
+    echo '<div class="card form-card"><h2 class="card-title">数据库连接</h2>' .
+        '<form method="post" action="' . e(u('a=admin_save_storage')) . '" data-ajax="1">' . csrf_field() .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">数据库类型</span><select class="input" name="db_driver">' . $drvOpts . '</select></label>' .
+        '<label class="field"><span class="field-l">表前缀</span><input class="input" name="db_prefix" maxlength="32" placeholder="mf_" value="' . e($conf['db_prefix'] !== '' ? $conf['db_prefix'] : 'mf_') . '"></label>' .
+        '</div>' .
+        '<label class="field"><span class="field-l">SQLite 数据库文件（仅 SQLite 使用）</span><input class="input" name="db_sqlite_path" maxlength="200" placeholder="db/forum.sqlite（相对 data/，留空用默认）" value="' . e($conf['db_sqlite_path']) . '"></label>' .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">主机（MySQL / PG）</span><input class="input" name="db_host" maxlength="120" placeholder="127.0.0.1" value="' . e($conf['db_host']) . '"></label>' .
+        '<label class="field"><span class="field-l">端口（可留空）</span><input class="input" name="db_port" maxlength="5" placeholder="3306 / 5432" value="' . e($conf['db_port']) . '"></label>' .
+        '</div>' .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">数据库名（MySQL / PG）</span><input class="input" name="db_name" maxlength="64" value="' . e($conf['db_name']) . '"></label>' .
+        '<label class="field"><span class="field-l">用户名</span><input class="input" name="db_user" maxlength="64" value="' . e($conf['db_user']) . '"></label>' .
+        '</div>' .
+        '<label class="field"><span class="field-l">密码</span><input class="input" name="db_pass" type="password" maxlength="128" value="' . e($conf['db_pass']) . '"></label>' .
+        '<div class="form-foot">' .
+        '<button class="btn btn-ghost" type="button" data-admin-test="db">测试连接（保存前可先验证）</button>' .
+        '<button class="btn btn-primary" type="submit">保存连接信息</button></div>' .
+        '<span class="test-msg muted"></span></form>' .
+        '<p class="hint">连接信息保存在文件侧配置（data/config.php）——引擎引导发生在读取数据库之前，这样即使数据库不可用，论坛也能读取配置并回退文件模式继续运行。测试连接会自动建表（若尚不存在）。SQLite 请放在 data/db/ 目录下以获得 .htaccess 保护。</p></div>';
+
+    /* ---- 卡片 3：双向无损迁移 ---- */
+    if (!$isDb) {
+        $dirLabel = '文件 → 数据库';
+        $dirVal = 'to_db';
+        $dirHint = '把 data/ 下全部数据文件迁入上方配置的数据库，完成后自动切换为数据库存储。执行前请先保存连接信息并「测试连接」通过。';
+    } else {
+        $dirLabel = '数据库 → 文件';
+        $dirVal = 'to_file';
+        $dirHint = '把数据库内全部数据行迁回 data/ 文件，完成后自动切换回文件存储。';
+    }
+    echo '<div class="card form-card"><h2 class="card-title">迁移（' . e($dirLabel) . '）</h2>' .
+        '<form method="post" action="' . e(u('a=admin_storage_migrate')) . '" data-confirm="确认执行迁移？系统会先把当前全部数据自动备份到 data/backup/，再逐条无损迁移并切换引擎。建议在低峰期操作。">' . csrf_field() .
+        '<input type="hidden" name="direction" value="' . $dirVal . '">' .
+        '<p class="hint">' . e($dirHint) . '</p>' .
+        '<p class="hint">迁移范围：data/ 下除 sessions / locks / logs / backup / upload / db 之外的全部数据。迁移是幂等的——迁移窗口期的新发帖可在完成后再次执行同向迁移对齐；每次迁移的备份包都留在 data/backup/ 可随时找回。</p>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">开始迁移</button></div></form></div>';
+
+    /* ---- 卡片 4：数据库管理（仅数据库模式，与文件模式管理能力对齐） ---- */
+    if ($isDb) {
+        echo '<div class="card form-card"><h2 class="card-title">数据库管理</h2>' .
+            '<div class="grid3">' .
+            '<form method="post" action="' . e(u('a=admin_storage_backup')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">导出数据库备份（zip）</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_storage_optimize')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">优化（回收空间 / 碎片整理）</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_storage_check')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">完整性检查</button></form>' .
+            '</div>' .
+            '<p class="hint">备份包（含全部数据行原文与恢复说明）存于 data/backup/，与文件模式的「一键备份」并列管理（保留最近 5 份）。「优化」：SQLite 执行 VACUUM / MySQL 执行 OPTIMIZE TABLE / PG 执行 VACUUM ANALYZE。</p></div>';
+    }
 }
 
 /* ---------------- 邮件 ---------------- */
@@ -1122,6 +1261,29 @@ function admin_tab_security(): void
         echo '</div>';
     }
     echo '<p class="hint">AI 封禁的 IP 可在后台「防火墙」中随时手动解封；巡逻决策与动作全部留痕于系统日志（AI·自主巡逻 / AI·自主封禁 等）。</p></div>';
+
+    /* ================= v1.21.0：常驻巡逻器（daemon.php）后台直达控制 ================= */
+    $dAlive = ai_daemon_alive();
+    $phpBin = (string)cfg('daemon_php_bin', '');
+    if ($phpBin === '' && defined('PHP_BINARY') && PHP_BINARY !== '') {
+        $phpBin = PHP_BINARY; // 当前 CLI/CGI 的 PHP 可执行文件路径作为合理默认
+    }
+    echo '<div class="card form-card"><h2 class="card-title">常驻巡逻器（daemon.php）</h2>' .
+        '<div class="ai-patrol-head">' .
+        ($dAlive
+            ? '<span class="badge badge-ok">🟢 在线</span><span class="hint">正在值守，每 60 秒写一次心跳</span>'
+            : '<span class="badge">⚪ 不在线</span><span class="hint">论坛自动退回「访客触发」巡逻模式，功能完全一致</span>') .
+        '</div>' .
+        '<form method="post" action="' . e(u('a=admin_daemon_start')) . '" data-confirm="尝试在本机后台启动 daemon.php？需要主机允许 PHP 创建常驻进程（虚拟主机通常不允许）。">' . csrf_field() .
+        '<label class="field"><span class="field-l">PHP 命令行路径</span><input class="input" name="php_bin" maxlength="200" placeholder="如 /usr/bin/php 或 C:\\php\\php.exe" value="' . e($phpBin) . '">' .
+        '<span class="hint">SSH 执行 which php 可查；保存后用于「一键启动」。主机不允许创建进程时，请手动执行：nohup php daemon.php &gt;/dev/null 2&gt;&amp;1 &amp;</span></label>' .
+        '<div class="form-foot">' .
+        '<button class="btn btn-primary" type="submit"' . ($dAlive ? ' disabled title="巡逻器已在线"' : '') . '>一键启动</button>' .
+        '</div></form>' .
+        '<form method="post" action="' . e(u('a=admin_daemon_stop')) . '" data-confirm="发送停止信号？巡逻器会在 30 秒内优雅退出（正在处理的任务不受影响）。">' . csrf_field() .
+        '<div class="form-foot"><span></span><button class="btn btn-ghost" type="submit"' . (!$dAlive ? ' disabled title="巡逻器不在线"' : '') . '>停止巡逻器</button></div></form>' .
+        '<p class="hint">启动原理：后台以「nohup php daemon.php」在服务器上创建常驻进程；虚拟主机等无法常驻的环境会给出明确提示，不影响论坛运行。停止原理：写入 data/daemon.stop 信号文件，巡逻器 30 秒内检测到后优雅退出并自行删除信号。</p></div>';
+
     // 访问统计已随每次计数原子落盘（fw_state_save），直接读 fw_state.php 即为最新数据
     $on = (int)cfg('fw_on', 1) === 1;
     $st = Store::read('fw_state.php', []);
