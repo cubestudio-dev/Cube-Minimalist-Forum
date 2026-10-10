@@ -338,5 +338,6 @@ function md_render(string $text): string
         }
         $html[] = '<div class="md-fn"><ol>' . $items . '</ol></div>';
     }
-    return implode("\n", $html);
+    /* v1.22.0 拓展：渲染结果过滤器（插件可后处理全站 Markdown HTML；第二个参数为原文） */
+    return (string)mf_apply_filters('md_html', implode("\n", $html), $text);
 }

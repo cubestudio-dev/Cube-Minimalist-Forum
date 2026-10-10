@@ -73,6 +73,10 @@ if ($p === 'icon') {
 if ($p === 'sitemap') {
     page_sitemap();
 }
+/* v1.22.0 拓展：插件静态资源（扩展名白名单 + 目录防逃逸），资源级端点先于门禁出站 */
+if ($p === 'plugin' && isset($_GET['file']) && is_string($_GET['file']) && $_GET['file'] !== '') {
+    plugin_asset(preg_replace('/[^a-z0-9_]/', '', (string)($_GET['pf'] ?? '')), (string)$_GET['file']);
+}
 
 /* 私密论坛模式（v1.14.0）：后台关闭「游客可浏览」时，未登录仅允许 登录 / 注册 / 找回密码 /
    协议页（协议门禁页需要能查看协议，否则同开会锁死访客）；资源端点已在上方先行放行 */
@@ -110,6 +114,7 @@ switch ($p === '' ? 'home' : $p) {
     case 'ping':          page_ping(); break; /* 已在上方资源段先行出站，此处仅为兜底 */
     case 'asset':         page_asset(); break; /* 已在上方资源段先行出站，此处仅为兜底 */
     case 'admin':         page_admin(); break;
+    case 'plugin':        page_plugin(); break; /* v1.22.0 拓展：插件前台路由 p=plugin&pf=<id> */
     default:              page_404();
 }
 

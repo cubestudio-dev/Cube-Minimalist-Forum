@@ -346,8 +346,8 @@ function fw_state(): array
     return $GLOBALS['FW_STATE_CACHE'];
 }
 
-/** 保存防火墙状态（加锁 + 原子写 + 体积清理），并刷新本请求缓存 */
-function fw_state_save(array $st): void
+/** 保存防火墙状态（加锁 + 原子写 + 体积清理），并刷新本请求缓存；$locked=true 表示调用方已持有 fw_state 锁（临界区内复用，避免同请求嵌套等锁） */
+function fw_state_save(array $st, bool $locked = false): void
 {
     $now = time();
     // 清理：IP 统计 7 天不活跃剔除 / 最多 2000 条；限流桶仅保留当前分钟；日统计 14 天
@@ -392,48 +392,81 @@ function fw_state_save(array $st): void
         });
         $st['spv'] = array_slice($st['spv'], 0, 500, true);
     }
-    $lk = Store::lock('fw_state', 3);
-    // 锁内重读合并：另一请求可能刚写过（丢弃它未保存的？不——以本次快照+本请求增量为准，
-    // 本函数由调用方在“读快照→修改→保存”的临界序列末尾调用，锁内最后重读一次做浅合并
-    // 会破坏计数语义；论坛为小并发场景，锁序列内的快照已足够准确）
+    if (!$locked) {
+        $lk = Store::lock('fw_state', 3);
+    }
     Store::write('fw_state.php', $st);
-    Store::unlock($lk);
+    if (!$locked) {
+        Store::unlock($lk);
+    }
     $GLOBALS['FW_STATE_CACHE'] = $st;
 }
 
-/** 请求计数 / 404 计数 / 拦截计数（读快照 → 修改 → 原子落盘） */
+/**
+ * v1.22.0：防火墙状态统一临界区——锁内强制重读最新状态 → 回调修改 → 原子落盘。
+ * 此前各写入点为「请求级旧快照修改 → 锁内整写」，攻击突发时并发请求互相覆盖：
+ * 每个请求都拿着攻击告警冷却占位写入之前的旧状态通过冷却判定，导致同一分钟内
+ * 连发多封告警邮件（冷却设置形同虚设），攻击窗口 / 日计数也互相丢失。
+ * 回调返回数组即落盘并刷新请求级缓存；返回 null 则跳过本次写入。
+ * 注意：回调内不得再调用 fw_state() / fw_state_save() / fw_ban() / fw_event() 等会
+ * 再次触碰 fw_state 锁的函数（flock 同请求嵌套同名锁会互等到超时）。
+ */
+function fw_state_update(callable $fn): void
+{
+    $lk = Store::lock('fw_state', 3);
+    if ($lk) {
+        $GLOBALS['FW_STATE_CACHE'] = null; // 丢弃请求级旧快照，锁内重读最新状态
+        $st = fw_state();
+        $st = $fn($st);
+        if (is_array($st)) {
+            fw_state_save($st, true);
+        }
+        Store::unlock($lk);
+    } else {
+        // 锁不可用（极端 IO 故障）：退化为快照直写，保证业务不中断
+        $st = $fn(fw_state());
+        if (is_array($st)) {
+            fw_state_save($st);
+        }
+    }
+}
+
+/** 请求计数 / 404 计数 / 拦截计数（v1.22.0：锁内最新读 → 修改 → 攻击告警判定 → 原子落盘，全程同一临界区） */
 function fw_bump(string $ip, string $key = 'c'): void
 {
     if ($ip === '') {
         return;
     }
-    $st = fw_state();
-    $d = date('Y-m-d');
-    if (!isset($st['days'][$d])) {
-        $st['days'][$d] = ['req' => 0, 'blocked' => 0, 'bans' => 0, 'ev' => 0];
-    }
-    if ($key === 'c') {
-        $st['days'][$d]['req']++;
-    } elseif ($key === 'blocked') {
-        $st['days'][$d]['blocked']++;
-    }
-    if (!isset($st['ips'][$ip])) {
-        $st['ips'][$ip] = ['c' => 0, 'f' => 0, 'l' => 0, 'ua' => '', 's' => 0, 'w' => 0, 'wl' => 0];
-    }
-    if ($key === 'c' || $key === 'blocked') {
-        $st['ips'][$ip]['c']++;
-        $st['ips'][$ip]['l'] = time();
-        if ($st['ips'][$ip]['ua'] === '') {
-            $ua = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
-            $st['ips'][$ip]['ua'] = cut_str($ua !== '' ? $ua : '(空 UA)', 60);
+    // 攻击告警冷却占位在本临界区内写入：同一秒的并发拦截请求串行通过，
+    // 后到者必然看到占位（冷却生效），一个冷却窗口最多发出一封告警邮件
+    fw_state_update(function ($st) use ($ip, $key) {
+        $d = date('Y-m-d');
+        if (!isset($st['days'][$d])) {
+            $st['days'][$d] = ['req' => 0, 'blocked' => 0, 'bans' => 0, 'ev' => 0];
         }
-    } elseif ($key === 'f') {
-        $st['ips'][$ip]['f']++;
-    }
-    if ($key === 'blocked') {
-        $st = fw_attack_track($st, $ip); // 攻击窗口统计 + 阈值判定（达到时在响应完成后自动发告警邮件）
-    }
-    fw_state_save($st);
+        if ($key === 'c') {
+            $st['days'][$d]['req']++;
+        } elseif ($key === 'blocked') {
+            $st['days'][$d]['blocked']++;
+        }
+        if (!isset($st['ips'][$ip])) {
+            $st['ips'][$ip] = ['c' => 0, 'f' => 0, 'l' => 0, 'ua' => '', 's' => 0, 'w' => 0, 'wl' => 0];
+        }
+        if ($key === 'c' || $key === 'blocked') {
+            $st['ips'][$ip]['c']++;
+            $st['ips'][$ip]['l'] = time();
+            if ($st['ips'][$ip]['ua'] === '') {
+                $ua = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+                $st['ips'][$ip]['ua'] = cut_str($ua !== '' ? $ua : '(空 UA)', 60);
+            }
+        } elseif ($key === 'f') {
+            $st['ips'][$ip]['f']++;
+        }
+        if ($key === 'blocked') {
+            $st = fw_attack_track($st, $ip); // 攻击窗口统计 + 阈值判定（达到时在响应完成后自动发告警邮件）
+        }
+        return $st;
+    });
 }
 
 /** 404 计数 + 扫描判定（pages.php 的 page_404 调用） */
@@ -448,11 +481,17 @@ function fw_bump_404(): void
     }
     fw_bump($ip, 'f');
     // 10 分钟窗口内 404 超限 → 记扫描行为并加分（交给统一评分管线）
-    $st = fw_state();
-    $rec = $st['ips'][$ip] ?? [];
-    if ((int)($rec['f'] ?? 0) >= FW_404_LIMIT && (int)cfg('fw_score_on', 1) === 1) {
-        $st['ips'][$ip]['f'] = 0; // 清零避免同窗口反复触发
-        fw_state_save($st);       // 先落盘清零，再加分（否则 score_add 内部快照会覆盖回旧值，后续每个 404 都重复加分）
+    $doScore = false;
+    fw_state_update(function ($st) use ($ip, &$doScore) {
+        $rec = $st['ips'][$ip] ?? [];
+        if ((int)($rec['f'] ?? 0) >= FW_404_LIMIT && (int)cfg('fw_score_on', 1) === 1) {
+            $st['ips'][$ip]['f'] = 0; // 清零避免同窗口反复触发（与加分同在各自临界区，互不覆盖）
+            $doScore = true;
+            return $st;
+        }
+        return null;
+    });
+    if ($doScore) {
         fw_score_add($ip, 60, '高频 404 扫描', false); // 不输出拦截页（当前正在渲染 404 页）
     }
 }
@@ -573,13 +612,14 @@ function fw_ban(string $ip, int $hours, string $reason, string $kind = 'manual',
     Store::unlock($lk);
     $GLOBALS['FW_BANS_CACHE'] = $bans; // 同请求内立即可见
     if ($ok) {
-        $st = fw_state();
-        $d = date('Y-m-d');
-        if (!isset($st['days'][$d])) {
-            $st['days'][$d] = ['req' => 0, 'blocked' => 0, 'bans' => 0, 'ev' => 0];
-        }
-        $st['days'][$d]['bans']++;
-        fw_state_save($st);
+        fw_state_update(function ($st) {
+            $d = date('Y-m-d');
+            if (!isset($st['days'][$d])) {
+                $st['days'][$d] = ['req' => 0, 'blocked' => 0, 'bans' => 0, 'ev' => 0];
+            }
+            $st['days'][$d]['bans']++;
+            return $st;
+        });
     }
     return $ok;
 }
@@ -1056,14 +1096,16 @@ function fw_attack_mail(string $triggerIp, int $peak): void
             "【攻击告警】{$site} 最近" . FW_ATK_WIN_MIN . "分钟被拦截 {$peak} 次",
             mail_template('攻击告警', $inner)
         );
-        // 记录发送结果（供后台攻击告警卡片展示）
-        $st2 = fw_state();
-        $al = is_array($st2['atk_alert'] ?? null) ? $st2['atk_alert'] : [];
-        $al['sent'] = $sent;
-        $al['admins'] = $admins;
-        $al['err'] = $sent > 0 ? '' : cut_str($err, 120);
-        $st2['atk_alert'] = $al;
-        fw_state_save($st2);
+        // 记录发送结果（供后台攻击告警卡片展示）——v1.22.0 改为锁内重读合并：
+        // 发信期间（SMTP 可耗时数秒）其他请求仍在写入计数，旧请求快照整写会覆盖它们
+        fw_state_update(function ($st2) use ($sent, $admins, $err) {
+            $al = is_array($st2['atk_alert'] ?? null) ? $st2['atk_alert'] : [];
+            $al['sent'] = $sent;
+            $al['admins'] = $admins;
+            $al['err'] = $sent > 0 ? '' : cut_str($err, 120);
+            $st2['atk_alert'] = $al;
+            return $st2;
+        });
         if ($sent > 0) {
             log_action('attack_alert', "最近 " . FW_ATK_WIN_MIN . " 分钟拦截 {$peak} 次（阈值 {$th}），攻击告警邮件已发送 {$sent}/{$admins} 位管理员", 0, '系统');
         } else {
@@ -1128,19 +1170,21 @@ function fw_score_add(string $ip, int $score, string $why, bool $deny = true): v
     if ($score <= 0 || (int)cfg('fw_score_on', 1) !== 1) {
         return;
     }
-    $st = fw_state();
-    if (!isset($st['ips'][$ip])) {
-        $st['ips'][$ip] = ['c' => 0, 'f' => 0, 'l' => 0, 'ua' => '', 's' => 0, 'w' => 0, 'wl' => 0];
-    }
-    $w = intdiv(time(), 600);
-    if ((int)($st['ips'][$ip]['w'] ?? 0) !== $w) {
-        $st['ips'][$ip]['w'] = $w;
-        $st['ips'][$ip]['s'] = 0;
-    }
-    $st['ips'][$ip]['s'] += $score;
-    $st['ips'][$ip]['l'] = time();
-    $now = (int)$st['ips'][$ip]['s'];
-    fw_state_save($st);
+    $now = 0;
+    fw_state_update(function ($st) use ($ip, $score, &$now) {
+        if (!isset($st['ips'][$ip])) {
+            $st['ips'][$ip] = ['c' => 0, 'f' => 0, 'l' => 0, 'ua' => '', 's' => 0, 'w' => 0, 'wl' => 0];
+        }
+        $w = intdiv(time(), 600);
+        if ((int)($st['ips'][$ip]['w'] ?? 0) !== $w) {
+            $st['ips'][$ip]['w'] = $w;
+            $st['ips'][$ip]['s'] = 0;
+        }
+        $st['ips'][$ip]['s'] += $score;
+        $st['ips'][$ip]['l'] = time();
+        $now = (int)$st['ips'][$ip]['s'];
+        return $st;
+    });
     $th = max(20, (int)cfg('fw_score_threshold', 100));
     fw_event('score', $ip, $why, '风险分 +' . $score . '（窗口累计 ' . $now . '/' . $th . '）', $score);
     if ($now >= $th) {
@@ -1250,29 +1294,34 @@ function fw_score_tick(string $ip): void
 function fw_event(string $action, string $ip, string $rule, string $detail = '', int $score = 0): void
 {
     try {
-        $st = fw_state();
-        $d = date('Y-m-d');
-        if (!isset($st['days'][$d])) {
-            $st['days'][$d] = ['req' => 0, 'blocked' => 0, 'bans' => 0, 'ev' => 0];
-        }
-        $st['days'][$d]['ev']++;
-        if ((int)$st['days'][$d]['ev'] > 2000) {
-            fw_state_save($st);
-            return; // 每日上限
-        }
-        // 节流：同 IP 同动作每分钟至多 2 条（计数随状态落盘，跨请求生效）
-        $m = intdiv(time(), 60);
-        $k = $ip . '|' . $action;
-        $slot = $st['ev'][$k] ?? null;
-        if (is_array($slot) && (int)$slot['m'] === $m) {
-            if ((int)$slot['c'] >= 2) {
-                return;
+        $skipLog = false;
+        fw_state_update(function ($st) use ($action, $ip, &$skipLog) {
+            $d = date('Y-m-d');
+            if (!isset($st['days'][$d])) {
+                $st['days'][$d] = ['req' => 0, 'blocked' => 0, 'bans' => 0, 'ev' => 0];
             }
-            $st['ev'][$k]['c']++;
-        } else {
-            $st['ev'][$k] = ['m' => $m, 'c' => 1];
+            $st['days'][$d]['ev']++;
+            if ((int)$st['days'][$d]['ev'] > 2000) {
+                $skipLog = true;
+                return $st; // 每日上限（计数照记，日志不写）
+            }
+            // 节流：同 IP 同动作每分钟至多 2 条（计数随状态落盘，跨请求生效）
+            $m = intdiv(time(), 60);
+            $k = $ip . '|' . $action;
+            $slot = $st['ev'][$k] ?? null;
+            if (is_array($slot) && (int)$slot['m'] === $m) {
+                if ((int)$slot['c'] >= 2) {
+                    return null; // 节流：无可落盘变更
+                }
+                $st['ev'][$k]['c']++;
+            } else {
+                $st['ev'][$k] = ['m' => $m, 'c' => 1];
+            }
+            return $st;
+        });
+        if ($skipLog) {
+            return;
         }
-        fw_state_save($st);
         if (!is_dir(DATA_DIR . '/logs')) {
             Store::ensureDir('logs');
         }

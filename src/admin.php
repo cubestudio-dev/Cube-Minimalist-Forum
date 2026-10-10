@@ -16,12 +16,18 @@ function page_admin(): void
        配合前端滚动位置恢复，保存后不再"从头刷新、回到顶部" */
     $_SESSION['admin_back'] = http_build_query($_GET);
     layout_header('后台管理', 0);
-    echo page_head('后台管理', '所有修改即时生效');
+    echo page_head(t('后台管理'), t('所有修改即时生效'));
+    mf_do_action('admin_head'); /* v1.22.0 拓展：插件向后台页面注入内容 */
 
     $tabs = admin_tab_titles();
+    /* v1.22.0 后台设置搜索框：跨全部标签页即时检索设置项，回车/点击跳转并高亮定位 */
+    echo '<div class="admin-search" id="adminSearch">';
+    echo '<input class="input admin-search-input" id="adminSearchInput" type="search" placeholder="' . e(t('搜索设置：输入关键词，如「上限」「邮件」「语言」…')) . '" autocomplete="off" aria-label="' . e(t('搜索后台设置')) . '">';
+    echo '<div class="admin-search-pop" id="adminSearchPop" hidden></div>';
+    echo '</div>';
     echo '<div class="admin-tabs">';
     foreach ($tabs as $k => $v) {
-        echo '<a class="atab' . ($tab === $k ? ' on' : '') . '" href="' . e(u('p=admin&tab=' . $k)) . '">' . e($v) . '</a>';
+        echo '<a class="atab' . ($tab === $k ? ' on' : '') . '" href="' . e(u('p=admin&tab=' . $k)) . '">' . e(t($v)) . '</a>';
     }
     echo '</div>';
     echo '<div class="admin-body">';
@@ -29,6 +35,7 @@ function page_admin(): void
     switch ($tab) {
         case 'feat': admin_tab_feat(); break;
         case 'storage': admin_tab_storage(); break;
+        case 'ext': admin_tab_ext(); break;
         case 'mail': admin_tab_mail(); break;
         case 'ai': admin_tab_ai(); break;
         case 'boards': admin_tab_boards(); break;
@@ -57,22 +64,22 @@ function page_admin(): void
 function admin_tab_basic(): void
 {
     echo '<div class="card form-card"><form method="post" action="' . e(u('a=admin_save_basic')) . '" data-ajax="1" data-ajax-live="brand">' . csrf_field() .
-        '<label class="field"><span class="field-l">论坛名称</span><input class="input" name="site_name" required maxlength="30" value="' . e((string)cfg('site_name')) . '"></label>' .
-        '<label class="field"><span class="field-l">论坛简介</span><input class="input" name="site_desc" maxlength="100" value="' . e((string)cfg('site_desc')) . '"></label>' .
-        '<label class="field"><span class="field-l">站点地址（可选）</span><input class="input" name="site_url" type="url" maxlength="200" placeholder="https://" value="' . e((string)cfg('site_url')) . '"></label>' .
-        '<label class="field"><span class="field-l">绑定域名（授权域名，可选）</span><input class="input" name="bind_domains" maxlength="500" placeholder="forum.example.com" value="' . e((string)cfg('bind_domains')) . '">' .
+        '<label class="field"><span class="field-l">' . t('论坛名称') . '</span><input class="input" name="site_name" required maxlength="30" value="' . e((string)cfg('site_name')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('论坛简介') . '</span><input class="input" name="site_desc" maxlength="100" value="' . e((string)cfg('site_desc')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('站点地址（可选）') . '</span><input class="input" name="site_url" type="url" maxlength="200" placeholder="https://" value="' . e((string)cfg('site_url')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('绑定域名（授权域名，可选）') . '</span><input class="input" name="bind_domains" maxlength="500" placeholder="forum.example.com" value="' . e((string)cfg('bind_domains')) . '">' .
         '<span class="hint">留空不限制。填写后仅允许列表内的域名访问论坛，其他域名（他人恶意解析、镜像站、IP 直连）一律 301 跳转到第一个授权域名。多个域名用逗号分隔；带 www 与不带 www 是两个域名，需分别填写。万一把域名写错导致无法访问：通过 FTP 打开 data/config.php 删掉 bind_domains 一行即可恢复</span></label>' .
         '<div class="grid3">' .
-        '<label class="field"><span class="field-l">每页帖子数</span><input class="input" name="per_page" type="number" min="5" max="100" value="' . (int)cfg('per_page', 20) . '"></label>' .
-        '<label class="field"><span class="field-l">发帖间隔（秒）</span><input class="input" name="post_interval" type="number" min="0" max="3600" value="' . (int)cfg('post_interval', 30) . '"></label>' .
-        '<label class="field"><span class="field-l">在线统计窗口（秒）</span><input class="input" name="online_window" type="number" min="60" max="86400" value="' . (int)cfg('online_window', 300) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('每页帖子数') . '</span><input class="input" name="per_page" type="number" min="5" max="100" value="' . (int)cfg('per_page', 20) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('发帖间隔（秒）') . '</span><input class="input" name="post_interval" type="number" min="0" max="3600" value="' . (int)cfg('post_interval', 30) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('在线统计窗口（秒）') . '</span><input class="input" name="online_window" type="number" min="60" max="86400" value="' . (int)cfg('online_window', 300) . '"></label>' .
         '</div>' .
-        '<label class="field"><span class="field-l">实时刷新间隔（秒）</span><input class="input" name="live_interval" type="number" min="0" max="300" value="' . (int)cfg('live_interval', 20) . '">' .
+        '<label class="field"><span class="field-l">' . t('实时刷新间隔（秒）') . '</span><input class="input" name="live_interval" type="number" min="0" max="300" value="' . (int)cfg('live_interval', 20) . '">' .
         '<span class="hint">前台自动刷新在线人数、未读通知，并提示新帖 / 新回复；设为 0 关闭。页面切到后台时自动暂停，不产生无效流量</span></label>' .
-        '<label class="field"><span class="field-l">Ping 测量间隔（秒）</span><input class="input" name="ping_interval" type="number" min="0" max="300" value="' . (int)cfg('ping_interval', 15) . '">' .
+        '<label class="field"><span class="field-l">' . t('Ping 测量间隔（秒）') . '</span><input class="input" name="ping_interval" type="number" min="0" max="300" value="' . (int)cfg('ping_interval', 15) . '">' .
         '<span class="hint">侧栏「Ping」每 N 秒测量一次浏览器到服务器的往返延迟（绿 &lt;100ms / 琥珀 &lt;300ms / 红 ≥300ms）；设为 0 关闭整个 Ping 显示。间隔越短数据越实时，但心跳请求也越频繁（5-300 秒）</span></label>' .
         '</div>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存基本设置</button></div></form></div>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存基本设置') . '</button></div></form></div>' .
         admin_card_seo() .
         admin_card_lang();
 }
@@ -85,23 +92,23 @@ function admin_card_seo(): string
         return '<option value="' . e($v) . '"' . ($robots === $v ? ' selected' : '') . '>' . e($v === '' ? '默认（index, follow）' : $v) . '</option>';
     };
     $smOn = (int)cfg('seo_sitemap', 0) === 1;
-    return '<div class="card form-card"><h2 class="card-title">SEO · 搜索引擎展示</h2>' .
+    return '<div class="card form-card"><h2 class="card-title">' . t('SEO · 搜索引擎展示') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_save_seo')) . '" data-ajax="1">' . csrf_field() .
-        '<label class="field"><span class="field-l">标题模板</span><input class="input" name="seo_title_tpl" maxlength="100" placeholder="{page} · {site}" value="' . e((string)cfg('seo_title_tpl', '{page} · {site}')) . '">' .
+        '<label class="field"><span class="field-l">' . t('标题模板') . '</span><input class="input" name="seo_title_tpl" maxlength="100" placeholder="{page} · {site}" value="' . e((string)cfg('seo_title_tpl', '{page} · {site}')) . '">' .
         '<span class="hint">{page} = 当前页面名，{site} = 论坛名称；首页仅显示 {site}。恢复默认请填 {page} · {site}</span></label>' .
-        '<label class="field"><span class="field-l">站点描述（搜索结果摘要）</span><textarea class="input" name="seo_description" rows="2" maxlength="200" placeholder="留空自动使用「论坛简介">' . e((string)cfg('seo_description', '')) . '</textarea></label>' .
-        '<label class="field"><span class="field-l">关键词</span><input class="input" name="seo_keywords" maxlength="200" placeholder="论坛, 社区, …（英文逗号分隔）" value="' . e((string)cfg('seo_keywords', '')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('站点描述（搜索结果摘要）') . '</span><textarea class="input" name="seo_description" rows="2" maxlength="200" placeholder="留空自动使用「论坛简介">' . e((string)cfg('seo_description', '')) . '</textarea></label>' .
+        '<label class="field"><span class="field-l">' . t('关键词') . '</span><input class="input" name="seo_keywords" maxlength="200" placeholder="论坛, 社区, …（英文逗号分隔）" value="' . e((string)cfg('seo_keywords', '')) . '"></label>' .
         '<div class="grid3">' .
-        '<label class="field"><span class="field-l">搜索引擎收录</span><select class="input" name="seo_robots">' . $robSel('') . $robSel('noindex, follow') . $robSel('index, nofollow') . $robSel('noindex, nofollow') . '</select>' .
+        '<label class="field"><span class="field-l">' . t('搜索引擎收录') . '</span><select class="input" name="seo_robots">' . $robSel('') . $robSel('noindex, follow') . $robSel('index, nofollow') . $robSel('noindex, nofollow') . '</select>' .
         '<span class="hint">noindex = 不收录；nofollow = 不顺着链接抓取</span></label>' .
-        '<label class="field"><span class="field-l">Sitemap 站点地图</span><select class="input" name="seo_sitemap"><option value="1"' . ($smOn ? ' selected' : '') . '>开启（index.php?p=sitemap）</option><option value="0"' . (!$smOn ? ' selected' : '') . '>关闭</option></select>' .
+        '<label class="field"><span class="field-l">' . t('Sitemap 站点地图') . '</span><select class="input" name="seo_sitemap"><option value="1"' . ($smOn ? ' selected' : '') . '>' . t('开启（index.php?p=sitemap）') . '</option><option value="0"' . (!$smOn ? ' selected' : '') . '>' . t('关闭') . '</option></select>' .
         '<span class="hint">自动生成 XML 站点地图供搜索引擎提交；仅含公开可浏览内容</span></label>' .
-        '<label class="field"><span class="field-l">Sitemap 收录上限（条）</span><input class="input" name="seo_sitemap_limit" type="number" min="10" max="5000" value="' . (int)cfg('seo_sitemap_limit', 500) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('Sitemap 收录上限（条）') . '</span><input class="input" name="seo_sitemap_limit" type="number" min="10" max="5000" value="' . (int)cfg('seo_sitemap_limit', 500) . '"></label>' .
         '</div>' .
-        '<label class="check"><input type="hidden" name="seo_og" value="0"><input type="checkbox" name="seo_og" value="1"' . ((int)cfg('seo_og', 1) === 1 ? ' checked' : '') . '> 输出 Open Graph 社交分享标签（分享到微信 / QQ / X 等展示标题、描述与图标）</label>' .
-        '<label class="field"><span class="field-l">自定义 &lt;head&gt; 内容（可选）</span><textarea class="input" name="seo_extra_head" rows="3" maxlength="2000" placeholder="站点验证、搜索控制台、统计代码等">' . e((string)cfg('seo_extra_head', '')) . '</textarea>' .
+        '<label class="check"><input type="hidden" name="seo_og" value="0"><input type="checkbox" name="seo_og" value="1"' . ((int)cfg('seo_og', 1) === 1 ? ' checked' : '') . '>' . t(' 输出 Open Graph 社交分享标签（分享到微信 / QQ / X 等展示标题、描述与图标）') . '</label>' .
+        '<label class="field"><span class="field-l">' . t('自定义 &lt;head&gt; 内容（可选）') . '</span><textarea class="input" name="seo_extra_head" rows="3" maxlength="2000" placeholder="站点验证、搜索控制台、统计代码等">' . e((string)cfg('seo_extra_head', '')) . '</textarea>' .
         '<span class="hint">原样插入每个页面 &lt;/head&gt; 之前；请只填写可信内容</span></label>' .
-        '<div class="form-foot"><span class="muted">别忘了同步服务器的 robots.txt（建议内容见下方）</span><button class="btn btn-primary" type="submit">保存 SEO 设置</button></div>' .
+        '<div class="form-foot"><span class="muted">别忘了同步服务器的 robots.txt（建议内容见下方）</span><button class="btn btn-primary" type="submit">' . t('保存 SEO 设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
         '<details><summary class="muted">robots.txt 建议内容（点击展开）</summary><pre class="code-hint">User-agent: *
 Disallow: /data/
@@ -118,16 +125,16 @@ function admin_card_lang(): string
         $opts .= '<option value="' . e($code) . '"' . ($def === $code ? ' selected' : '') . '>' . e($name) . '（' . e($code) . '）</option>';
     }
     $auto = (int)cfg('lang_auto_ip', 0) === 1;
-    return '<div class="card form-card"><h2 class="card-title">界面语言</h2>' .
+    return '<div class="card form-card"><h2 class="card-title">' . t('界面语言') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_save_lang')) . '" data-ajax="1">' . csrf_field() .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">默认论坛语言</span><select class="input" name="lang_default">' . $opts . '</select>' .
+        '<label class="field"><span class="field-l">' . t('默认论坛语言') . '</span><select class="input" name="lang_default">' . $opts . '</select>' .
         '<span class="hint">访客首次访问时的界面语言</span></label>' .
-        '<label class="field"><span class="field-l">按 IP 自动切换语言</span><select class="input" name="lang_auto_ip"><option value="1"' . ($auto ? ' selected' : '') . '>开启（按访客 IP 归属国家自动匹配）</option><option value="0"' . (!$auto ? ' selected' : '') . '>关闭（始终用默认语言）</option></select>' .
+        '<label class="field"><span class="field-l">' . t('按 IP 自动切换语言') . '</span><select class="input" name="lang_auto_ip"><option value="1"' . ($auto ? ' selected' : '') . '>' . t('开启（按访客 IP 归属国家自动匹配）') . '</option><option value="0"' . (!$auto ? ' selected' : '') . '>' . t('关闭（始终用默认语言）') . '</option></select>' .
         '<span class="hint">中国大陆 → 简中；港澳台 → 繁中；日本 → 日语；俄语区 → 俄语；其他 → 英语。用户主动选择的语言优先于自动判断；仅提交 IP 给免费归属地接口，结果缓存 30 天</span></label>' .
         '</div>' .
         '<p class="hint">前台核心界面（导航 / 登录注册 / 发帖回复 / 时间显示等）已支持五语切换；未翻译的深度条目自动以简体中文显示，用户可在「个人设置」长期保存自己的语言。后台管理界面保持中文。</p>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存语言设置</button></div>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存语言设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form></div>';
 }
 
@@ -139,7 +146,7 @@ function admin_tab_titles(): array
     return [
         'basic' => '基本', 'feat' => '功能', 'storage' => '存储', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
-        'anns' => '公告', 'theme' => '主题', 'docs' => '协议', 'api' => '开放 API', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
+        'anns' => '公告', 'theme' => '主题', 'ext' => '拓展', 'docs' => '协议', 'api' => '开放 API', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
 }
 
@@ -164,22 +171,22 @@ function admin_tab_feat(): void
         'ai_precheck'  => ['AI 审查（发帖预检）', '每条帖子 / 回复发布后立即交给 AI 审核，违规自动隐藏、通知作者可申诉；模型与严格程度在「AI」页配置'],
         'ai_autopilot' => ['AI 自主管理', 'AI 无人值守巡逻：自主封禁风险 IP / 解除误封 / 邮件警报管理员；间隔与红线在「安全防护」页配置'],
     ];
-    echo '<div class="card form-card"><h2 class="card-title">功能总开关</h2><p class="muted">勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。</p>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('功能总开关') . '</h2><p class="muted">勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。</p>' .
         '<form method="post" action="' . e(u('a=admin_save_feat')) . '" data-ajax="1">' . csrf_field();
     foreach ($items as $k => [$name, $desc]) {
         $on = feat_on($k);
         echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
-            '<span class="feat-txt"><b>' . e($name) . '</b>' . ($desc !== '' ? '<span class="muted">' . e($desc) . '</span>' : '') . '</span>' .
-            '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . ($on ? '开启' : '关闭') . '</span></label>';
+            '<span class="feat-txt"><b>' . e(t($name)) . '</b>' . ($desc !== '' ? '<span class="muted">' . e($desc) . '</span>' : '') . '</span>' .
+            '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . e(t($on ? '开启' : '关闭')) . '</span></label>';
     }
     foreach ($aiItems as $k => [$name, $desc]) {
         $on = (int)cfg($k, 1) === 1;
         echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
-            '<span class="feat-txt"><b>' . e($name) . '</b><span class="muted">' . e($desc) . '</span></span>' .
-            '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . ($on ? '开启' : '关闭') . '</span></label>';
+            '<span class="feat-txt"><b>' . e(t($name)) . '</b><span class="muted">' . e($desc) . '</span></span>' .
+            '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . e(t($on ? '开启' : '关闭')) . '</span></label>';
     }
     echo '<div class="form-foot"><span class="muted">数据安全不受影响：关闭任何开关都不会删除数据，重新勾选即恢复</span>' .
-        '<button class="btn btn-primary" type="submit">保存功能开关</button></div></form></div>';
+        '<button class="btn btn-primary" type="submit">' . t('保存功能开关') . '</button></div></form></div>';
 }
 
 /* ---------------- v1.21.0 存储引擎（文件 ⇄ 数据库，双向无损迁移） ---------------- */
@@ -192,7 +199,7 @@ function admin_tab_storage(): void
     $fstat = FileStore::stats();
 
     /* ---- 卡片 1：当前状态 ---- */
-    echo '<div class="card form-card"><h2 class="card-title">存储引擎</h2>';
+    echo '<div class="card form-card"><h2 class="card-title">' . t('存储引擎') . '</h2>';
     if ($isDb) {
         $dstat = DbStore::stats();
         echo '<p><span class="badge badge-ok">当前：数据库存储</span> <span class="muted">' . e(strtoupper(DbStore::kind()))
@@ -213,25 +220,25 @@ function admin_tab_storage(): void
         $drvOpts .= '<option value="' . $dv . '"' . (($conf['db_driver'] ?: 'sqlite') === $dv ? ' selected' : '') . (!$ok ? ' disabled' : '') . '>'
             . e($dn . (!$ok ? '（PHP 未启用 pdo_' . $dv . ' 扩展）' : '')) . '</option>';
     }
-    echo '<div class="card form-card"><h2 class="card-title">数据库连接</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('数据库连接') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_save_storage')) . '" data-ajax="1">' . csrf_field() .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">数据库类型</span><select class="input" name="db_driver">' . $drvOpts . '</select></label>' .
-        '<label class="field"><span class="field-l">表前缀</span><input class="input" name="db_prefix" maxlength="32" placeholder="mf_" value="' . e($conf['db_prefix'] !== '' ? $conf['db_prefix'] : 'mf_') . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('数据库类型') . '</span><select class="input" name="db_driver">' . $drvOpts . '</select></label>' .
+        '<label class="field"><span class="field-l">' . t('表前缀') . '</span><input class="input" name="db_prefix" maxlength="32" placeholder="mf_" value="' . e($conf['db_prefix'] !== '' ? $conf['db_prefix'] : 'mf_') . '"></label>' .
         '</div>' .
-        '<label class="field"><span class="field-l">SQLite 数据库文件（仅 SQLite 使用）</span><input class="input" name="db_sqlite_path" maxlength="200" placeholder="db/forum.sqlite（相对 data/，留空用默认）" value="' . e($conf['db_sqlite_path']) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('SQLite 数据库文件（仅 SQLite 使用）') . '</span><input class="input" name="db_sqlite_path" maxlength="200" placeholder="db/forum.sqlite（相对 data/，留空用默认）" value="' . e($conf['db_sqlite_path']) . '"></label>' .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">主机（MySQL / PG）</span><input class="input" name="db_host" maxlength="120" placeholder="127.0.0.1" value="' . e($conf['db_host']) . '"></label>' .
-        '<label class="field"><span class="field-l">端口（可留空）</span><input class="input" name="db_port" maxlength="5" placeholder="3306 / 5432" value="' . e($conf['db_port']) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('主机（MySQL / PG）') . '</span><input class="input" name="db_host" maxlength="120" placeholder="127.0.0.1" value="' . e($conf['db_host']) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('端口（可留空）') . '</span><input class="input" name="db_port" maxlength="5" placeholder="3306 / 5432" value="' . e($conf['db_port']) . '"></label>' .
         '</div>' .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">数据库名（MySQL / PG）</span><input class="input" name="db_name" maxlength="64" value="' . e($conf['db_name']) . '"></label>' .
-        '<label class="field"><span class="field-l">用户名</span><input class="input" name="db_user" maxlength="64" value="' . e($conf['db_user']) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('数据库名（MySQL / PG）') . '</span><input class="input" name="db_name" maxlength="64" value="' . e($conf['db_name']) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('用户名') . '</span><input class="input" name="db_user" maxlength="64" value="' . e($conf['db_user']) . '"></label>' .
         '</div>' .
-        '<label class="field"><span class="field-l">密码</span><input class="input" name="db_pass" type="password" maxlength="128" value="' . e($conf['db_pass']) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('密码') . '</span><input class="input" name="db_pass" type="password" maxlength="128" value="' . e($conf['db_pass']) . '"></label>' .
         '<div class="form-foot">' .
         '<button class="btn btn-ghost" type="button" data-admin-test="db">测试连接（保存前可先验证）</button>' .
-        '<button class="btn btn-primary" type="submit">保存连接信息</button></div>' .
+        '<button class="btn btn-primary" type="submit">' . t('保存连接信息') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
         '<p class="hint">连接信息保存在文件侧配置（data/config.php）——引擎引导发生在读取数据库之前，这样即使数据库不可用，论坛也能读取配置并回退文件模式继续运行。测试连接会自动建表（若尚不存在）。SQLite 请放在 data/db/ 目录下以获得 .htaccess 保护。</p></div>';
 
@@ -250,15 +257,15 @@ function admin_tab_storage(): void
         '<input type="hidden" name="direction" value="' . $dirVal . '">' .
         '<p class="hint">' . e($dirHint) . '</p>' .
         '<p class="hint">迁移范围：data/ 下除 sessions / locks / logs / backup / upload / db 之外的全部数据。迁移是幂等的——迁移窗口期的新发帖可在完成后再次执行同向迁移对齐；每次迁移的备份包都留在 data/backup/ 可随时找回。</p>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">开始迁移</button></div></form></div>';
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('开始迁移') . '</button></div></form></div>';
 
     /* ---- 卡片 4：数据库管理（仅数据库模式，与文件模式管理能力对齐） ---- */
     if ($isDb) {
-        echo '<div class="card form-card"><h2 class="card-title">数据库管理</h2>' .
+        echo '<div class="card form-card"><h2 class="card-title">' . t('数据库管理') . '</h2>' .
             '<div class="grid3">' .
-            '<form method="post" action="' . e(u('a=admin_storage_backup')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">导出数据库备份（zip）</button></form>' .
-            '<form method="post" action="' . e(u('a=admin_storage_optimize')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">优化（回收空间 / 碎片整理）</button></form>' .
-            '<form method="post" action="' . e(u('a=admin_storage_check')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">完整性检查</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_storage_backup')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">' . t('导出数据库备份（zip）') . '</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_storage_optimize')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">' . t('优化（回收空间 / 碎片整理）') . '</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_storage_check')) . '">' . csrf_field() . '<button class="btn btn-ghost" type="submit">' . t('完整性检查') . '</button></form>' .
             '</div>' .
             '<p class="hint">备份包（含全部数据行原文与恢复说明）存于 data/backup/，与文件模式的「一键备份」并列管理（保留最近 5 份）。「优化」：SQLite 执行 VACUUM / MySQL 执行 OPTIMIZE TABLE / PG 执行 VACUUM ANALYZE。</p></div>';
     }
@@ -269,16 +276,16 @@ function admin_tab_mail(): void
 {
     echo '<div class="card form-card"><form id="mail-form">' .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">SMTP 主机</span><input class="input" name="smtp_host" required placeholder="smtp.qq.com" value="' . e((string)cfg('smtp_host')) . '"></label>' .
-        '<label class="field"><span class="field-l">SMTP 端口</span><input class="input" name="smtp_port" type="number" min="1" max="65535" value="' . (int)cfg('smtp_port', 465) . '"><span class="hint">465 为 SSL；587 / 25 自动尝试 STARTTLS</span></label>' .
+        '<label class="field"><span class="field-l">' . t('SMTP 主机') . '</span><input class="input" name="smtp_host" required placeholder="smtp.qq.com" value="' . e((string)cfg('smtp_host')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('SMTP 端口') . '</span><input class="input" name="smtp_port" type="number" min="1" max="65535" value="' . (int)cfg('smtp_port', 465) . '"><span class="hint">465 为 SSL；587 / 25 自动尝试 STARTTLS</span></label>' .
         '</div>' .
-        '<label class="field"><span class="field-l">发信邮箱</span><input class="input" name="smtp_from" type="email" required value="' . e((string)cfg('smtp_from')) . '"></label>' .
-        '<label class="field"><span class="field-l">授权码</span><input class="input" name="smtp_pass" value="' . e((string)cfg('smtp_pass')) . '" placeholder="邮箱服务商提供的 SMTP 授权码（非登录密码）"></label>' .
+        '<label class="field"><span class="field-l">' . t('发信邮箱') . '</span><input class="input" name="smtp_from" type="email" required value="' . e((string)cfg('smtp_from')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('授权码') . '</span><input class="input" name="smtp_pass" value="' . e((string)cfg('smtp_pass')) . '" placeholder="邮箱服务商提供的 SMTP 授权码（非登录密码）"></label>' .
         '<div class="form-foot">' .
         '<button class="btn btn-primary" type="button" data-admin-save="mail">保存邮件设置</button>' .
         '<button class="btn btn-ghost" type="button" data-admin-test="mail">测试发信</button>' .
         '</div></form>' .
-        '<div class="field"><span class="field-l">测试收件邮箱</span><div class="code-row"><input class="input" id="mail-test-to" type="email" placeholder="填写一个收件邮箱，当场发一封测试邮件">' .
+        '<div class="field"><span class="field-l">' . t('测试收件邮箱') . '</span><div class="code-row"><input class="input" id="mail-test-to" type="email" placeholder="填写一个收件邮箱，当场发一封测试邮件">' .
         '<button class="btn btn-ghost" type="button" data-admin-test="mail" data-to="#mail-test-to">发送测试邮件</button></div>' .
         '<span class="test-msg muted"></span></div></div>';
 }
@@ -299,13 +306,13 @@ function admin_tab_ai(): void
         '<details class="ai-model-add"' . ($list ? '' : ' open') . '><summary>' . ($list ? '＋ 添加模型' : '＋ 添加第一个模型') . '</summary>' .
         '<form method="post" action="' . e(u('a=admin_model_new')) . '" class="ai-model-form">' . csrf_field() .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">备注名称（可选）</span><input class="input" name="name" maxlength="30" placeholder="如 GLM 主力 / 免费备用"></label>' .
-        '<label class="field"><span class="field-l">模型名称</span><input class="input" name="model" required maxlength="100" placeholder="如 gpt-4o-mini / glm-4-flash"></label>' .
+        '<label class="field"><span class="field-l">' . t('备注名称（可选）') . '</span><input class="input" name="name" maxlength="30" placeholder="如 GLM 主力 / 免费备用"></label>' .
+        '<label class="field"><span class="field-l">' . t('模型名称') . '</span><input class="input" name="model" required maxlength="100" placeholder="如 gpt-4o-mini / glm-4-flash"></label>' .
         '</div>' .
-        '<label class="field"><span class="field-l">API 地址（OpenAI 兼容）</span><input class="input" name="url" required maxlength="200" placeholder="https://api.openai.com 或 https://host/v1"><span class="hint">支持填根地址、/v1 或完整 /chat/completions</span></label>' .
-        '<label class="field"><span class="field-l">API 密钥</span><input class="input" name="key" required maxlength="200"></label>' .
-        '<label class="check"><input type="checkbox" name="on" value="1" checked> 立即启用该模型</label>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">添加模型</button></div>' .
+        '<label class="field"><span class="field-l">' . t('API 地址（OpenAI 兼容）') . '</span><input class="input" name="url" required maxlength="200" placeholder="https://api.openai.com 或 https://host/v1"><span class="hint">支持填根地址、/v1 或完整 /chat/completions</span></label>' .
+        '<label class="field"><span class="field-l">' . t('API 密钥') . '</span><input class="input" name="key" required maxlength="200"></label>' .
+        '<label class="check"><input type="checkbox" name="on" value="1" checked>' . t(' 立即启用该模型') . '</label>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('添加模型') . '</button></div>' .
         '</form></details>';
 
     if (!$list) {
@@ -337,19 +344,19 @@ function admin_tab_ai(): void
                     : '') .
                 '<form method="post" action="' . e(u('a=admin_model_move')) . '" class="inline"><input type="hidden" name="id" value="' . $id . '"><input type="hidden" name="dir" value="up">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit" title="上移">↑</button></form>' .
                 '<form method="post" action="' . e(u('a=admin_model_move')) . '" class="inline"><input type="hidden" name="id" value="' . $id . '"><input type="hidden" name="dir" value="down">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit" title="下移">↓</button></form>' .
-                '<form method="post" action="' . e(u('a=admin_model_del')) . '" class="inline" data-confirm="确认删除该模型？其失败记录将一并清除"><input type="hidden" name="id" value="' . $id . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">删除</button></form>' .
+                '<form method="post" action="' . e(u('a=admin_model_del')) . '" class="inline" data-confirm="确认删除该模型？其失败记录将一并清除"><input type="hidden" name="id" value="' . $id . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('删除') . '</button></form>' .
                 '</span></div>' .
                 '<details><summary class="muted">编辑配置</summary>' .
                 '<form method="post" action="' . e(u('a=admin_model_save')) . '" class="ai-model-form">' . csrf_field() .
                 '<input type="hidden" name="id" value="' . $id . '">' .
                 '<div class="grid2">' .
-                '<label class="field"><span class="field-l">备注名称（可选）</span><input class="input" name="name" maxlength="30" value="' . e($m['name']) . '"></label>' .
-                '<label class="field"><span class="field-l">模型名称</span><input class="input" name="model" required maxlength="100" value="' . e($m['model']) . '"></label>' .
+                '<label class="field"><span class="field-l">' . t('备注名称（可选）') . '</span><input class="input" name="name" maxlength="30" value="' . e($m['name']) . '"></label>' .
+                '<label class="field"><span class="field-l">' . t('模型名称') . '</span><input class="input" name="model" required maxlength="100" value="' . e($m['model']) . '"></label>' .
                 '</div>' .
-                '<label class="field"><span class="field-l">API 地址</span><input class="input" name="url" required maxlength="200" value="' . e($m['url']) . '"></label>' .
-                '<label class="field"><span class="field-l">API 密钥</span><input class="input" name="key" required maxlength="200" value="' . e($m['key']) . '"></label>' .
-                '<label class="check"><input type="checkbox" name="on" value="1"' . ($m['on'] ? ' checked' : '') . '> 启用该模型</label>' .
-                '<div class="form-foot"><span></span><button class="btn btn-ghost btn-sm" type="submit">保存修改</button></div>' .
+                '<label class="field"><span class="field-l">' . t('API 地址') . '</span><input class="input" name="url" required maxlength="200" value="' . e($m['url']) . '"></label>' .
+                '<label class="field"><span class="field-l">' . t('API 密钥') . '</span><input class="input" name="key" required maxlength="200" value="' . e($m['key']) . '"></label>' .
+                '<label class="check"><input type="checkbox" name="on" value="1"' . ($m['on'] ? ' checked' : '') . '>' . t(' 启用该模型') . '</label>' .
+                '<div class="form-foot"><span></span><button class="btn btn-ghost btn-sm" type="submit">' . t('保存修改') . '</button></div>' .
                 '</form></details>' .
                 '</div>';
         }
@@ -361,19 +368,19 @@ function admin_tab_ai(): void
     /* ---- 卡片 2：审核策略 ---- */
     echo '<div class="card form-card"><form id="ai-form">' .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">单模型重试次数</span><input class="input" name="ai_retries" type="number" min="1" max="10" value="' . (int)cfg('ai_retries', 2) . '"><span class="hint">同一模型单次审核内的 HTTP 重试次数（1-10；v1.18.0 起默认 2，降低最坏情况的叠加等待）</span></label>' .
-        '<label class="field"><span class="field-l">单次请求超时（秒）</span><input class="input" name="ai_timeout" type="number" min="5" max="120" value="' . (int)cfg('ai_timeout', 20) . '"><span class="hint">等待 AI 返回的最长时间（5-120 秒；v1.18.0 起默认 20 秒）。模型平时响应慢就调大，想快速失败换模型就调小</span></label>' .
-        '<label class="field"><span class="field-l">自动切换阈值（连续失败 N 次）</span><input class="input" name="ai_fail_limit" type="number" min="1" max="20" value="' . $limit . '"><span class="hint">某模型连续失败达到该次数后，后续审核自动换下一个模型（默认 3）</span></label>' .
+        '<label class="field"><span class="field-l">' . t('单模型重试次数') . '</span><input class="input" name="ai_retries" type="number" min="1" max="10" value="' . (int)cfg('ai_retries', 2) . '"><span class="hint">同一模型单次审核内的 HTTP 重试次数（1-10；v1.18.0 起默认 2，降低最坏情况的叠加等待）</span></label>' .
+        '<label class="field"><span class="field-l">' . t('单次请求超时（秒）') . '</span><input class="input" name="ai_timeout" type="number" min="5" max="120" value="' . (int)cfg('ai_timeout', 20) . '"><span class="hint">等待 AI 返回的最长时间（5-120 秒；v1.18.0 起默认 20 秒）。模型平时响应慢就调大，想快速失败换模型就调小</span></label>' .
+        '<label class="field"><span class="field-l">' . t('自动切换阈值（连续失败 N 次）') . '</span><input class="input" name="ai_fail_limit" type="number" min="1" max="20" value="' . $limit . '"><span class="hint">某模型连续失败达到该次数后，后续审核自动换下一个模型（默认 3）</span></label>' .
         '</div>' .
-        '<label class="field"><span class="field-l">审核模式（火力）</span>' .
+        '<label class="field"><span class="field-l">' . t('审核模式（火力）') . '</span>' .
         '<label class="check"><input type="radio" name="ai_mode" value="normal"' . (ai_mode() === 'normal' ? ' checked' : '') . '> <b>标准</b> —— 按模型顺序审核，失败自动切换（消耗最低）</label>' .
         '<label class="check"><input type="radio" name="ai_mode" value="parallel"' . (ai_mode() === 'parallel' ? ' checked' : '') . '> <b>并行火力</b> —— 队列一次取出多条，多个模型<b>同刻并发、各审一条</b>（模型有几个就同时审几条，吞吐成倍提升）；只剩一条时自动改为<b>双模型竞速</b>——两个模型同刻出发审同一条，先返回者胜出，单条等待时间约减半</label>' .
         '<label class="check"><input type="radio" name="ai_mode" value="fullpower"' . (ai_mode() === 'fullpower' ? ' checked' : '') . '> <b>全火力全开</b> —— 每条内容同时交给<b>所有启用的模型</b>一起审核：任一模型判定违规即判违规，全部无问题才放行（严判，API 消耗与启用模型数成正比）</label>' .
         '</label>' .
-        '<label class="field"><span class="field-l">审核严格程度</span><select name="ai_strict" class="input" style="max-width:100%">' .
-        '<option value="loose"' . ($strict === 'loose' ? ' selected' : '') . '>宽松 —— 拿不准一律不违规（创作 / 交流型论坛友好）</option>' .
-        '<option value="standard"' . ($strict === 'standard' ? ' selected' : '') . '>标准 —— 直接命中违规类别才判违规（推荐）</option>' .
-        '<option value="strict"' . ($strict === 'strict' ? ' selected' : '') . '>严格 —— 擦边 / 变体字规避审查也判违规（合规要求高时用）</option>' .
+        '<label class="field"><span class="field-l">' . t('审核严格程度') . '</span><select name="ai_strict" class="input" style="max-width:100%">' .
+        '<option value="loose"' . ($strict === 'loose' ? ' selected' : '') . '>' . t('宽松 —— 拿不准一律不违规（创作 / 交流型论坛友好）') . '</option>' .
+        '<option value="standard"' . ($strict === 'standard' ? ' selected' : '') . '>' . t('标准 —— 直接命中违规类别才判违规（推荐）') . '</option>' .
+        '<option value="strict"' . ($strict === 'strict' ? ' selected' : '') . '>' . t('严格 —— 擦边 / 变体字规避审查也判违规（合规要求高时用）') . '</option>' .
         '</select><span class="hint">发给 AI 的审核提示词由程序内置<b>固定</b>（保证审核口径稳定、可预期、不被误改），此处仅选择注入哪一档「判定尺度」，保存后对后续每次审核立即生效。</span></label>' .
         '<details style="margin-top:2px"><summary class="muted">查看审核提示词：固定主体 + 三档判定尺度（当前使用：' . e($lvName) . '）</summary>' .
         '<div class="prompt-box"><b>固定主体（每次审核都发送）</b><pre>' . e(AI_SYSTEM_PROMPT) . '</pre></div>' .
@@ -400,7 +407,7 @@ function admin_tab_docs(): void
         'doc_privacy'    => ['隐私政策', '说明本站收集哪些数据（IP 日志、Cookie、邮箱等）与用途。合规站点建议填写'],
         'doc_disclaimer' => ['免责声明', '本站对用户发布内容的免责说明。UGC 站点建议填写'],
     ];
-    echo '<div class="card form-card"><h2 class="card-title">协议管理</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('协议管理') . '</h2>' .
         '<p class="muted">填写内容后即自动启用该协议：出现在注册页确认、协议门禁与页脚入口（按下方开关）。支持直接输入多行纯文本；URL 会自动变成可点击链接。没有现成文案？点每栏的「填入内置模板」一键生成，替换其中的【站名】【站长邮箱】【更新日期】后保存即可。</p>' .
         '<p class="hint">前台展示：访客通过页脚或 <a href="' . e(u('p=doc')) . '">协议中心</a> 查看协议——协议中心与每份协议都有独立的完整大页面（自动生成目录、版本号与更新时间，支持打印 / 保存 PDF）。</p>' .
         '<form method="post" action="' . e(u('a=admin_save_docs')) . '" data-ajax="1">' . csrf_field();
@@ -416,11 +423,11 @@ function admin_tab_docs(): void
     }
     echo '<label class="check"><input type="hidden" name="doc_gate" value="0"><input type="checkbox" name="doc_gate" value="1"' . (!empty(cfg('doc_gate', 0)) ? ' checked' : '') . '> <b>访问门禁</b> —— 开启后，未同意协议的访客打开网站任何页面时，都会先看到「请阅读并同意协议」页面，不同意无法进入（登录、注册、协议页除外；管理员不受限，避免把自己锁在门外）。协议内容每次修改后，已同意的用户需重新确认一次</label>' .
         '<label class="check"><input type="hidden" name="doc_footer" value="0"><input type="checkbox" name="doc_footer" value="1"' . (!empty(cfg('doc_footer', 0)) ? ' checked' : '') . '> <b>页脚入口</b> —— 在网站页脚显示「用户协议 / 隐私政策 / 免责声明」查看入口</label>' .
-        '<div class="form-foot"><button class="btn btn-primary" type="submit">保存协议设置</button></div>' .
+        '<div class="form-foot"><button class="btn btn-primary" type="submit">' . t('保存协议设置') . '</button></div>' .
         '</form>' .
         '<p class="hint">注册页的强制勾选自动生效：只要对应协议已填写，新用户注册时必须勾选「我已阅读并同意」才能提交。</p>';
     /* v1.18.0：同意记录机制说明（用户问"记住隐私协议是在哪儿弄的"，这里说清楚） */
-    echo '<div class="card form-card"><h2 class="card-title">「同意协议」是如何记录的</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('「同意协议」是如何记录的') . '</h2>' .
         '<p class="hint" style="font-size:13.5px;line-height:1.9">' .
         '· <b>当前协议版本号</b>：<b>' . e(strtoupper(substr(doc_fingerprint(), 0, 8))) . '</b>（由三份协议内容计算指纹生成，任何一份内容修改后版本号自动变化）<br>' .
         '· <b>记录位置</b>：访客点「同意」时，本站在其浏览器写入一年期 Cookie（<code>mf_doc</code>，值为「版本指纹.同意时间戳」），并同步写入其登录会话；<br>' .
@@ -444,7 +451,7 @@ function admin_tab_api(): void
     if ($termsEmpty) {
         $termsVal = api_terms_template(); // 从未保存过 → 预填内置模板，保存即固化
     }
-    echo '<div class="card form-card"><h2 class="card-title">开放 API</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('开放 API') . '</h2>' .
         '<p class="muted">把论坛的能力开放给第三方：用户可在「个人设置 → 开放 API」阅读条款后签发自己的访问令牌，用它开发客户端、机器人或自定义界面。您在这里决定开放与否、开放哪些能力与限速额度；写入类端点与网页端接受<b>完全相同</b>的校验链（功能开关、禁言、发言间隔、字数上限、AI 审核、操作日志）。</p>' .
         '<p class="hint">开发者文档（自动反映下方开放状态）：<a href="' . e(u('p=api_docs')) . '">' . e(u('p=api_docs')) . '</a>。建议把该页链接发给想做客户端的用户。行为审计：「日志」页检索 <code>api_call</code>（写入类调用）与 <code>api_token</code>（签发 / 重置 / 撤销）。</p>' .
         '<form method="post" action="' . e(u('a=admin_save_api')) . '" data-ajax="1">' . csrf_field();
@@ -453,9 +460,9 @@ function admin_tab_api(): void
         '<label class="check"><input type="hidden" name="api_guest" value="0"><input type="checkbox" name="api_guest" value="1"' . ((int)cfg('api_guest', 0) === 1 ? ' checked' : '') . '> <b>允许访客免令牌调用公开端点</b> —— 关闭时只有持令牌的注册用户能调用 API（更严格；私密论坛模式下此开关无效，一律要求令牌）</label>' .
         '<label class="check"><input type="hidden" name="api_log" value="0"><input type="checkbox" name="api_log" value="1"' . ((int)cfg('api_log', 0) === 1 ? ' checked' : '') . '> <b>记录写入类调用日志</b> —— 通过 API 发帖 / 回复 / 点赞 / 删除时写入「日志」（api_call）；读取类不记，防止日志爆量。认证失败一律记录（api_deny 由无效令牌触发，见日志页）</label>' .
         '<div class="grid3">' .
-        '<label class="field"><span class="field-l">令牌限速（次 / 分钟）</span><input class="input" name="api_rate_token" type="number" min="0" max="10000" value="' . (int)cfg('api_rate_token', 120) . '"></label>' .
-        '<label class="field"><span class="field-l">访客限速（次 / 分钟）</span><input class="input" name="api_rate_guest" type="number" min="0" max="10000" value="' . (int)cfg('api_rate_guest', 30) . '"></label>' .
-        '<label class="field"><span class="field-l">跨域来源（CORS，可选）</span><input class="input" name="api_cors" maxlength="500" placeholder="留空=同源；*=全部" value="' . e((string)cfg('api_cors', '')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('令牌限速（次 / 分钟）') . '</span><input class="input" name="api_rate_token" type="number" min="0" max="10000" value="' . (int)cfg('api_rate_token', 120) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('访客限速（次 / 分钟）') . '</span><input class="input" name="api_rate_guest" type="number" min="0" max="10000" value="' . (int)cfg('api_rate_guest', 30) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('跨域来源（CORS，可选）') . '</span><input class="input" name="api_cors" maxlength="500" placeholder="留空=同源；*=全部" value="' . e((string)cfg('api_cors', '')) . '"></label>' .
         '</div>' .
         '<p class="hint">限速填 0 = 不限制（不推荐）。CORS 供浏览器内运行的第三方前端调用：留空=仅同源可用（最安全）；填 <code>*</code> 允许任意网页调用；填具体来源如 <code>https://app.example.com</code>（多个用逗号分隔），只对这些站点的浏览器放行。</p>';
 
@@ -478,7 +485,7 @@ function admin_tab_api(): void
     echo '<h2 class="card-title" style="margin-top:18px">开放 API 使用条款</h2>' .
         '<p class="hint">用户在「个人设置」签发令牌前必须阅读并勾选同意本条款；签发时记录同意时间与条款版本指纹。' . ($termsEmpty ? '当前展示的是内置模板（尚未保存过），可直接修改或原样保存生效。' : '条款文本更新不会自动影响已签发的令牌；如需收紧政策，可在此说明并撤销相关令牌。') . '</p>' .
         '<label class="field"><textarea class="input" name="api_terms" rows="12" style="min-height:220px">' . e($termsVal) . '</textarea></label>' .
-        '<div class="form-foot"><span class="muted">保存后立即生效，无需重启</span><button class="btn btn-primary" type="submit">保存 API 设置</button></div>' .
+        '<div class="form-foot"><span class="muted">保存后立即生效，无需重启</span><button class="btn btn-primary" type="submit">' . t('保存 API 设置') . '</button></div>' .
         '</form></div>';
 
     /* 已签发令牌（审计与管控） */
@@ -497,7 +504,7 @@ function admin_tab_api(): void
                 ($tu && !empty($tu['banned']) ? ' · <span class="badge badge-warn">已封禁</span>' : '') . '</span></span>' .
                 '<form method="post" action="' . e(u('a=admin_api_revoke')) . '" class="inline" data-confirm="确认撤销「' . e($tname) . '」的 API 令牌？其客户端将立即失去访问权。">' .
                 '<input type="hidden" name="uid" value="' . (int)$tid . '">' . csrf_field() .
-                '<button class="btn btn-ghost btn-sm danger" type="submit">撤销</button></form></div>';
+                '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('撤销') . '</button></form></div>';
         }
         echo '</div>';
         echo '<p class="hint">服务端只保存令牌的 SHA-256 哈希，明文仅签发时向用户展示一次；用户可在「个人设置」自助重置 / 撤销，此处撤销适用于安全处置。</p>';
@@ -510,7 +517,7 @@ function admin_tab_api(): void
         $base = 'https://' . (string)($_SERVER['HTTP_HOST'] ?? 'your-forum.example.com');
     }
     $base = rtrim($base, '/');
-    echo '<div class="card form-card"><h2 class="card-title">客户端接入示例</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('客户端接入示例') . '</h2>' .
         '<p class="hint" style="font-size:13px;line-height:1.8">curl "' . e($base) . '/index.php?api=threads.list&amp;per_page=10"<br>' .
         'curl -H "Authorization: Bearer mf_你的令牌" -X POST -H "Content-Type: application/json" -d \'{"board":1,"title":"来自客户端","content":"你好"}\' "' . e($base) . '/index.php?api=threads.create"</p>' .
         '<p class="hint">完整端点文档、参数、错误码与限速规则见 <a href="' . e(u('p=api_docs')) . '">开发者文档</a>（前台对登录用户开放）。</p></div>';
@@ -519,11 +526,11 @@ function admin_tab_api(): void
 /* ---------------- 板块 ---------------- */
 function admin_tab_boards(): void
 {
-    echo '<div class="card form-card"><h2 class="card-title">新建板块</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('新建板块') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_board_new')) . '" class="inline-form">' . csrf_field() .
         '<input class="input" name="name" required maxlength="20" placeholder="板块名称">' .
         '<input class="input" name="desc" maxlength="60" placeholder="一句话简介（可选）">' .
-        '<button class="btn btn-primary" type="submit">创建</button></form></div>';
+        '<button class="btn btn-primary" type="submit">' . t('创建') . '</button></form></div>';
 
     $bs = board_all();
     echo '<div class="card form-card"><h2 class="card-title">板块列表（' . count($bs) . '）</h2><div class="admin-list">';
@@ -536,11 +543,11 @@ function admin_tab_boards(): void
             '<input type="hidden" name="id" value="' . $bid . '">' . csrf_field() .
             '<input class="input" name="name" value="' . e((string)$b['name']) . '" maxlength="20" required>' .
             '<input class="input" name="desc" value="' . e((string)$b['desc']) . '" maxlength="60">' .
-            '<button class="btn btn-ghost btn-sm" type="submit">保存</button></form>' .
+            '<button class="btn btn-ghost btn-sm" type="submit">' . t('保存') . '</button></form>' .
             '<span class="row-ops">' .
             '<form method="post" action="' . e(u('a=admin_board_move')) . '" class="inline"><input type="hidden" name="id" value="' . $bid . '"><input type="hidden" name="dir" value="up">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit" title="上移">↑</button></form>' .
             '<form method="post" action="' . e(u('a=admin_board_move')) . '" class="inline"><input type="hidden" name="id" value="' . $bid . '"><input type="hidden" name="dir" value="down">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit" title="下移">↓</button></form>' .
-            '<form method="post" action="' . e(u('a=admin_board_del')) . '" class="inline" data-confirm="确认删除该板块？（板块下有帖子时无法删除）"><input type="hidden" name="id" value="' . $bid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">删除</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_board_del')) . '" class="inline" data-confirm="确认删除该板块？（板块下有帖子时无法删除）"><input type="hidden" name="id" value="' . $bid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('删除') . '</button></form>' .
             '</span></div>';
     }
     echo '</div></div>';
@@ -553,7 +560,7 @@ function admin_tab_users(): void
     echo '<form method="get" action="' . e(u('')) . '" class="search-bar">' .
         '<input type="hidden" name="p" value="admin"><input type="hidden" name="tab" value="users">' .
         '<input class="input" name="q" value="' . e($q) . '" placeholder="搜索用户名 / 邮箱">' .
-        '<button class="btn btn-ghost" type="submit">搜索</button></form>';
+        '<button class="btn btn-ghost" type="submit">' . t('搜索') . '</button></form>';
 
     $us = user_all();
     if ($q !== '') {
@@ -582,12 +589,12 @@ function admin_tab_users(): void
             echo '<span class="row-ops">' .
                 '<form method="post" action="' . e(u('a=admin_user_mute')) . '" class="inline-form">' .
                 '<input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() .
-                '<select name="mins" class="input input-sm"><option value="10">10 分钟</option><option value="60">1 小时</option><option value="1440">1 天</option><option value="10080">7 天</option></select>' .
-                '<button class="btn btn-ghost btn-sm" type="submit">禁言</button></form>';
+                '<select name="mins" class="input input-sm"><option value="10">' . t('10 分钟') . '</option><option value="60">' . t('1 小时') . '</option><option value="1440">' . t('1 天') . '</option><option value="10080">' . t('7 天') . '</option></select>' .
+                '<button class="btn btn-ghost btn-sm" type="submit">' . t('禁言') . '</button></form>';
             if (!empty($x['banned'])) {
-                echo '<form method="post" action="' . e(u('a=admin_user_unban')) . '" class="inline"><input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit">解封</button></form>';
+                echo '<form method="post" action="' . e(u('a=admin_user_unban')) . '" class="inline"><input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit">' . t('解封') . '</button></form>';
             } else {
-                echo '<form method="post" action="' . e(u('a=admin_user_ban')) . '" class="inline" data-confirm="确认封禁该账号？封禁后无法登录。"><input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">封号</button></form>';
+                echo '<form method="post" action="' . e(u('a=admin_user_ban')) . '" class="inline" data-confirm="确认封禁该账号？封禁后无法登录。"><input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('封号') . '</button></form>';
             }
             echo '<form method="post" action="' . e(u('a=admin_user_role')) . '" class="inline"><input type="hidden" name="uid" value="' . $uid . '"><input type="hidden" name="to" value="' . (empty($x['admin']) ? '1' : '0') . '">' . csrf_field() .
                 '<button class="btn btn-ghost btn-sm" type="submit">' . (empty($x['admin']) ? '设为管理员' : '取消管理员') . '</button></form>' .
@@ -607,7 +614,7 @@ function admin_tab_content(): void
     echo '<form method="get" action="' . e(u('')) . '" class="search-bar">' .
         '<input type="hidden" name="p" value="admin"><input type="hidden" name="tab" value="content">' .
         '<input class="input" name="q" value="' . e($q) . '" placeholder="搜索帖子标题 / 作者">' .
-        '<button class="btn btn-ghost" type="submit">搜索</button></form>';
+        '<button class="btn btn-ghost" type="submit">' . t('搜索') . '</button></form>';
 
     $idx = thread_index();
     usort($idx, function ($a, $b) {
@@ -643,8 +650,8 @@ function admin_tab_content(): void
         foreach (board_all() as $b) {
             echo '<option value="' . (int)$b['id'] . '"' . ((int)$t['board'] === (int)$b['id'] ? ' selected' : '') . '>' . e((string)$b['name']) . '</option>';
         }
-        echo '</select>' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit">移版</button></form>' .
-            '<form method="post" action="' . e(u('a=admin_thread_op')) . '" class="inline" data-confirm="确认删除该帖子？将通知作者。"><input type="hidden" name="tid" value="' . $tid . '"><input type="hidden" name="act" value="delete">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">删除</button></form>' .
+        echo '</select>' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit">' . t('移版') . '</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_thread_op')) . '" class="inline" data-confirm="确认删除该帖子？将通知作者。"><input type="hidden" name="tid" value="' . $tid . '"><input type="hidden" name="act" value="delete">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('删除') . '</button></form>' .
             '</span></div>';
     }
     echo '</div><p class="hint">删除回复请进入帖子页面，在对应回复处操作。</p></div>';
@@ -656,7 +663,7 @@ function admin_tab_queue(): void
     $q = queue_list();
     echo '<div class="list-head"><h2 class="card-title">AI 待审队列（' . count($q) . '）</h2>' .
         '<form method="post" action="' . e(u('a=admin_queue_run')) . '" class="inline">' . csrf_field() .
-        '<button class="btn btn-primary btn-sm" type="submit">立即审核一条</button></form></div>';
+        '<button class="btn btn-primary btn-sm" type="submit">' . t('立即审核一条') . '</button></form></div>';
     echo '<p class="hint">AI 随论坛访问自动处理队列，每次只处理一条（保护速率限制）；也可以在此手动触发。审核失败的内容会保持隐藏并通知管理员。</p>';
     echo '<div class="admin-list">';
     if (!$q) {
@@ -675,8 +682,8 @@ function admin_tab_queue(): void
             '<p class="muted">内容预览：' . ($gone ? '（已被删除）' : e($preview)) . '</p>' .
             '<div class="notice-ops">' .
             '<a class="btn btn-ghost btn-sm" href="' . e(u('p=thread&id=' . (int)$rep['tid'])) . '">查看</a>' .
-            '<form method="post" action="' . e(u('a=admin_queue_restore')) . '" class="inline"><input type="hidden" name="rid" value="' . (int)$rep['id'] . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit">直接恢复</button></form>' .
-            '<form method="post" action="' . e(u('a=admin_queue_delete')) . '" class="inline" data-confirm="确认直接删除该内容？将通知作者。"><input type="hidden" name="rid" value="' . (int)$rep['id'] . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">直接删除</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_queue_restore')) . '" class="inline"><input type="hidden" name="rid" value="' . (int)$rep['id'] . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit">' . t('直接恢复') . '</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_queue_delete')) . '" class="inline" data-confirm="确认直接删除该内容？将通知作者。"><input type="hidden" name="rid" value="' . (int)$rep['id'] . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('直接删除') . '</button></form>' .
             '</div></div>';
     }
     echo '</div>';
@@ -710,8 +717,8 @@ function admin_tab_manual(): void
             '<p class="muted">内容预览：' . ($gone ? '（已被删除）' : e($preview)) . '</p>' .
             '<div class="notice-ops">' .
             '<a class="btn btn-ghost btn-sm" href="' . e(u('p=thread&id=' . (int)$r['tid'])) . '">查看</a>' .
-            '<form method="post" action="' . e(u('a=admin_manual_restore')) . '" class="inline"><input type="hidden" name="rid" value="' . (int)$r['id'] . '">' . csrf_field() . '<button class="btn btn-primary btn-sm" type="submit">没问题，恢复</button></form>' .
-            '<form method="post" action="' . e(u('a=admin_manual_delete')) . '" class="inline" data-confirm="确认删除该内容？将通知作者。"><input type="hidden" name="rid" value="' . (int)$r['id'] . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">有问题，删除</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_manual_restore')) . '" class="inline"><input type="hidden" name="rid" value="' . (int)$r['id'] . '">' . csrf_field() . '<button class="btn btn-primary btn-sm" type="submit">' . t('没问题，恢复') . '</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_manual_delete')) . '" class="inline" data-confirm="确认删除该内容？将通知作者。"><input type="hidden" name="rid" value="' . (int)$r['id'] . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('有问题，删除') . '</button></form>' .
             '</div></div>';
     }
     echo '</div>';
@@ -747,8 +754,8 @@ function admin_tab_anns(): void
     echo '<div class="card form-card"><h2 class="card-title">' . ($edit ? '编辑公告 #' . $editId : '发布公告') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_ann_save')) . '">' . csrf_field() .
         '<input type="hidden" name="id" value="' . ($edit ? $editId : 0) . '">' .
-        '<label class="field"><span class="field-l">标题</span><input class="input" name="title" required maxlength="60" value="' . e((string)($edit['title'] ?? '')) . '"></label>' .
-        '<label class="field"><span class="field-l">内容</span><textarea class="input" name="content" rows="8" required maxlength="2000" placeholder="支持 Markdown：# 标题、**加粗**、- 列表、> 引用、| 表格 |、==高亮==、![图](https://...)">' . e((string)($edit['content'] ?? '')) . '</textarea></label>' .
+        '<label class="field"><span class="field-l">' . t('标题') . '</span><input class="input" name="title" required maxlength="60" value="' . e((string)($edit['title'] ?? '')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('内容') . '</span><textarea class="input" name="content" rows="8" required maxlength="2000" placeholder="支持 Markdown：# 标题、**加粗**、- 列表、> 引用、| 表格 |、==高亮==、![图](https://...)">' . e((string)($edit['content'] ?? '')) . '</textarea></label>' .
         '<div class="form-foot"><span class="muted">支持 Markdown：标题 / 加粗 / 斜体 / 删除线 / 高亮 / 列表 / 任务列表 / 表格 / 引用 / 代码块 / 链接 / 图片（https 外链）</span><button class="btn btn-primary" type="submit">' . ($edit ? '保存修改' : '发布') . '</button></div></form></div>';
 
     $anns = ann_all();
@@ -761,7 +768,7 @@ function admin_tab_anns(): void
             '<span class="muted">' . fmt_dt((int)$a['created']) . '</span></div>' .
             '<span class="row-ops">' .
             '<a class="btn btn-ghost btn-sm" href="' . e(u('p=admin&tab=anns&edit=' . (int)$a['id'])) . '">编辑</a>' .
-            '<form method="post" action="' . e(u('a=admin_ann_del')) . '" class="inline" data-confirm="确认删除该公告？"><input type="hidden" name="id" value="' . (int)$a['id'] . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">删除</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_ann_del')) . '" class="inline" data-confirm="确认删除该公告？"><input type="hidden" name="id" value="' . (int)$a['id'] . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('删除') . '</button></form>' .
             '</span></div>';
     }
     echo '</div></div>';
@@ -776,33 +783,33 @@ function admin_tab_theme(): void
     /* 网站图标（v1.14.0）：上传后立即生效，存储于 data/upload/（data/ 目录禁止 Web 直访，仅经 p=icon 受控输出） */
     $icon = (string)cfg('site_icon', '');
     $hasIcon = $icon !== '' && strpos($icon, '/') === false && is_file(DATA_DIR . '/upload/' . $icon);
-    echo '<div class="card form-card"><h2 class="card-title">网站图标（favicon）</h2>';
+    echo '<div class="card form-card"><h2 class="card-title">' . t('网站图标（favicon）') . '</h2>';
     echo '<div class="icon-current"><span class="icon-preview"><img src="' . e($hasIcon ? u('p=icon&v=' . (int)@filemtime(DATA_DIR . '/upload/' . $icon)) : ua('assets/favicon.svg')) . '" alt="当前网站图标" width="48" height="48"></span>' .
         '<span class="muted">' . ($hasIcon ? '当前为自定义图标：' . e($icon) : '当前为默认图标') . '</span>';
     if ($hasIcon) {
         echo '<form method="post" action="' . e(u('a=admin_icon_del')) . '" class="inline" data-confirm="确认恢复默认图标？">' . csrf_field() .
-            '<button class="btn btn-ghost btn-sm" type="submit">恢复默认</button></form>';
+            '<button class="btn btn-ghost btn-sm" type="submit">' . t('恢复默认') . '</button></form>';
     }
     echo '</div>';
     echo '<form method="post" action="' . e(u('a=admin_icon_upload')) . '" enctype="multipart/form-data">' . csrf_field() .
-        '<label class="field"><span class="field-l">上传新图标</span><input class="input" type="file" name="icon" accept=".png,.jpg,.jpeg,.webp,.gif,.ico,.svg" required>' .
+        '<label class="field"><span class="field-l">' . t('上传新图标') . '</span><input class="input" type="file" name="icon" accept=".png,.jpg,.jpeg,.webp,.gif,.ico,.svg" required>' .
         '<span class="hint">支持 PNG / JPG / WEBP / GIF / ICO / SVG；不超过 200KB，建议 256×256 以上；上传后浏览器可能需要强制刷新才能看到新图标</span></label>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">上传图标</button></div></form></div>';
-    echo '<div class="card form-card"><h2 class="card-title">颜色与页脚</h2><form method="post" action="' . e(u('a=admin_save_theme')) . '" data-ajax="1" data-ajax-live="accent">' . csrf_field() .
-        '<div class="field"><span class="field-l">主题色</span><div class="palette">';
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('上传图标') . '</button></div></form></div>';
+    echo '<div class="card form-card"><h2 class="card-title">' . t('颜色与页脚') . '</h2><form method="post" action="' . e(u('a=admin_save_theme')) . '" data-ajax="1" data-ajax-live="accent">' . csrf_field() .
+        '<div class="field"><span class="field-l">' . t('主题色') . '</span><div class="palette">';
     foreach ($palette as $p) {
         echo '<label class="swatch" style="background:' . e($p) . '"><input type="radio" name="theme_color" value="' . e($p) . '"' . (strcasecmp($cur, $p) === 0 ? ' checked' : '') . ' aria-label="' . e($p) . '"></label>';
     }
     echo '</div><input class="input" type="color" name="theme_color_custom" value="' . e(preg_match('/^#[0-9a-fA-F]{6}$/', $cur) ? $cur : '#0f766e') . '" style="max-width:120px"><span class="hint">色板或自定义颜色，保存后全局生效</span></div>' .
-        '<label class="field"><span class="field-l">深色模式默认值</span><select name="dark_default" class="input">' .
-        '<option value="system"' . ($dark === 'system' ? ' selected' : '') . '>跟随系统</option>' .
-        '<option value="light"' . ($dark === 'light' ? ' selected' : '') . '>浅色</option>' .
-        '<option value="dark"' . ($dark === 'dark' ? ' selected' : '') . '>深色</option>' .
+        '<label class="field"><span class="field-l">' . t('深色模式默认值') . '</span><select name="dark_default" class="input">' .
+        '<option value="system"' . ($dark === 'system' ? ' selected' : '') . '>' . t('跟随系统') . '</option>' .
+        '<option value="light"' . ($dark === 'light' ? ' selected' : '') . '>' . t('浅色') . '</option>' .
+        '<option value="dark"' . ($dark === 'dark' ? ' selected' : '') . '>' . t('深色') . '</option>' .
         '</select><span class="hint">用户仍可在右上角手动切换，选择会被记住</span></label>' .
-        '<label class="field"><span class="field-l">页脚文字（左侧，留空显示默认）</span><input class="input" name="footer_text" maxlength="120" placeholder="默认：' . e((string)cfg('site_name')) . ' · Cube Minimalist Forum v' . e(app_version()) . '" value="' . e((string)cfg('footer_text', '')) . '"></label>' .
-        '<label class="field"><span class="field-l">页脚备注（右侧，留空显示默认）</span><input class="input" name="footer_note" maxlength="120" placeholder="默认：纯文字 · 文件存储 · 无数据库" value="' . e((string)cfg('footer_note', '')) . '"></label>' .
-        '<label class="field"><span class="field-l">自定义样式（CSS）</span><textarea class="input" name="custom_css" rows="6" placeholder="/* 追加到页面尾部的自定义 CSS */">' . e((string)cfg('custom_css')) . '</textarea></label>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存主题设置</button></div></form></div>';
+        '<label class="field"><span class="field-l">' . t('页脚文字（左侧，留空显示默认）') . '</span><input class="input" name="footer_text" maxlength="120" placeholder="默认：' . e((string)cfg('site_name')) . ' · Cube Minimalist Forum v' . e(app_version()) . '" value="' . e((string)cfg('footer_text', '')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('页脚备注（右侧，留空显示默认）') . '</span><input class="input" name="footer_note" maxlength="120" placeholder="默认：纯文字 · 文件存储 · 无数据库" value="' . e((string)cfg('footer_note', '')) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('自定义样式（CSS）') . '</span><textarea class="input" name="custom_css" rows="6" placeholder="/* 追加到页面尾部的自定义 CSS */">' . e((string)cfg('custom_css')) . '</textarea></label>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存主题设置') . '</button></div></form></div>';
 }
 
 /* ---------------- 监控 ---------------- */
@@ -906,7 +913,7 @@ function admin_tab_monitor(): void
     echo '</div>';
     echo '<p class="hint">CPU 与内存读数优先来自系统接口（/proc）；被主机限制时 CPU 按系统负载估算、内存显示本 PHP 进程占用，不影响其他功能；磁盘为整块物理盘的用量。论坛自身占用见下方「存储占用」。</p></div>';
 
-    echo '<div class="card form-card"><h2 class="card-title">存储占用</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('存储占用') . '</h2>' .
         '<div class="flex" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">' .
         '<span>合计 <b>' . e(fmt_bytes($total)) . '</b> / 配额 ' . (int)cfg('quota_mb', 100) . 'MB</span>' .
         '<span class="muted">程序 ' . e(fmt_bytes($app)) . ' · 数据 ' . e(fmt_bytes($data)) . '</span></div>' .
@@ -918,7 +925,7 @@ function admin_tab_monitor(): void
         '上次自动检查：' . ((int)($st['last_check'] ?? 0) > 0 ? e(fmt_dt((int)$st['last_check'])) : '尚无记录（随访问每小时检查一次）') . '</p>' .
         $storeChart . '</div>';
 
-    echo '<div class="card form-card"><h2 class="card-title">服务器信息</h2><div class="mon-grid">' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('服务器信息') . '</h2><div class="mon-grid">' .
         '<div class="mon-cell"><b>v' . e(app_version()) . '</b><span>论坛版本</span></div>' .
         '<div class="mon-cell"><b>' . e($php['version']) . '</b><span>PHP 版本（' . e($php['sapi']) . '）</span></div>' .
         '<div class="mon-cell"><b>' . ($liveOn > 0 ? $liveOn . 's' : '关闭') . '</b><span>前台实时刷新间隔</span></div>' .
@@ -959,7 +966,7 @@ function admin_tab_monitor(): void
             $errTail = implode("\n", array_slice($lines, -12));
         }
     }
-    echo '<div class="card form-card"><h2 class="card-title">环境自检</h2><div class="mon-grid">';
+    echo '<div class="card form-card"><h2 class="card-title">' . t('环境自检') . '</h2><div class="mon-grid">';
     foreach ($dirChecks as $rel => $label) {
         $exists = is_dir(Store::path($rel));
         $ok = $exists ? Store::dirWritable($rel) : false;
@@ -984,7 +991,7 @@ function admin_tab_monitor(): void
             $badNames[] = $rel === '.' ? 'data/' : 'data/' . $rel . '/';
         }
         echo '<form method="post" action="' . e(u('a=admin_repair_dirs')) . '"><div class="form-foot">' . csrf_field() .
-            '<button class="btn btn-primary" type="submit">一键修复目录权限</button></div></form>' .
+            '<button class="btn btn-primary" type="submit">' . t('一键修复目录权限') . '</button></div></form>' .
             '<p class="hint">不可写：<b>' . e(implode('、', $badNames)) . '</b>。一键修复会依次尝试：创建缺失目录 → 修改权限（0775/0777）→ 重建空的失效目录（可救回属主不对的目录）。若修复后仍不可写，说明目录属主不属于 PHP 运行账号，请通过 FTP / 主机面板将 data/ 及其全部子目录权限设为 755 或 775。</p>';
     }
     if (!$dataW) {
@@ -992,7 +999,7 @@ function admin_tab_monitor(): void
     }
     echo '</div>';
 
-    echo '<div class="card form-card"><h2 class="card-title">内容规模</h2><div class="mon-grid">' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('内容规模') . '</h2><div class="mon-grid">' .
         '<div class="mon-cell"><b>' . $threads . '</b><span>帖子</span></div>' .
         '<div class="mon-cell"><b>' . $withReplies . '</b><span>有回复的帖</span></div>' .
         '<div class="mon-cell"><b>' . $users . '</b><span>用户</span></div>' .
@@ -1002,17 +1009,17 @@ function admin_tab_monitor(): void
         '</div></div>';
 
     $on = (int)cfg('monitor_on', 1) === 1;
-    echo '<div class="card form-card"><h2 class="card-title">监控与告警设置</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('监控与告警设置') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_save_monitor')) . '">' . csrf_field() .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">自动告警</span><select name="monitor_on" class="input">' .
-        '<option value="1"' . ($on ? ' selected' : '') . '>开启</option>' .
-        '<option value="0"' . (!$on ? ' selected' : '') . '>关闭</option></select></label>' .
-        '<label class="field"><span class="field-l">告警阈值（MB）</span><input class="input" name="monitor_mb" type="number" min="1" max="999" value="' . $th . '"></label>' .
-        '<label class="field"><span class="field-l">监控页实时刷新间隔（秒，0=关闭）</span><input class="input" name="monitor_interval" type="number" min="0" max="300" value="' . $monInt . '"><span class="hint">实时资源卡的自动刷新频率，建议 3～30 秒；0 为关闭以节省流量</span></label>' .
+        '<label class="field"><span class="field-l">' . t('自动告警') . '</span><select name="monitor_on" class="input">' .
+        '<option value="1"' . ($on ? ' selected' : '') . '>' . t('开启') . '</option>' .
+        '<option value="0"' . (!$on ? ' selected' : '') . '>' . t('关闭') . '</option></select></label>' .
+        '<label class="field"><span class="field-l">' . t('告警阈值（MB）') . '</span><input class="input" name="monitor_mb" type="number" min="1" max="999" value="' . $th . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('监控页实时刷新间隔（秒，0=关闭）') . '</span><input class="input" name="monitor_interval" type="number" min="0" max="300" value="' . $monInt . '"><span class="hint">实时资源卡的自动刷新频率，建议 3～30 秒；0 为关闭以节省流量</span></label>' .
         '</div>' .
         '<div class="form-foot"><button class="btn btn-ghost" type="button" data-admin-test="monitor">发送测试告警邮件</button>' .
-        '<button class="btn btn-primary" type="submit">保存监控设置</button></div>' .
+        '<button class="btn btn-primary" type="submit">' . t('保存监控设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
         '<p class="hint">总占用（程序 + 数据）超过阈值时自动给全部管理员发告警邮件。检查随论坛访问进行（每小时至多一次）；持续超限时每 6 小时提醒一次，回落到阈值下后自动重置。告警通过后台「邮件」中配置的 SMTP 发送。</p></div>';
 }
@@ -1032,7 +1039,7 @@ function admin_tab_system(array $me): void
     }
     $backups = array_reverse(Store::scan('backup'));
 
-    echo '<div class="card form-card"><h2 class="card-title">系统信息</h2><div class="stat-row">' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('系统信息') . '</h2><div class="stat-row">' .
         '<div class="stat"><b>v' . e(app_version()) . '</b><span>论坛版本</span></div>' .
         '<div class="stat"><b>' . e(PHP_VERSION) . '</b><span>PHP 版本</span></div>' .
         '<div class="stat"><b>' . e(fmt_bytes($appSize)) . '</b><span>程序体积</span></div>' .
@@ -1043,9 +1050,9 @@ function admin_tab_system(array $me): void
         '</div>' .
         '<p class="hint">程序本体限制 ≤ 10MB；数据目录随使用增长，建议定期「一键备份」并下载留存；升级请到「更新升级」上传更新包。</p></div>';
 
-    echo '<div class="card form-card"><h2 class="card-title">数据备份</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('数据备份') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_backup')) . '" class="inline">' . csrf_field() .
-        '<button class="btn btn-primary" type="submit">一键备份数据目录</button></form>' .
+        '<button class="btn btn-primary" type="submit">' . t('一键备份数据目录') . '</button></form>' .
         '<p class="hint">打包 data/ 目录（不含缓存与本次备份），保留最近 5 份，存于 data/backup/。</p>' .
         '<div class="admin-list">';
     if (!$backups) {
@@ -1058,12 +1065,12 @@ function admin_tab_system(array $me): void
             '<a class="btn btn-ghost btn-sm" href="' . e(u('a=admin_backup_dl&id=' . e($b))) . '">下载</a>' .
             '<form method="post" action="' . e(u('a=admin_backup_del')) . '" class="inline" data-confirm="确认删除该备份包？删除后不可恢复。">' . csrf_field() . hidden_back() .
             '<input type="hidden" name="id" value="' . e($b) . '">' .
-            '<button class="btn btn-danger btn-sm" type="submit">删除</button></form>' .
+            '<button class="btn btn-danger btn-sm" type="submit">' . t('删除') . '</button></form>' .
             '</span></div>';
     }
     echo '</div></div>';
     /* v1.16.0 存量数据一键压缩 */
-    echo '<div class="card form-card"><h2 class="card-title">数据占用压缩</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('数据占用压缩') . '</h2>' .
         '<p class="muted">v1.16.0 起新写入的数据文件均为 gzip 压缩格式（中文数据体积约省一半以上）；此按钮可把存量明文数据一次性转为压缩格式。</p>' .
         '<form method="post" action="' . e(u('a=admin_data_compress')) . '" class="inline-form">' . csrf_field() .
         '<button class="btn btn-primary" type="submit" data-confirm="遍历并压缩所有数据文件？数据内容不会变化，仅重新压缩存储。">一键压缩存量数据</button>' .
@@ -1075,18 +1082,18 @@ function admin_tab_system(array $me): void
 function admin_tab_logs(): void
 {
     [$lf, $lb] = log_stats();
-    echo '<div class="card form-card"><div class="list-head"><h2 class="card-title">日志设置</h2>' .
+    echo '<div class="card form-card"><div class="list-head"><h2 class="card-title">' . t('日志设置') . '</h2>' .
         '<span class="muted">共 ' . $lf . ' 个日志文件 · ' . e(fmt_bytes($lb)) . '</span></div>' .
         '<form method="post" action="' . e(u('a=admin_logs_settings')) . '" class="inline-form" data-ajax="1">' . csrf_field() .
-        '<label class="field"><span class="field-l">日志保留天数（0 = 永久）</span><input class="input" type="number" name="log_days" min="0" max="3650" value="' . (int)cfg('log_days', 90) . '" style="max-width:170px"></label>' .
-        '<label class="field"><span class="field-l">记录页面访问（含游客）</span><select class="input" name="log_views" style="max-width:170px">' .
-        '<option value="0"' . ((int)cfg('log_views', 0) === 0 ? ' selected' : '') . '>关闭</option>' .
-        '<option value="1"' . ((int)cfg('log_views', 0) === 1 ? ' selected' : '') . '>开启</option></select></label>' .
-        '<button class="btn btn-primary" type="submit">保存设置</button></form>' .
+        '<label class="field"><span class="field-l">' . t('日志保留天数（0 = 永久）') . '</span><input class="input" type="number" name="log_days" min="0" max="3650" value="' . (int)cfg('log_days', 90) . '" style="max-width:170px"></label>' .
+        '<label class="field"><span class="field-l">' . t('记录页面访问（含游客）') . '</span><select class="input" name="log_views" style="max-width:170px">' .
+        '<option value="0"' . ((int)cfg('log_views', 0) === 0 ? ' selected' : '') . '>' . t('关闭') . '</option>' .
+        '<option value="1"' . ((int)cfg('log_views', 0) === 1 ? ' selected' : '') . '>' . t('开启') . '</option></select></label>' .
+        '<button class="btn btn-primary" type="submit">' . t('保存设置') . '</button></form>' .
         '<form method="post" action="' . e(u('a=admin_logs_clear')) . '" class="inline" data-confirm="确认清理过期日志？">' . csrf_field() .
-        '<button class="btn btn-ghost btn-sm" type="submit">立即清理过期日志</button></form>' .
+        '<button class="btn btn-ghost btn-sm" type="submit">' . t('立即清理过期日志') . '</button></form>' .
         '<form method="post" action="' . e(u('a=admin_logs_export')) . '" class="inline" data-confirm="将导出全部操作日志、防火墙事件与运行错误为 TXT 文件（日志较多时可能需要数十秒），继续？">' . csrf_field() .
-        '<button class="btn btn-primary btn-sm" type="submit">⬇ 一键导出全部日志（TXT）</button></form>' .
+        '<button class="btn btn-primary btn-sm" type="submit">' . t('⬇ 一键导出全部日志（TXT）') . '</button></form>' .
         '<p class="hint">日志按天存放于 data/logs/（守卫保护，无法被直接访问）；超过保留天数的文件会在每天首次写日志时自动清理；日志总量上限 20MB，超出时从最旧删起。导出内容包含：全部操作日志、全部防火墙事件日志、运行错误日志（尾部 200 行），流式生成不占内存，TXT 可直接用记事本 / Excel 打开。</p></div>';
 
     $files = log_files();
@@ -1101,7 +1108,7 @@ function admin_tab_logs(): void
     $total = 0;
     $rows = log_read($date, $per, $page, $qUser, $qAction, $total);
 
-    echo '<div class="card form-card"><h2 class="card-title">查询日志</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('查询日志') . '</h2>' .
         '<form method="get" action="' . e(u('')) . '" class="inline-form">' .
         '<input type="hidden" name="p" value="admin"><input type="hidden" name="tab" value="logs">' .
         '<select name="date" class="input input-sm">';
@@ -1114,12 +1121,12 @@ function admin_tab_logs(): void
     }
     echo '</select>' .
         '<input class="input input-sm" name="quser" value="' . e($qUser) . '" placeholder="用户名或 IP">' .
-        '<select name="qaction" class="input input-sm"><option value="">全部动作</option>';
+        '<select name="qaction" class="input input-sm"><option value="">' . t('全部动作') . '</option>';
     foreach (LOG_ACTIONS as $k => $v) {
         echo '<option value="' . e($k) . '"' . ($k === $qAction ? ' selected' : '') . '>' . e($v) . '</option>';
     }
     echo '</select>' .
-        '<button class="btn btn-ghost btn-sm" type="submit">筛选</button></form>';
+        '<button class="btn btn-ghost btn-sm" type="submit">' . t('筛选') . '</button></form>';
 
     $logActStats = log_action_stats($date, 10);
     if ($logActStats) {
@@ -1159,20 +1166,20 @@ function admin_tab_update(): void
 {
     $cur = app_version();
     $his = update_history();
-    echo '<div class="card form-card"><h2 class="card-title">当前版本</h2><div class="stat-row">' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('当前版本') . '</h2><div class="stat-row">' .
         '<div class="stat"><b>v' . e($cur) . '</b><span>当前版本</span></div>' .
         '<div class="stat"><b>v' . e(MF_VERSION) . '</b><span>程序内置版本</span></div>' .
         '<div class="stat"><b>' . count($his) . '</b><span>已安装更新包</span></div>' .
         '</div>' .
         '<p class="hint">「程序内置版本」表示当前部署的代码版本；「当前版本」会随更新包安装自动前进。若通过更新包升级，二者可以不同（以「当前版本」为准，数据不会丢失）。</p></div>';
 
-    echo '<div class="card form-card"><h2 class="card-title">上传更新包</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('上传更新包') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_update')) . '" enctype="multipart/form-data" data-confirm="确认安装该更新包？安装前会自动备份当前程序文件。">' . csrf_field() .
-        '<label class="field"><span class="field-l">更新包（.zip，由开发者提供，内含 update.json）</span><input class="input" type="file" name="pkg" accept=".zip" required></label>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">上传并安装更新</button></div></form>' .
+        '<label class="field"><span class="field-l">' . t('更新包（.zip，由开发者提供，内含 update.json）') . '</span><input class="input" type="file" name="pkg" accept=".zip" required></label>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('上传并安装更新') . '</button></div></form>' .
         '<p class="hint">安装流程：① 自动备份当前程序文件到 data/backup/ → ② 覆盖变更文件 → ③ 执行数据迁移脚本 → ④ 版本号前进。<b>data/ 数据目录永远不会被更新包改动</b>；完成后刷新页面即可，<b>无需重新安装、数据不丢</b>。若 php.ini 限制了上传大小，请调大 upload_max_filesize / post_max_size。</p></div>';
 
-    echo '<div class="card form-card"><h2 class="card-title">更新历史</h2><div class="admin-list">';
+    echo '<div class="card form-card"><h2 class="card-title">' . t('更新历史') . '</h2><div class="admin-list">';
     if (!$his) {
         echo empty_state('还没有安装过更新包（完整安装包部署的站点从当前版本直接开始）');
     }
@@ -1191,25 +1198,25 @@ function admin_tab_update(): void
 function admin_tab_security(): void
 {
     /* ================= v1.20.0：账号安全（登录设备 / 二次验证 / 并发上限） ================= */
-    echo '<div class="card form-card"><h2 class="card-title">账号安全 · 登录设备管理</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('账号安全 · 登录设备管理') . '</h2>' .
         '<form data-admin-save="security">' .
         '<b class="ai-sub">新设备登录防护与同时在线设备数量</b>' .
         '<label class="check"><input type="hidden" name="dev_verify" value="0"><input type="checkbox" name="dev_verify" value="1"' . ((int)cfg('dev_verify', 0) === 1 ? ' checked' : '') . '> <b>新设备二次验证（全站总闸）</b> —— 开启后，所有用户在新设备登录时都必须先输入邮箱验证码（发送至注册邮箱，5 分钟有效）；关闭时用户仍可在「个人设置 → 登录设备」自行开启。验证码邮件无法发送时（如 SMTP 未配置）自动降级放行并留痕，不会把用户挡在门外</label>' .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">同一账号同时在线设备上限（台）</span><input class="input" name="sess_max" type="number" min="1" max="50" value="' . dev_cfg_max() . '"><span class="hint">1-50，默认 10；超出时最早登录的设备被自动下线，当前正在使用的设备永远保留</span></label>' .
+        '<label class="field"><span class="field-l">' . t('同一账号同时在线设备上限（台）') . '</span><input class="input" name="sess_max" type="number" min="1" max="50" value="' . dev_cfg_max() . '"><span class="hint">1-50，默认 10；超出时最早登录的设备被自动下线，当前正在使用的设备永远保留</span></label>' .
         '</div>' .
         '<p class="hint">每次登录都会记录设备名称、IP 与归属地（用户可在「个人设置 → 登录设备」查看并一键下线任意设备）；新设备登录成功后系统自动发送站内提醒，引导用户修改密码与下线设备。被下线的设备 30 天内无法借助「保持登录」静默重登，但用密码主动登录视为本人操作。</p>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="button" data-admin-save="security">保存账号安全设置</button></div>' .
         '<span class="test-msg muted"></span></form></div>';
 
     /* ================= v1.16.0：AI 自主防护（严全面模式）—— 从「AI」页移入本页（本质是安全防护功能） ================= */
-    echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">AI 自主防护（严全面模式）</h2>' .
+    echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">' . t('AI 自主防护（严全面模式）') . '</h2>' .
         '<form>' .
         '<b class="ai-sub">无人值守时让 AI 全自主值守论坛</b>' .
         '<label class="check"><input type="hidden" name="ai_autopilot" value="0"><input type="checkbox" name="ai_autopilot" value="1"' . (!empty(cfg('ai_autopilot')) ? ' checked' : '') . '> <b>AI 自主管理</b> —— 授权 AI 无人值守时自主巡逻论坛：分析风险 IP 与关键日志，<b>自主封禁恶意 IP / 解除误封 / 邮件警报管理员</b>。所有动作强制白名单校验：只能封本次材料中出现过的风险 IP、保护名单免疫、单轮封禁≤上限、管理员手动封禁不可解，全部留痕可撤销。巡逻节奏：常驻巡逻器（php daemon.php）在线时按间隔主动巡，否则由访客访问惰性触发（有风险事件才调用 AI，零浪费）</label>' .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">巡逻间隔（分钟）</span><input class="input" name="ai_patrol_interval" type="number" min="2" max="360" value="' . ai_patrol_interval() . '"><span class="hint">每次巡逻至少间隔（2-360，默认 15）；间隔越短响应越快，无事件时零消耗</span></label>' .
-        '<label class="field"><span class="field-l">单轮封禁上限（个）</span><input class="input" name="ai_patrol_ban_limit" type="number" min="1" max="10" value="' . ai_patrol_ban_limit() . '"><span class="hint">AI 一轮巡逻最多封禁的 IP 数（1-10，默认 3，红线防滥杀）</span></label>' .
+        '<label class="field"><span class="field-l">' . t('巡逻间隔（分钟）') . '</span><input class="input" name="ai_patrol_interval" type="number" min="2" max="360" value="' . ai_patrol_interval() . '"><span class="hint">每次巡逻至少间隔（2-360，默认 15）；间隔越短响应越快，无事件时零消耗</span></label>' .
+        '<label class="field"><span class="field-l">' . t('单轮封禁上限（个）') . '</span><input class="input" name="ai_patrol_ban_limit" type="number" min="1" max="10" value="' . ai_patrol_ban_limit() . '"><span class="hint">AI 一轮巡逻最多封禁的 IP 数（1-10，默认 3，红线防滥杀）</span></label>' .
         '</div>' .
         '<label class="check"><input type="hidden" name="ai_patrol_alert" value="0"><input type="checkbox" name="ai_patrol_alert" value="1"' . (!empty(cfg('ai_patrol_alert', 1)) ? ' checked' : '') . '> <b>允许 AI 发邮件警报</b> —— 巡逻发现严重态势（持续攻击、封禁激增、审核服务异常）时给管理员发邮件（30 分钟节流，轻微事件不打扰）</label>' .
         '<div class="form-foot"><button class="btn btn-primary" type="button" data-admin-save="ai">保存自主防护设置</button></div>' .
@@ -1232,7 +1239,7 @@ function admin_tab_security(): void
         $modeBadge = '<span class="badge">⚪ 未启用</span>';
         $modeHint = '在上方勾选「AI 自主管理」并保存后开始巡逻';
     }
-    echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">AI 自主管理 · 巡逻状态与最近报告</h2>' .
+    echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">' . t('AI 自主管理 · 巡逻状态与最近报告') . '</h2>' .
         '<div class="ai-patrol-head">' . $modeBadge .
         '<span class="hint">上次巡逻：' . ($lastT > 0 ? e(date('m-d H:i', $lastT)) . '（' . e(fmt_time($lastT)) . '）' : '尚未巡逻')
         . ' · 间隔 ' . ai_patrol_interval() . ' 分钟 · 单轮封禁上限 ' . ai_patrol_ban_limit() . '</span>' .
@@ -1268,14 +1275,14 @@ function admin_tab_security(): void
     if ($phpBin === '' && defined('PHP_BINARY') && PHP_BINARY !== '') {
         $phpBin = PHP_BINARY; // 当前 CLI/CGI 的 PHP 可执行文件路径作为合理默认
     }
-    echo '<div class="card form-card"><h2 class="card-title">常驻巡逻器（daemon.php）</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('常驻巡逻器（daemon.php）') . '</h2>' .
         '<div class="ai-patrol-head">' .
         ($dAlive
             ? '<span class="badge badge-ok">🟢 在线</span><span class="hint">正在值守，每 60 秒写一次心跳</span>'
             : '<span class="badge">⚪ 不在线</span><span class="hint">论坛自动退回「访客触发」巡逻模式，功能完全一致</span>') .
         '</div>' .
         '<form method="post" action="' . e(u('a=admin_daemon_start')) . '" data-confirm="尝试在本机后台启动 daemon.php？需要主机允许 PHP 创建常驻进程（虚拟主机通常不允许）。">' . csrf_field() .
-        '<label class="field"><span class="field-l">PHP 命令行路径</span><input class="input" name="php_bin" maxlength="200" placeholder="如 /usr/bin/php 或 C:\\php\\php.exe" value="' . e($phpBin) . '">' .
+        '<label class="field"><span class="field-l">' . t('PHP 命令行路径') . '</span><input class="input" name="php_bin" maxlength="200" placeholder="如 /usr/bin/php 或 C:\\php\\php.exe" value="' . e($phpBin) . '">' .
         '<span class="hint">SSH 执行 which php 可查；保存后用于「一键启动」。主机不允许创建进程时，请手动执行：nohup php daemon.php &gt;/dev/null 2&gt;&amp;1 &amp;</span></label>' .
         '<div class="form-foot">' .
         '<button class="btn btn-primary" type="submit"' . ($dAlive ? ' disabled title="巡逻器已在线"' : '') . '>一键启动</button>' .
@@ -1304,7 +1311,7 @@ function admin_tab_security(): void
     $trendBlock = $trendHtml !== ''
         ? '<h3 class="chart-title">近 14 天请求 / 拦截趋势</h3>' . $trendHtml
         : '<p class="muted" style="margin:12px 0 0">暂无趋势数据（随访问自动聚合，最多保留 14 天）</p>';
-    echo '<div class="card form-card"><h2 class="card-title">防护总览</h2><div class="stat-row">' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('防护总览') . '</h2><div class="stat-row">' .
         '<div class="stat"><b>' . (int)($today['req'] ?? 0) . '</b><span>今日请求</span></div>' .
         '<div class="stat"><b style="color:var(--danger)">' . (int)($today['blocked'] ?? 0) . '</b><span>今日拦截</span></div>' .
         '<div class="stat"><b>' . (int)($today['bans'] ?? 0) . '</b><span>今日新增封禁</span></div>' .
@@ -1314,10 +1321,10 @@ function admin_tab_security(): void
         '</div>' .
         '<div class="chart-block">' . $trendBlock . '</div>' .
         '<form method="post" action="' . e(u('a=admin_fw_on')) . '" class="inline-form">' . csrf_field() .
-        '<label class="field" style="max-width:260px"><span class="field-l">防火墙总开关</span><select name="fw_on" class="input">' .
-        '<option value="1"' . ($on ? ' selected' : '') . '>开启（推荐）</option>' .
-        '<option value="0"' . (!$on ? ' selected' : '') . '>关闭（仅统计不拦截）</option></select></label>' .
-        '<button class="btn btn-primary" type="submit">保存总开关</button></form>' .
+        '<label class="field" style="max-width:260px"><span class="field-l">' . t('防火墙总开关') . '</span><select name="fw_on" class="input">' .
+        '<option value="1"' . ($on ? ' selected' : '') . '>' . t('开启（推荐）') . '</option>' .
+        '<option value="0"' . (!$on ? ' selected' : '') . '>' . t('关闭（仅统计不拦截）') . '</option></select></label>' .
+        '<button class="btn btn-primary" type="submit">' . t('保存总开关') . '</button></form>' .
         '<p class="hint">此表单<b>只切换总开关</b>，不会改动下方「限流与自动策略 / 白名单 / 真实 IP 识别」等任何其他设置。五道防线依次执行：白名单 → 封禁名单 → 危险 IP 库 → 限流 → 自动策略。已登录的管理员不受拦截；危险 IP 库数据来自公开威胁情报源，误判时可把对方 IP 加入白名单。</p></div>';
 
     /* ---- 攻击告警（多次拦截 → 自动邮件通知管理员，v1.9.0） ---- */
@@ -1332,37 +1339,37 @@ function admin_tab_security(): void
     } else {
         $atkLast = '尚未触发过。';
     }
-    echo '<div class="card form-card"><h2 class="card-title">攻击告警（自动邮件）</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('攻击告警（自动邮件）') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_save_attack')) . '" data-ajax="1">' . csrf_field() .
         '<div class="grid2">' .
-        '<label class="field"><span class="field-l">攻击告警邮件</span><select name="fw_atk_alert_on" class="input">' .
-        '<option value="1"' . ($atkOn ? ' selected' : '') . '>开启（推荐）</option>' .
-        '<option value="0"' . (!$atkOn ? ' selected' : '') . '>关闭</option></select></label>' .
+        '<label class="field"><span class="field-l">' . t('攻击告警邮件') . '</span><select name="fw_atk_alert_on" class="input">' .
+        '<option value="1"' . ($atkOn ? ' selected' : '') . '>' . t('开启（推荐）') . '</option>' .
+        '<option value="0"' . (!$atkOn ? ' selected' : '') . '>' . t('关闭') . '</option></select></label>' .
         '<label class="field"><span class="field-l">触发阈值（' . FW_ATK_WIN_MIN . ' 分钟内被拦截次数）</span><input class="input" type="number" name="fw_atk_alert_n" min="5" max="10000" value="' . $atkN . '"></label>' .
-        '<label class="field"><span class="field-l">告警冷却（分钟）</span><input class="input" type="number" name="fw_atk_alert_cool" min="5" max="1440" value="' . $atkCool . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('告警冷却（分钟）') . '</span><input class="input" type="number" name="fw_atk_alert_cool" min="5" max="1440" value="' . $atkCool . '"></label>' .
         '</div>' .
         '<div class="form-foot"><button class="btn btn-ghost" type="button" data-admin-test="attack">发送测试告警邮件</button>' .
-        '<button class="btn btn-primary" type="submit">保存攻击告警设置</button></div>' .
+        '<button class="btn btn-primary" type="submit">' . t('保存攻击告警设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
         '<p class="hint">开启后，' . FW_ATK_WIN_MIN . ' 分钟窗口内防火墙拦截（限流 429 / 封禁名单 / 危险 IP 库 / 自动策略自动封禁均计入）累计达到阈值，即自动向全部管理员邮箱发送告警：含今日拦截与请求统计、事件最多的来源 IP Top5、最近事件摘要与处置建议；冷却期内不重复发送，实际发信在响应完成后进行（绝不拖慢站点）。' . $atkLast .
         '邮件经后台「邮件」页配置的 SMTP 发送，收件人为全部管理员账号的邮箱。</p></div>';
 
     /* ---- 防护设置（限流 / 策略 / 白名单 / 代理） ---- */
-    echo '<div class="card form-card"><h2 class="card-title">限流与自动策略</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('限流与自动策略') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_fw_save')) . '" data-ajax="1">' . csrf_field() .
         '<input type="hidden" name="fw_on" value="' . ($on ? '1' : '0') . '">';
     echo '<div class="grid2">';
-    echo '<label class="field"><span class="field-l">访问限流</span><select name="fw_rl_on" class="input">' .
-        '<option value="1"' . ($rlOn ? ' selected' : '') . '>开启</option><option value="0"' . (!$rlOn ? ' selected' : '') . '>关闭</option></select></label>';
-    echo '<label class="field"><span class="field-l">每 IP 每分钟请求上限</span><input class="input" type="number" name="fw_rl_pm" min="5" max="10000" value="' . (int)cfg('fw_rl_pm', 60) . '"><span class="hint">超限返回 429；登录管理员不受限</span></label>';
+    echo '<label class="field"><span class="field-l">' . t('访问限流') . '</span><select name="fw_rl_on" class="input">' .
+        '<option value="1"' . ($rlOn ? ' selected' : '') . '>' . t('开启') . '</option><option value="0"' . (!$rlOn ? ' selected' : '') . '>' . t('关闭') . '</option></select></label>';
+    echo '<label class="field"><span class="field-l">' . t('每 IP 每分钟请求上限') . '</span><input class="input" type="number" name="fw_rl_pm" min="5" max="10000" value="' . (int)cfg('fw_rl_pm', 60) . '"><span class="hint">超限返回 429；登录管理员不受限</span></label>';
     $rlBan = (int)cfg('fw_rl_ban_min', 0);
-    echo '<label class="field"><span class="field-l">超限自动临时封禁（分钟，0=只限流不封）</span><input class="input" type="number" name="fw_rl_ban_min" min="0" max="1440" value="' . $rlBan . '"></label>';
-    echo '<label class="field"><span class="field-l">自动策略引擎</span><select name="fw_score_on" class="input">' .
-        '<option value="1"' . ($scOn ? ' selected' : '') . '>开启</option><option value="0"' . (!$scOn ? ' selected' : '') . '>关闭</option></select></label>';
-    echo '<label class="field"><span class="field-l">自动封禁风险阈值</span><input class="input" type="number" name="fw_score_threshold" min="20" max="10000" value="' . (int)cfg('fw_score_threshold', 100) . '"><span class="hint">10 分钟窗口内风险分累计达到阈值即自动封禁</span></label>';
-    echo '<label class="field"><span class="field-l">自动封禁时长（小时）</span><input class="input" type="number" name="fw_auto_ban_hours" min="1" max="720" value="' . (int)cfg('fw_auto_ban_hours', 24) . '"></label>';
+    echo '<label class="field"><span class="field-l">' . t('超限自动临时封禁（分钟，0=只限流不封）') . '</span><input class="input" type="number" name="fw_rl_ban_min" min="0" max="1440" value="' . $rlBan . '"></label>';
+    echo '<label class="field"><span class="field-l">' . t('自动策略引擎') . '</span><select name="fw_score_on" class="input">' .
+        '<option value="1"' . ($scOn ? ' selected' : '') . '>' . t('开启') . '</option><option value="0"' . (!$scOn ? ' selected' : '') . '>' . t('关闭') . '</option></select></label>';
+    echo '<label class="field"><span class="field-l">' . t('自动封禁风险阈值') . '</span><input class="input" type="number" name="fw_score_threshold" min="20" max="10000" value="' . (int)cfg('fw_score_threshold', 100) . '"><span class="hint">10 分钟窗口内风险分累计达到阈值即自动封禁</span></label>';
+    echo '<label class="field"><span class="field-l">' . t('自动封禁时长（小时）') . '</span><input class="input" type="number" name="fw_auto_ban_hours" min="1" max="720" value="' . (int)cfg('fw_auto_ban_hours', 24) . '"></label>';
     echo '</div>';
-    echo '<div class="field"><span class="field-l">内置策略规则（可单独开关）</span><div class="check-grid">';
+    echo '<div class="field"><span class="field-l">' . t('内置策略规则（可单独开关）') . '</span><div class="check-grid">';
     $rules = [
         'fw_r_empty_ua'  => ['空 UA 请求（+40 分）', 1],
         'fw_r_script_ua' => ['脚本 / 攻击工具 UA（+50 分）', 1],
@@ -1380,7 +1387,7 @@ function admin_tab_security(): void
         echo '<label class="check"><input type="checkbox" name="' . $k . '" value="1"' . ($val ? ' checked' : '') . '> ' . e($v[0]) . '</label>';
     }
     echo '</div></div>';
-    echo '<label class="field"><span class="field-l">IP 白名单（逗号或换行分隔，支持网段 1.2.3.0/24；命中后跳过一切拦截）</span>' .
+    echo '<label class="field"><span class="field-l">' . t('IP 白名单（逗号或换行分隔，支持网段 1.2.3.0/24；命中后跳过一切拦截）') . '</span>' .
         '<textarea class="input" name="fw_whitelist" rows="2" placeholder="如：203.0.113.7, 198.51.100.0/24">' . e((string)cfg('fw_whitelist', '')) . '</textarea>' .
         '<span class="hint">你当前的 IP：<b>' . e(fw_ip()) . '</b>（建议加入白名单，避免自己被误拦）</span></label>';
 
@@ -1393,7 +1400,7 @@ function admin_tab_security(): void
         'direct'     => ['直连', 'badge-ok'],
     ];
     [$modeName, $modeBadge] = $modeMap[$link['mode']] ?? [$link['mode'], ''];
-    echo '<div class="field"><span class="field-l">真实 IP 识别（当前请求链路诊断）</span>' .
+    echo '<div class="field"><span class="field-l">' . t('真实 IP 识别（当前请求链路诊断）') . '</span>' .
         '<div class="admin-list" style="margin:6px 0 4px">' .
         '<div class="admin-row"><div class="u-info"><b>' . e($modeName) . '</b>' .
         '<span class="muted">REMOTE_ADDR（TCP 对端）=' . e($link['remote'] !== '' ? $link['remote'] : '—') .
@@ -1401,11 +1408,11 @@ function admin_tab_security(): void
         ($link['xff'] !== '' ? '；X-Forwarded-For=' . e(cut_str($link['xff'], 80)) : '') . '</span></div>' .
         '<span class="badge ' . $modeBadge . '">识别 IP：' . e($link['resolved'] !== '' ? $link['resolved'] : '未知') . '</span></div>' .
         '</div></div>';
-    echo '<label class="check"><input type="checkbox" name="fw_trust_cf" value="1"' . ((int)cfg('fw_trust_cf', 1) === 1 ? ' checked' : '') . '> Cloudflare CDN 适配（推荐开启：自动识别 Cloudflare 官方网段，从 CF-Connecting-IP 取真实访客 IP）</label>' .
+    echo '<label class="check"><input type="checkbox" name="fw_trust_cf" value="1"' . ((int)cfg('fw_trust_cf', 1) === 1 ? ' checked' : '') . '>' . t(' Cloudflare CDN 适配（推荐开启：自动识别 Cloudflare 官方网段，从 CF-Connecting-IP 取真实访客 IP）') . '</label>' .
         '<span class="hint">开启后，仅当请求的 TCP 对端确属 Cloudflare 官方网段（v4 + IPv6 共 22 条，内置）才信任 CF-Connecting-IP 头，直连伪造无效——限流、封禁、访问统计、IP 归属地全部基于真实 IP，避免「同节点访客被集体限流 / 自动封禁误封 Cloudflare 节点导致整站 403」。未使用 Cloudflare 时此开关无任何影响。</span>' .
-        '<label class="check" style="margin-top:8px"><input type="checkbox" name="fw_trust_xff" value="1"' . ((int)cfg('fw_trust_xff', 0) === 1 ? ' checked' : '') . '> 站点在反向代理 / 其他 CDN 之后（信任 X-Forwarded-For）</label>' .
+        '<label class="check" style="margin-top:8px"><input type="checkbox" name="fw_trust_xff" value="1"' . ((int)cfg('fw_trust_xff', 0) === 1 ? ' checked' : '') . '>' . t(' 站点在反向代理 / 其他 CDN 之后（信任 X-Forwarded-For）') . '</label>' .
         '<span class="hint">宝塔反代、其他不带真实 IP 头的 CDN 等场景开启（从 X-Forwarded-For 首段取 IP）；套在 Cloudflare 之前时会自动优先用更可信的 CF-Connecting-IP。直接暴露的服务器请勿开启，否则可被伪造头绕过限流。</span>' .
-        '<label class="field" style="margin-top:8px"><span class="field-l">Cloudflare 网段覆盖（可选，留空 = 使用程序内置 CF 官方网段）</span>' .
+        '<label class="field" style="margin-top:8px"><span class="field-l">' . t('Cloudflare 网段覆盖（可选，留空 = 使用程序内置 CF 官方网段）') . '</span>' .
         '<textarea class="input" name="fw_cf_ranges" rows="2" placeholder="如 Cloudflare 官方调整网段，可在此填入：104.16.0.0/13, 2606:4700::/32">' . e((string)cfg('fw_cf_ranges', '')) . '</textarea>' .
         '<span class="hint">逗号 / 空白分隔，支持 IPv4 与 IPv6 CIDR；仅当 CF 官方发布新网段而程序未跟进时才需要填写。</span></label>';
     echo '<details style="margin-top:6px"><summary class="muted">Cloudflare 接入推荐配置（点开查看）</summary>' .
@@ -1416,12 +1423,12 @@ function admin_tab_security(): void
         '④ <b>速率限制 / WAF</b>：可按需在 CF 面板加一层，但建议阈值放宽，程序内置防火墙已按真实 IP 限流；<br>' .
         '⑤ <b>「我正在被攻击」模式</b>：开启后人机验证可能拦截发帖与登录，仅在遭遇攻击时短期使用；<br>' .
         '⑥ 本程序无需任何 CF 侧配置即可取到真实 IP——装上本版本即自动生效，后台上方诊断卡可随时核验。</div></details>';
-    echo '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存防护设置</button></div></form></div>';
+    echo '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存防护设置') . '</button></div></form></div>';
 
     /* ---- 危险 IP 库 ---- */
     $synced = (int)$intel['synced'];
     $stale = $synced > 0 && $synced < time() - max(1, (int)cfg('fw_intel_hours', 24)) * 3600;
-    echo '<div class="card form-card"><h2 class="card-title">危险 IP 库（威胁情报）</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('危险 IP 库（威胁情报）') . '</h2>' .
         '<div class="mon-grid">' .
         '<div class="mon-cell' . ((int)$intel['total'] > 0 ? '' : ' cell-bad') . '"><b>' . (int)$intel['total'] . '</b><span>已入库条数</span></div>' .
         '<div class="mon-cell"><b>' . ($synced > 0 ? e(fmt_dt($synced)) : '未同步') . '</b><span>上次同步' . ($stale ? '（已过期，建议同步）' : '') . '</span></div>' .
@@ -1440,24 +1447,24 @@ function admin_tab_security(): void
         echo '</div>';
     }
     echo '<form method="post" action="' . e(u('a=admin_fw_intel_save')) . '" data-ajax="1">' . csrf_field() . '<div class="grid2">';
-    echo '<label class="field"><span class="field-l">危险 IP 库拦截</span><select name="fw_intel_on" class="input">' .
-        '<option value="1"' . ((int)cfg('fw_intel_on', 1) === 1 ? ' selected' : '') . '>开启</option><option value="0"' . ((int)cfg('fw_intel_on', 1) !== 1 ? ' selected' : '') . '>关闭</option></select></label>';
-    echo '<label class="field"><span class="field-l">自动同步间隔（小时）</span><input class="input" type="number" name="fw_intel_hours" min="1" max="168" value="' . (int)cfg('fw_intel_hours', 24) . '"></label>';
+    echo '<label class="field"><span class="field-l">' . t('危险 IP 库拦截') . '</span><select name="fw_intel_on" class="input">' .
+        '<option value="1"' . ((int)cfg('fw_intel_on', 1) === 1 ? ' selected' : '') . '>' . t('开启') . '</option><option value="0"' . ((int)cfg('fw_intel_on', 1) !== 1 ? ' selected' : '') . '>' . t('关闭') . '</option></select></label>';
+    echo '<label class="field"><span class="field-l">' . t('自动同步间隔（小时）') . '</span><input class="input" type="number" name="fw_intel_hours" min="1" max="168" value="' . (int)cfg('fw_intel_hours', 24) . '"></label>';
     foreach (['et' => 1, 'feodo' => 1, 'blackbook' => 0] as $sk => $def) {
         echo '<label class="check"><input type="checkbox" name="fw_src_' . $sk . '" value="1"' . ((int)cfg('fw_src_' . $sk, $def) === 1 ? ' checked' : '') . '> ' . e(FW_INTEL_SOURCES[$sk]['name']) . '</label>';
     }
     echo '</div>' .
-        '<label class="field"><span class="field-l">自定义威胁情报源（每行一个 URL，最多 5 条，返回 IP/CIDR 纯文本列表）</span>' .
+        '<label class="field"><span class="field-l">' . t('自定义威胁情报源（每行一个 URL，最多 5 条，返回 IP/CIDR 纯文本列表）') . '</span>' .
         '<textarea class="input" name="fw_intel_custom" rows="2" placeholder="https://...">' . e((string)cfg('fw_intel_custom', '')) . '</textarea></label>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">保存库设置</button></div></form>';
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存库设置') . '</button></div></form>';
     echo '<form method="post" action="' . e(u('a=admin_fw_intel_sync')) . '" class="inline" data-confirm="立即从公开威胁情报源同步危险 IP 库？">' . csrf_field() .
-        '<button class="btn btn-ghost" type="submit">立即同步</button></form> ';
+        '<button class="btn btn-ghost" type="submit">' . t('立即同步') . '</button></form> ';
     echo '<details style="margin-top:10px"><summary class="muted">手动导入黑名单（粘贴或上传 txt）</summary>' .
         '<form method="post" action="' . e(u('a=admin_fw_intel_import')) . '" enctype="multipart/form-data" style="margin-top:8px">' . csrf_field() .
-        '<label class="field"><span class="field-l">黑名单文本（每行一个 IP / CIDR / IP 区间，# 开头为注释，最多 5 万行）</span>' .
+        '<label class="field"><span class="field-l">' . t('黑名单文本（每行一个 IP / CIDR / IP 区间，# 开头为注释，最多 5 万行）') . '</span>' .
         '<textarea class="input" name="list" rows="4" placeholder="1.2.3.4&#10;5.6.7.0/24&#10;8.8.8.8-8.8.8.16"></textarea></label>' .
-        '<label class="field"><span class="field-l">或上传 .txt 文件（≤ 2MB）</span><input class="input" type="file" name="file" accept=".txt,.csv,text/plain"></label>' .
-        '<div class="form-foot"><span class="muted">导入与现有库合并，不清空</span><button class="btn btn-ghost" type="submit">导入</button></div></form></details>';
+        '<label class="field"><span class="field-l">' . t('或上传 .txt 文件（≤ 2MB）') . '</span><input class="input" type="file" name="file" accept=".txt,.csv,text/plain"></label>' .
+        '<div class="form-foot"><span class="muted">导入与现有库合并，不清空</span><button class="btn btn-ghost" type="submit">' . t('导入') . '</button></div></form></details>';
     echo '<p class="hint">内置种子：库为空时会启用少量公开的常见恶意网段种子兜底；完整库依赖同步（主机需能访问外网，cURL 或 file_get_contents 任一可用即可）。</p></div>';
 
     /* ---- 访问统计 ---- */
@@ -1510,7 +1517,7 @@ function admin_tab_security(): void
     $uaTop = array_slice($uaTop, 0, 8, true);
     $stTop = array_filter($stTop);
 
-    echo '<div class="card form-card wide-card"><div class="list-head"><h2 class="card-title">访问统计（每个 IP 的请求次数与归属地）</h2>' .
+    echo '<div class="card form-card wide-card"><div class="list-head"><h2 class="card-title">' . t('访问统计（每个 IP 的请求次数与归属地）') . '</h2>' .
         '<span class="muted">共 ' . $ipTotal . ' 个活跃 IP · ' .
         '<a class="fw-link' . ($sort === 'time' ? ' on' : '') . '" href="' . e(u('p=admin&tab=security&ssort=time')) . '">最近活跃</a> · ' .
         '<a class="fw-link' . ($sort === 'req' ? ' on' : '') . '" href="' . e(u('p=admin&tab=security&ssort=req')) . '">请求最多</a></span></div>';
@@ -1561,11 +1568,11 @@ function admin_tab_security(): void
         if ($banned) {
             echo '<form method="post" action="' . e(u('a=admin_fw_unban')) . '" class="inline">' . csrf_field() .
                 '<input type="hidden" name="ip" value="' . e((string)$ip) . '">' .
-                '<button class="btn btn-ghost btn-sm" type="submit">解封</button></form>';
+                '<button class="btn btn-ghost btn-sm" type="submit">' . t('解封') . '</button></form>';
         } else {
             echo '<form method="post" action="' . e(u('a=admin_fw_ban')) . '" class="inline" data-confirm="封禁 IP ' . e((string)$ip) . ' 24 小时？">' . csrf_field() .
                 '<input type="hidden" name="ip" value="' . e((string)$ip) . '"><input type="hidden" name="dur" value="1440"><input type="hidden" name="reason" value="后台手动封禁">' .
-                '<button class="btn btn-ghost btn-sm danger" type="submit">封禁24h</button></form>';
+                '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('封禁24h') . '</button></form>';
         }
         echo '</div></div>';
     }
@@ -1576,16 +1583,16 @@ function admin_tab_security(): void
     echo '<p class="hint">统计随访问自动聚合（每 60 秒落盘一次）；7 天不活跃的 IP 自动移除统计。归属地通过 ip-api.com 免费接口批量查询并缓存 30 天（主源连不上时自动改用备用源，查不到的 IP 稍后重试，不会留下错误的「未知」记录）。</p></div>';
 
     /* ---- 封禁管理 ---- */
-    echo '<div class="card form-card"><h2 class="card-title">手动封禁</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('手动封禁') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_fw_ban')) . '" class="inline-form">' . csrf_field() .
-        '<label class="field"><span class="field-l">IP 或网段</span><input class="input" name="ip" required placeholder="如 1.2.3.4 或 5.6.7.0/24" style="max-width:220px"></label>' .
-        '<label class="field"><span class="field-l">时长</span><select name="dur" class="input" style="max-width:150px">';
+        '<label class="field"><span class="field-l">' . t('IP 或网段') . '</span><input class="input" name="ip" required placeholder="如 1.2.3.4 或 5.6.7.0/24" style="max-width:220px"></label>' .
+        '<label class="field"><span class="field-l">' . t('时长') . '</span><select name="dur" class="input" style="max-width:150px">';
     foreach ([30 => '30 分钟', 60 => '1 小时', 360 => '6 小时', 1440 => '24 小时', 10080 => '7 天', 43200 => '30 天', 0 => '永久'] as $m => $lbl) {
         echo '<option value="' . $m . '"' . ($m === 1440 ? ' selected' : '') . '>' . e($lbl) . '</option>';
     }
     echo '</select></label>' .
-        '<label class="field"><span class="field-l">理由（记录用）</span><input class="input" name="reason" maxlength="100" placeholder="如：恶意刷帖" style="max-width:260px"></label>' .
-        '<button class="btn btn-danger" type="submit">立即封禁</button></form>';
+        '<label class="field"><span class="field-l">' . t('理由（记录用）') . '</span><input class="input" name="reason" maxlength="100" placeholder="如：恶意刷帖" style="max-width:260px"></label>' .
+        '<button class="btn btn-danger" type="submit">' . t('立即封禁') . '</button></form>';
     echo '<div class="admin-list" style="margin-top:10px">';
     if (!$bans) {
         echo empty_state('当前没有封禁记录');
@@ -1599,21 +1606,21 @@ function admin_tab_security(): void
             ($expired ? '<span class="badge">已过期</span>' : '<span class="badge badge-warn">' . ($until > 0 ? e(fmt_dt($until)) . ' 解除' : '永久') . '</span>') .
             '<form method="post" action="' . e(u('a=admin_fw_unban')) . '" class="inline">' . csrf_field() .
             '<input type="hidden" name="ip" value="' . e((string)$key) . '">' .
-            '<button class="btn btn-ghost btn-sm" type="submit">移除</button></form></span></div>';
+            '<button class="btn btn-ghost btn-sm" type="submit">' . t('移除') . '</button></form></span></div>';
     }
     echo '</div></div>';
 
     /* ---- 自定义规则 ---- */
     $rulesAll = fw_rules_all();
-    echo '<div class="card form-card"><h2 class="card-title">自定义封禁规则（内置策略机器人之外的补充）</h2>' .
+    echo '<div class="card form-card"><h2 class="card-title">' . t('自定义封禁规则（内置策略机器人之外的补充）') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_fw_rule_add')) . '" class="inline-form">' . csrf_field() .
-        '<label class="field"><span class="field-l">规则名</span><input class="input" name="name" required maxlength="30" placeholder="如：拦截恶意爬虫" style="max-width:180px"></label>' .
-        '<label class="field"><span class="field-l">匹配对象</span><select name="type" class="input" style="max-width:130px"><option value="ua">User-Agent</option><option value="uri">请求路径</option><option value="query">查询参数</option></select></label>' .
-        '<label class="field"><span class="field-l">匹配方式</span><select name="mode" class="input" style="max-width:120px"><option value="text">包含文本</option><option value="regex">正则</option></select></label>' .
-        '<label class="field"><span class="field-l">匹配内容</span><input class="input" name="pattern" required maxlength="120" placeholder="如 scrapy 或 (bot|spider)" style="max-width:220px"></label>' .
-        '<label class="field"><span class="field-l">命中动作</span><select name="action" class="input" style="max-width:150px"><option value="score">加分（计入风险分）</option><option value="ban">直接封禁</option></select></label>' .
-        '<label class="field"><span class="field-l">分值 / 封禁时长(h)</span><input class="input" type="number" name="val" min="1" max="720" value="50" style="max-width:110px"></label>' .
-        '<button class="btn btn-primary" type="submit">添加规则</button></form>';
+        '<label class="field"><span class="field-l">' . t('规则名') . '</span><input class="input" name="name" required maxlength="30" placeholder="如：拦截恶意爬虫" style="max-width:180px"></label>' .
+        '<label class="field"><span class="field-l">' . t('匹配对象') . '</span><select name="type" class="input" style="max-width:130px"><option value="ua">User-Agent</option><option value="uri">' . t('请求路径') . '</option><option value="query">' . t('查询参数') . '</option></select></label>' .
+        '<label class="field"><span class="field-l">' . t('匹配方式') . '</span><select name="mode" class="input" style="max-width:120px"><option value="text">' . t('包含文本') . '</option><option value="regex">' . t('正则') . '</option></select></label>' .
+        '<label class="field"><span class="field-l">' . t('匹配内容') . '</span><input class="input" name="pattern" required maxlength="120" placeholder="如 scrapy 或 (bot|spider)" style="max-width:220px"></label>' .
+        '<label class="field"><span class="field-l">' . t('命中动作') . '</span><select name="action" class="input" style="max-width:150px"><option value="score">' . t('加分（计入风险分）') . '</option><option value="ban">' . t('直接封禁') . '</option></select></label>' .
+        '<label class="field"><span class="field-l">' . t('分值 / 封禁时长(h)') . '</span><input class="input" type="number" name="val" min="1" max="720" value="50" style="max-width:110px"></label>' .
+        '<button class="btn btn-primary" type="submit">' . t('添加规则') . '</button></form>';
     echo '<div class="admin-list" style="margin-top:10px">';
     if (!$rulesAll) {
         echo empty_state('还没有自定义规则（内置四条策略已默认启用，见上方「限流与自动策略」）');
@@ -1628,7 +1635,7 @@ function admin_tab_security(): void
             '<button class="btn btn-ghost btn-sm" type="submit">' . (!empty($r['on']) ? '停用' : '启用') . '</button></form>' .
             '<form method="post" action="' . e(u('a=admin_fw_rule_del')) . '" class="inline" data-confirm="删除该规则？">' . csrf_field() .
             '<input type="hidden" name="id" value="' . e((string)($r['id'] ?? '')) . '">' .
-            '<button class="btn btn-ghost btn-sm danger" type="submit">删除</button></form></span></div>';
+            '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('删除') . '</button></form></span></div>';
     }
     echo '</div></div>';
 
@@ -1642,7 +1649,7 @@ function admin_tab_security(): void
     $fwPage = max(1, get_int('fwpage', 1));
     $fwTotal = 0;
     $rows = fw_events_read($date, 50, $fwPage, $qip, $fwTotal);
-    echo '<div class="card form-card"><div class="list-head"><h2 class="card-title">防火墙日志（拦截 / 封禁 / 评分事件）</h2>' .
+    echo '<div class="card form-card"><div class="list-head"><h2 class="card-title">' . t('防火墙日志（拦截 / 封禁 / 评分事件）') . '</h2>' .
         '<span class="muted">每天至多 2000 条，保留 ' . (int)cfg('fw_log_keep', 14) . ' 天</span></div>' .
         '<form method="get" action="' . e(u('')) . '" class="inline-form">' .
         '<input type="hidden" name="p" value="admin"><input type="hidden" name="tab" value="security">' .
@@ -1656,11 +1663,11 @@ function admin_tab_security(): void
     }
     echo '</select>' .
         '<input class="input input-sm" name="fwq" value="' . e($qip) . '" placeholder="按 IP 筛选">' .
-        '<button class="btn btn-ghost btn-sm" type="submit">筛选</button> ' .
+        '<button class="btn btn-ghost btn-sm" type="submit">' . t('筛选') . '</button> ' .
         '<a class="btn btn-ghost btn-sm" href="' . e(u('p=admin&tab=security')) . '">重置</a></form>';
     echo '<form method="post" action="' . e(u('a=admin_fw_log_clear')) . '" class="inline" data-confirm="清空 ' . e($date) . ' 的防火墙日志？">' . csrf_field() .
         '<input type="hidden" name="date" value="' . e($date) . '">' .
-        '<button class="btn btn-ghost btn-sm danger" type="submit">清空该日日志</button></form>';
+        '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('清空该日日志') . '</button></form>';
     $actNames = [
         'block' => '拦截·封禁名单', 'intel_block' => '拦截·危险IP库', 'ratelimit' => '限流·429',
         'score' => '策略·风险分', 'auto_ban' => '策略·自动封禁',
@@ -1694,4 +1701,240 @@ function admin_tab_security(): void
     echo '</tbody></table></div>';
     echo paginate($fwTotal, 50, $fwPage, 'p=admin&tab=security&fwdate=' . urlencode($date) . '&fwq=' . urlencode($qip), 'fwpage');
     echo '</div>';
+}
+
+/* ================= v1.22.0 后台设置搜索 ================= */
+
+/**
+ * 设置项全局索引（与各标签页卡片同步维护；card 供前端按前缀匹配定位卡片，动态尾部（N）不写入）。
+ * 每项：[tab, card 卡片标题前缀, label 设置项名, kw 补充关键词（含英文/别名）]
+ */
+function admin_search_index(): array
+{
+    $i = [
+        /* 基本 */
+        ['basic', '基本设置', '论坛名称', 'site name 站名 网站名'],
+        ['basic', '基本设置', '论坛简介', 'site desc 描述 简介'],
+        ['basic', '基本设置', '站点地址（可选）', 'site url 网址 域名'],
+        ['basic', '基本设置', '绑定域名（授权域名，可选）', 'bind domains 防镜像 恶意解析 301'],
+        ['basic', '基本设置', '每页帖子数', 'per page 分页 每页条数'],
+        ['basic', '基本设置', '发帖间隔（秒）', 'post interval 发帖频率 防灌水'],
+        ['basic', '基本设置', '在线统计窗口（秒）', 'online window 在线人数'],
+        ['basic', '基本设置', '实时刷新间隔（秒）', 'live interval 自动刷新 轮询'],
+        ['basic', '基本设置', 'Ping 测量间隔（秒）', 'ping 延迟 心跳'],
+        ['basic', 'SEO · 搜索引擎展示', '标题模板', 'seo title {page} {site}'],
+        ['basic', 'SEO · 搜索引擎展示', '站点描述（搜索结果摘要）', 'seo description 摘要 meta'],
+        ['basic', 'SEO · 搜索引擎展示', '关键词', 'seo keywords'],
+        ['basic', 'SEO · 搜索引擎展示', '搜索引擎收录', 'robots noindex nofollow 收录'],
+        ['basic', 'SEO · 搜索引擎展示', 'Sitemap 站点地图', 'sitemap xml 站点地图'],
+        ['basic', 'SEO · 搜索引擎展示', 'Sitemap 收录上限（条）', 'sitemap limit'],
+        ['basic', 'SEO · 搜索引擎展示', 'Open Graph 社交分享标签', 'og 分享 微信'],
+        ['basic', 'SEO · 搜索引擎展示', '自定义 <head> 内容（可选）', 'extra head 验证 统计代码'],
+        ['basic', '界面语言', '默认论坛语言', 'language 语言 简中 繁中 英 日 俄'],
+        ['basic', '界面语言', '按 IP 自动切换语言', 'language auto geo 自动语言'],
+        /* 功能 */
+        ['feat', '功能总开关', '开放注册', 'register 注册开关'],
+        ['feat', '功能总开关', '游客可浏览', 'guest browse 私密模式 登录可见'],
+        ['feat', '功能总开关', '发帖 / 回复开关', 'post reply 发帖 回复'],
+        ['feat', '功能总开关', '内容编辑', 'edit 编辑'],
+        ['feat', '功能总开关', '点赞 / 举报 / 搜索 / 表情', 'like report search emoji'],
+        ['feat', '功能总开关', '在线名单 / 用户签名 / @ 提及通知', 'online signature mention 提及'],
+        ['feat', '功能总开关', 'AI 审查（发帖预检）', 'ai precheck 审核'],
+        ['feat', '功能总开关', 'AI 自主管理', 'ai autopilot 巡逻'],
+        /* 存储 */
+        ['storage', '存储引擎', '当前存储引擎', 'storage engine 文件 数据库 切换'],
+        ['storage', '数据库连接', '数据库类型', 'sqlite mysql postgres pg 驱动'],
+        ['storage', '数据库连接', 'SQLite 数据库文件', 'sqlite 路径 文件'],
+        ['storage', '数据库连接', '主机 / 端口（MySQL / PG）', 'host port 数据库'],
+        ['storage', '数据库连接', '数据库名 / 用户名 / 密码', 'database user pass'],
+        ['storage', '数据库连接', '表前缀', 'table prefix'],
+        ['storage', '数据库连接', '测试连接', 'test connection 连接测试'],
+        ['storage', '迁移', '文件 ⇄ 数据库 无损迁移', 'migrate 迁移 备份 双向'],
+        ['storage', '数据库管理', '数据库备份 / 优化 / 完整性检查', 'backup optimize vacuum integrity'],
+        /* 邮件 */
+        ['mail', '邮件发送设置', 'SMTP 主机 / 端口', 'smtp host port 邮件服务器'],
+        ['mail', '邮件发送设置', '发信邮箱 / SMTP 用户名', 'from 邮箱 账号'],
+        ['mail', '邮件发送设置', 'SMTP 授权码 / 密码', 'smtp pass 授权码'],
+        ['mail', '邮件发送设置', '加密方式（SSL / TLS）', 'smtp secure ssl tls 465 587'],
+        ['mail', '邮件发送设置', '测试收件邮箱', 'test mail 发信测试'],
+        /* AI */
+        ['ai', '审核模型', 'API 地址（OpenAI 兼容）', 'api url base openai'],
+        ['ai', '审核模型', 'API 密钥', 'api key 密钥'],
+        ['ai', '审核模型', '模型名称', 'model 模型'],
+        ['ai', '审核模型', '审核严格程度', 'strict 严格'],
+        ['ai', '审核模型', '审核模式（火力）', '火力 双模型 竞速 并行'],
+        ['ai', '审核模型', '单模型重试次数 / 超时', 'retry timeout'],
+        ['ai', 'AI 自主防护（严全面模式）', '自动封禁风险阈值', 'auto ban score 阈值'],
+        ['ai', 'AI 自主防护（严全面模式）', '巡逻间隔（分钟）', 'patrol interval'],
+        ['ai', 'AI 自主防护（严全面模式）', '单轮封禁上限（个）', 'ban limit'],
+        ['ai', 'AI 待审队列', 'AI 队列处理', 'queue 队列'],
+        /* 板块 */
+        ['boards', '新建板块', '板块名称 / 简介', 'board new 创建板块'],
+        ['boards', '板块列表', '板块排序 / 编辑 / 删除', 'board sort move'],
+        /* 用户 */
+        ['users', '用户', '用户搜索 / 封禁 / 设为管理员', 'user search ban admin'],
+        /* 内容 */
+        ['content', '帖子', '帖子搜索 / 置顶 / 锁定 / 删除', 'thread pin lock delete'],
+        ['content', '举报记录', '举报处理', 'report'],
+        ['content', '人工待审', '待审内容处理', 'manual review'],
+        ['content', 'AI 待审队列', 'AI 审核队列', 'ai queue'],
+        /* 公告 */
+        ['anns', '公告', '发布公告 / 编辑公告', 'announcement 公告'],
+        /* 主题 */
+        ['theme', '颜色与页脚', '主题色', 'theme color 颜色'],
+        ['theme', '颜色与页脚', '深色模式默认值', 'dark mode 深色'],
+        ['theme', '颜色与页脚', '自定义样式（CSS）', 'custom css 样式'],
+        ['theme', '颜色与页脚', '页脚文字 / 页脚备注', 'footer 文案'],
+        ['theme', '网站图标（favicon）', '上传新图标', 'favicon icon 图标'],
+        /* 拓展 */
+        ['ext', '拓展（插件）', '启用 / 停用 / 删除 / 安装插件', 'plugin 插件 拓展 扩展 enable disable install'],
+        ['ext', '拓展（插件）', '开发者指南', 'developer api 钩子 hook 开发'],
+        /* 协议 */
+        ['docs', '协议管理', '用户协议 / 隐私政策 / 免责声明', 'doc 协议 privacy'],
+        ['docs', '「同意协议」是如何记录的', '协议门禁与同意留痕', 'gate 门禁 记录'],
+        /* 开放 API */
+        ['api', '开放 API', 'API 总开关 / 令牌签发', 'api token enable'],
+        ['api', '开放 API', '访客限速 / 令牌限速', 'rate limit 限速'],
+        ['api', '开放 API', '跨域来源（CORS，可选）', 'cors 跨域'],
+        ['api', '已签发的令牌', '令牌管理 / 吊销', 'token revoke'],
+        ['api', '客户端接入示例', '接入文档', 'docs 接入'],
+        /* 日志 */
+        ['logs', '日志设置', '记录页面访问（含游客）', 'log views 访问日志'],
+        ['logs', '日志设置', '日志保留天数', 'log keep 保留'],
+        ['logs', '查询日志', '系统日志查询', 'log query 查询'],
+        ['logs', '数据占用压缩', '日志与备份压缩', 'compress 压缩 gzip'],
+        /* 安全防护 */
+        ['security', '防护总览', '防火墙总开关 / 今日拦截', 'firewall on 拦截'],
+        ['security', '账号安全 · 登录设备管理', '新设备二次验证总闸', 'device verify 二次验证 登录设备'],
+        ['security', '账号安全 · 登录设备管理', '同一账号同时在线设备上限（台）', 'session max 同时登录 上限'],
+        ['security', '限流与自动策略', '访问限流', 'rate limit 限流'],
+        ['security', '限流与自动策略', '每 IP 每分钟请求上限', 'per ip limit'],
+        ['security', '限流与自动策略', '超限自动临时封禁（分钟）', 'auto ban 临时封禁'],
+        ['security', '限流与自动策略', '自动策略引擎 / 内置策略规则', 'score auto policy 评分'],
+        ['security', '限流与自动策略', '自动封禁时长 / 风险阈值', 'auto ban hours'],
+        ['security', '手动封禁', 'IP 或网段封禁', 'ban ip cidr 手动封禁'],
+        ['security', 'IP 白名单', '白名单（跳过拦截）', 'whitelist 白名单'],
+        ['security', '危险 IP 库（威胁情报）', '危险 IP 库拦截', 'threat intel 威胁情报 黑名单'],
+        ['security', '危险 IP 库（威胁情报）', '自定义威胁情报源', 'intel url 情报源'],
+        ['security', '危险 IP 库（威胁情报）', '自动同步间隔 / 黑名单文本', 'sync interval blacklist'],
+        ['security', '自定义封禁规则', '规则名 / 匹配方式 / 匹配内容', 'custom rule 自定义规则 正则'],
+        ['security', '自定义封禁规则', '匹配对象 / 命中动作 / 分值', 'rule target action score'],
+        ['security', '攻击告警（自动邮件）', '攻击告警邮件', 'attack alert 攻击告警'],
+        ['security', '攻击告警（自动邮件）', '触发阈值（10 分钟内被拦截次数）', 'alert threshold 阈值'],
+        ['security', '攻击告警（自动邮件）', '告警冷却（分钟）', 'alert cool 冷却'],
+        ['security', '常驻巡逻器（daemon.php）', '巡逻器启动 / 停止 / 心跳', 'daemon 巡逻器 后台进程'],
+        ['security', '常驻巡逻器（daemon.php）', 'PHP 命令行路径', 'php path cli'],
+        ['security', '真实 IP 识别', 'Cloudflare 网段覆盖', 'cf ip range 真实ip'],
+        ['security', '访问统计', 'IP 请求次数与归属地', 'access stats 统计 归属地'],
+        ['security', '防火墙日志', '拦截 / 封禁 / 评分事件', 'fw log 事件'],
+        /* 监控 */
+        ['monitor', '监控与告警设置', '存储占用告警', 'monitor disk alert 占用'],
+        ['monitor', '监控与告警设置', '告警阈值（MB）/ 自动告警', 'threshold 告警'],
+        ['monitor', '监控与告警设置', '监控页实时刷新间隔', 'monitor interval'],
+        ['monitor', '环境自检', '目录权限 / 一键修复', 'env check 修复 权限'],
+        ['monitor', '存储占用', '存储空间统计', 'disk usage'],
+        ['monitor', '实时资源', 'CPU / 内存 / 负载', 'cpu memory load 资源'],
+        ['monitor', '服务器信息', 'PHP / 系统版本', 'server php info'],
+        /* 更新升级 */
+        ['update', '当前版本', '版本号 / 检查更新', 'version 检查更新'],
+        ['update', '上传更新包', '更新包（.zip）', 'update zip 升级包'],
+        ['update', '更新历史', '历史版本记录', 'update history'],
+        ['update', '数据备份', '手动备份 / 自动备份', 'backup 备份'],
+        /* 系统 */
+        ['system', '系统信息', '程序版本 / 数据统计', 'system info 系统'],
+        ['system', '注销账号管理', '注销请求', 'delete account 注销'],
+    ];
+    return $i;
+}
+
+/* ================= v1.22.0 拓展（插件）管理页 ================= */
+
+function admin_tab_ext(): void
+{
+    $disc = plugins_discover();
+    $en = plugins_enabled_ids();
+    $routes = $GLOBALS['MF_PLUGIN_ROUTES'] ?? [];
+    echo '<div class="card form-card"><h2 class="card-title">' . t('拓展（插件）') . '</h2>' .
+        '<p class="hint">插件存放于 <code>data/plugins/&lt;插件id&gt;/</code>（该目录拒绝 Web 直访，数据库模式下也始终留在文件系统）。安装 = 上传 zip 包（含 plugin.json 清单）；启用后<b>下一个请求起生效</b>，停用立即失效；加载失败的插件会跳过并写入错误日志，绝不影响论坛运行。<b>插件代码拥有与论坛程序同级的全部权限，请只安装可信来源的插件。</b></p>';
+    if (!$disc) {
+        echo '<p class="muted">尚未安装任何插件。把开发者提供的插件 zip 包在下方上传，或通过 FTP 将插件目录放入 data/plugins/ 后刷新本页。</p>';
+    }
+    foreach ($disc as $id => $p) {
+        $on = in_array($id, $en, true);
+        echo '<div class="plugin-row' . ($on ? ' plugin-on' : '') . '">';
+        echo '<div class="plugin-info"><b>' . e($p['name']) . '</b>' .
+            ($p['version'] !== '' ? ' <span class="muted">v' . e($p['version']) . '</span>' : '') .
+            ($p['author'] !== '' ? ' <span class="muted">· ' . e($p['author']) . '</span>' : '') .
+            '<br><span class="muted">' . ($p['desc'] !== '' ? e(cut_str($p['desc'], 160)) : e($id)) . '</span>' .
+            '<br><span class="muted" style="font-size:12px">id：' . e($id) . ' · data/plugins/' . e($id) . '/' . ($p['ok'] ? '' : ' · <b class="badge badge-warn">' . e($p['err']) . '</b>') . '</span></div>';
+        echo '<div class="plugin-ops">';
+        if ($p['ok']) {
+            echo '<span class="badge ' . ($on ? 'badge-ok' : '') . '">' . e(t($on ? '已启用' : '已停用')) . '</span> ';
+            if ($on && isset($routes[$id])) {
+                echo '<a class="btn btn-ghost" href="' . e(u('p=plugin&pf=' . $id)) . '">' . e(t('前台入口')) . '</a> ';
+            }
+            echo '<form class="inline" method="post" action="' . e(u('a=admin_plugin_toggle')) . '" data-confirm="' . e(t($on ? '停用该插件？' : '启用该插件？')) . '">' . csrf_field() .
+                '<input type="hidden" name="pf" value="' . e($id) . '"><button class="btn" type="submit">' . e(t($on ? '停用' : '启用')) . '</button></form> ';
+            echo '<form class="inline" method="post" action="' . e(u('a=admin_plugin_remove')) . '" data-confirm="' . e(t('彻底删除该插件及其全部文件？此操作不可恢复！')) . '">' . csrf_field() .
+                '<input type="hidden" name="pf" value="' . e($id) . '"><button class="btn btn-danger" type="submit">' . e(t('删除')) . '</button></form>';
+        } else {
+            echo '<form class="inline" method="post" action="' . e(u('a=admin_plugin_remove')) . '" data-confirm="' . e(t('删除该损坏的插件目录？')) . '">' . csrf_field() .
+                '<input type="hidden" name="pf" value="' . e($id) . '"><button class="btn btn-danger" type="submit">' . e(t('删除')) . '</button></form>';
+        }
+        echo '</div></div>';
+    }
+    echo '</div>';
+
+    echo '<div class="card form-card"><h2 class="card-title">' . t('安装插件') . '</h2>' .
+        '<form method="post" action="' . e(u('a=admin_plugin_install')) . '" enctype="multipart/form-data" data-confirm="' . e(t('确认安装该插件包？插件代码将以论坛程序同级权限运行，请确保来源可信。')) . '">' . csrf_field() .
+        '<label class="field"><span class="field-l">' . e(t('插件包（.zip，内含 plugin.json）')) . '</span><input class="input" type="file" name="pfzip" accept=".zip" required></label>' .
+        '<div class="form-foot"><span class="muted">' . e(t('限 8MB / 300 个文件；安装后需在上方列表点击「启用」')) . '</span><button class="btn btn-primary" type="submit">' . e(t('上传并安装')) . '</button></div></form></div>';
+
+    $ex = <<<'PHPEX'
+<?php
+/** 插件入口：data/plugins/hello/plugin.php */
+$cfg = mf_plugin_cfg('hello');            // 读插件配置（data/plugins.cfg.php）
+mf_plugin_cfg_set('hello', ['views' => (int)($cfg['views'] ?? 0)]);
+
+mf_add_action('page_footer', function () { // 每页页脚注入一行小字
+    echo '<div style="text-align:center;color:#999;font-size:12px">Powered by hello 插件</div>';
+}, 20);
+
+mf_add_filter('site_title', function ($title, $page) { // 改写每页 <title>
+    return $title;
+}, 10);
+
+mf_add_action('post_created', function (array $thread) {   // 发帖事件
+    mf_log('hello', '新帖子：' . ($thread['title'] ?? ''));
+}, 10);
+
+mf_register_route('hello', function (string $id) {         // 独立页面 p=plugin&pf=hello
+    layout_header('Hello 插件');
+    echo page_head('Hello 插件', '第一个插件示例');
+    echo '<div class="card"><h2 class="card-title">It works!</h2><p>这是由插件渲染的页面。</p></div>';
+    layout_footer();
+});
+PHPEX;
+    echo '<div class="card form-card"><h2 class="card-title">' . t('开发者指南') . '</h2>' .
+        '<p class="hint">一个插件 = data/plugins/ 下的一个目录，最少两个文件：<code>plugin.json</code>（清单）与入口 PHP（默认 <code>plugin.php</code>）。入口文件在论坛完全初始化后执行（配置 / 会话 / 数据库 / 多语言全部就绪），可直接使用全部论坛函数。</p>' .
+        '<p><b>plugin.json 清单：</b></p><pre class="code-hint">{
+  "name": "示例插件",
+  "version": "1.0.0",
+  "author": "作者名",
+  "desc": "一句话说明插件做什么",
+  "entry": "plugin.php",
+  "id": "hello"
+}</pre>' .
+        '<p><b>可用 API：</b></p><pre class="code-hint">mf_add_action(钩子名, 回调, 优先级=10)      // 订阅动作钩子
+mf_add_filter(过滤器名, 回调, 优先级=10)    // 订阅过滤器（返回值向后传递）
+mf_do_action(钩子名, ...参数)               // 触发动作（内核埋点已调用）
+mf_apply_filters(过滤器名, 值, ...参数)     // 应用过滤器
+mf_register_route(插件id, 回调)             // 注册前台独立页面 p=plugin&pf=<id>
+mf_plugin_cfg(插件id, 键=null, 默认=null)   // 读插件配置
+mf_plugin_cfg_set(插件id, [键=>值])         // 写插件配置
+mf_log(插件id, 消息)                        // 写系统日志（后台日志页可见）</pre>' .
+        '<p><b>动作钩子：</b><code>plugins_loaded</code> 插件全部加载完 · <code>page_head</code> 前台 &lt;head&gt; 内 · <code>page_footer</code> 前台 &lt;/body&gt; 前 · <code>admin_head</code> 后台 &lt;head&gt; 区 · <code>user_register(uid, 昵称)</code> 注册成功 · <code>user_login(uid, 昵称)</code> 登录成功 · <code>post_created(帖子数组)</code> 发帖成功 · <code>reply_created(帖子id, 回复id, 作者id)</code> 回复成功 · <code>thread_view(帖子数组)</code> 帖子页渲染</p>' .
+        '<p><b>过滤器：</b><code>site_title(标题, 页面名)</code> 每页 &lt;title&gt; · <code>md_html(渲染后HTML, 原文)</code> 全站 Markdown 渲染结果</p>' .
+        '<p><b>静态资源：</b>插件目录下的文件不对外直访（data/ 受保护），放 <code>assets/</code> 里通过 <code>index.php?p=plugin&amp;pf=&lt;id&gt;&amp;file=style.css</code> 受控出站（扩展名白名单）。</p>' .
+        '<p><b>完整示例（hello）：</b></p><pre class="code-hint">' . e($ex) . '</pre></div>';
 }

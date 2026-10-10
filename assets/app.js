@@ -802,4 +802,132 @@
   $$('.js-dev-toggle').forEach(function (cb) {
     cb.addEventListener('change', function () { if (cb.form) cb.form.submit(); });
   });
-})();
+  /* ---------- v1.22.0：后台设置搜索（跨标签页索引 + 即时过滤 + 跳转高亮） ---------- */
+  var adminSearch = document.getElementById('adminSearchInput');
+  var adminPop = document.getElementById('adminSearchPop');
+  if (adminSearch && adminPop) {
+    var searchIdx = null;      // 延迟加载：首次聚焦拉取索引
+    var searchIdxBusy = false;
+    var activeItem = -1;       // 键盘导航
+
+    function tabTitles() {
+      var m = {};
+      $$('.admin-tabs .atab').forEach(function (a) {
+        var q = (a.getAttribute('href') || '').split('tab=')[1] || '';
+        m[q] = a.textContent;
+      });
+      return m;
+    }
+
+    function loadIdx(done) {
+      if (searchIdx || searchIdxBusy) { done(searchIdx); return; }
+      searchIdxBusy = true;
+      fetch(apiUrl('a=admin_search'), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          searchIdx = (j && j.ok && j.items) ? j.items : [];
+          searchIdxBusy = false;
+          done(searchIdx);
+        })
+        .catch(function () { searchIdxBusy = false; done([]); });
+    }
+
+    function highlightCard(cardPrefix, label) {
+      var cards = $$('.admin-body .card');
+      for (var i = 0; i < cards.length; i++) {
+        var h = cards[i].querySelector('.card-title');
+        if (h && (h.textContent || '').indexOf(cardPrefix) === 0) {
+          cards[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+          cards[i].classList.remove('mf-flash');
+          void cards[i].offsetWidth; // 重启动画
+          cards[i].classList.add('mf-flash');
+          if (label) {
+            var ls = cards[i].querySelectorAll('.field-l');
+            for (var k = 0; k < ls.length; k++) {
+              if ((ls[k].textContent || '').indexOf(label) !== -1) {
+                ls[k].classList.remove('mf-flash-l');
+                void ls[k].offsetWidth;
+                ls[k].classList.add('mf-flash-l');
+                break;
+              }
+            }
+          }
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function gotoItem(it) {
+      var hash = '#mfset-' + encodeURIComponent(it[1] + '|' + (it[2] || ''));
+      sessionStorage.setItem('mfsetPending', JSON.stringify(it));
+      window.location.href = apiUrl('p=admin&tab=' + it[0]) + hash;
+    }
+
+    function renderPop(q) {
+      var tabs = tabTitles();
+      var items = searchIdx || [];
+      var kw = q.trim().toLowerCase();
+      var hits = [];
+      if (kw !== '') {
+        for (var i = 0; i < items.length && hits.length < 12; i++) {
+          var it = items[i];
+          var hay = (it[1] + ' ' + it[2] + ' ' + (it[3] || '') + ' ' + (tabs[it[0]] || '')).toLowerCase();
+          if (hay.indexOf(kw) !== -1) hits.push(it);
+        }
+      }
+      activeItem = -1;
+      if (hits.length === 0) {
+        adminPop.hidden = kw === '';
+        adminPop.innerHTML = kw === '' ? '' : '<div class="asr-empty">没有匹配的设置项</div>';
+        return;
+      }
+      adminPop.hidden = false;
+      adminPop.innerHTML = hits.map(function (it, n) {
+        return '<button type="button" class="asr" data-n="' + n + '">' +
+          '<b>' + (it[2] || it[1]) + '</b>' +
+          '<span>' + it[1] + ' · ' + (tabs[it[0]] || it[0]) + '</span></button>';
+      }).join('');
+      adminPop._hits = hits;
+      $$('.asr', adminPop).forEach(function (btn) {
+        btn.addEventListener('mousedown', function (e) { // mousedown 先于 blur，避免弹层先收起
+          e.preventDefault();
+          gotoItem(adminPop._hits[(parseInt(btn.getAttribute('data-n'), 10) || 0)]);
+        });
+      });
+    }
+
+    adminSearch.addEventListener('focus', function () { loadIdx(function () { renderPop(adminSearch.value); }); });
+    adminSearch.addEventListener('input', function () { loadIdx(function () { renderPop(adminSearch.value); }); });
+    adminSearch.addEventListener('keydown', function (e) {
+      var rows = $$('.asr', adminPop);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!rows.length) return;
+        e.preventDefault();
+        activeItem = e.key === 'ArrowDown' ? (activeItem + 1) % rows.length : (activeItem - 1 + rows.length) % rows.length;
+        rows.forEach(function (r, n) { r.classList.toggle('on', n === activeItem); });
+      } else if (e.key === 'Enter') {
+        if (adminPop._hits && adminPop._hits.length) {
+          e.preventDefault();
+          gotoItem(adminPop._hits[activeItem >= 0 ? activeItem : 0]);
+        }
+      } else if (e.key === 'Escape') {
+        adminPop.hidden = true;
+        adminSearch.blur();
+      }
+    });
+    document.addEventListener('click', function (e) {
+      if (!adminSearch.contains(e.target) && !adminPop.contains(e.target)) adminPop.hidden = true;
+    });
+
+    /* 跨页跳转落地：读取 pending 定位信息，滚动到目标卡片并高亮 */
+    var pending = sessionStorage.getItem('mfsetPending');
+    if (pending) {
+      try {
+        var it = JSON.parse(pending);
+        sessionStorage.removeItem('mfsetPending');
+        setTimeout(function () { highlightCard(it[1], it[2] || ''); }, 150);
+      } catch (e) { sessionStorage.removeItem('mfsetPending'); }
+    }
+  }
+  })();

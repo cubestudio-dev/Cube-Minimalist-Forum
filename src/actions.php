@@ -21,6 +21,11 @@ function handle_action(string $a): void
         act_sysmon_live();
         return;
     }
+    /* v1.22.0 后台设置搜索：GET 只读 JSON（仅管理员，无 CSRF 需求，不写任何数据） */
+    if ($a === 'admin_search') {
+        act_admin_search();
+        return;
+    }
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
         redirect(u('p=home'));
     }
@@ -82,6 +87,9 @@ function route_action(string $a): void
         case 'api_token_new':         act_api_token_new(); return;
         case 'api_token_revoke':      act_api_token_revoke(); return;
         case 'admin_save_api':         admin_tab_guard(); act_admin_save_api(); return;
+        case 'admin_plugin_toggle':    admin_tab_guard(); act_admin_plugin_toggle(); return;
+        case 'admin_plugin_remove':    admin_tab_guard(); act_admin_plugin_remove(); return;
+        case 'admin_plugin_install':   admin_tab_guard(); act_admin_plugin_install(); return;
         case 'admin_api_revoke':       admin_tab_guard(); act_admin_api_revoke(); return;
         case 'admin_save_docs':    admin_tab_guard(); act_admin_save_docs(); return;
         case 'admin_data_compress': admin_tab_guard(); act_admin_data_compress(); return;
@@ -643,6 +651,7 @@ function act_register(): void
         auth_login($user, false);
     }
     log_action('register', '用户 ' . $name . '（#' . $uid . '）注册成功', $uid, $name);
+    mf_do_action('user_register', (int)$uid, (string)$name); /* v1.22.0 拓展钩子 */
     clear_old();
     flash('ok', '注册成功，欢迎加入！');
     redirect(u('p=home'));
@@ -695,6 +704,7 @@ function act_login(): void
     auth_login($u, $remember);
     dev_login_register((int)$u['id'], $u, $ip, $kickedHere); // 登记设备（新设备自动发提醒；超出并发上限自动下线最早设备）
     log_action('login', '用户 ' . (string)$u['name'] . '（#' . (int)$u['id'] . '）登录成功' . ($remember ? '，保持登录 30 天' : '') . '（' . dev_ua_name($ua) . ' · IP ' . $ip . '）', (int)$u['id'], (string)$u['name']);
+    mf_do_action('user_login', (int)$u['id'], (string)$u['name']); /* v1.22.0 拓展钩子 */
     clear_old();
     flash('ok', '欢迎回来，' . (string)$u['name']);
     $next = (string)($_POST['next'] ?? '');
@@ -913,6 +923,7 @@ function act_thread_new(): void
     log_action('thread_new', '发布《' . cut_str($title, 40) . '》（板块：' . board_name($board) . '）');
     /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
     mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title);
+    mf_do_action('post_created', thread_get($tid) ?? ['id' => $tid, 'board' => $board, 'title' => $title, 'author' => (int)$u['id']]); /* v1.22.0 拓展钩子 */
     /* 严全面·消息审核：v1.16.0 改为响应后异步预检（register_shutdown_function），
        发帖立即返回不再被 AI 调用阻塞（此前同步调用会让整个服务等待数秒）；
        判定违规后仍会自动隐藏 + 通知申诉，机制不变 */
@@ -952,6 +963,7 @@ function act_reply_new(): void
     log_action('reply_new', '在《' . cut_str((string)($t['title'] ?? ''), 40) . '》中发表回复');
     /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
     mentions_notify($content, (int)$u['id'], $tid, (int)$rid);
+    mf_do_action('reply_created', $tid, (int)$rid, (int)$u['id']); /* v1.22.0 拓展钩子 */
     /* 严全面·消息审核：v1.16.0 改为响应后异步预检，不再阻塞响应（同上） */
     register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id']);
     flash('ok', '回复成功，AI 正在后台审核内容');
@@ -2746,4 +2758,97 @@ function act_admin_daemon_stop(): void
     @file_put_contents(DATA_DIR . '/daemon.stop', (string)time());
     log_action('admin_daemon_stop', '发送巡逻器停止信号', (int)$me['id']);
     act_ok('已发送停止信号，巡逻器将在 30 秒内优雅退出', u('p=admin&tab=security'));
+}
+
+/* ================= v1.22.0 拓展（插件）管理 + 后台设置搜索 ================= */
+
+/** 后台设置搜索索引（GET JSON，仅管理员；索引与 admin_tab_ext 同步维护） */
+function act_admin_search(): void
+{
+    if (!current_user() || empty(current_user()['admin'])) {
+        json_response(['ok' => false, 'msg' => 'Forbidden']);
+        return;
+    }
+    header('Cache-Control: no-store');
+    json_response(['ok' => true, 'items' => admin_search_index()]);
+}
+
+/** 启用 / 停用插件 */
+function act_admin_plugin_toggle(): void
+{
+    $me = admin_tab_guard();
+    $id = (string)($_POST['pf'] ?? '');
+    if (!plugin_id_ok($id)) {
+        act_err('插件 id 不合法');
+        return;
+    }
+    $all = plugins_discover();
+    if (!isset($all[$id]) || !$all[$id]['ok']) {
+        act_err('插件不存在或清单不完整：' . $id);
+        return;
+    }
+    $en = plugins_enabled_ids();
+    $on = !in_array($id, $en, true);
+    $new = $on ? array_merge($en, [$id]) : array_values(array_diff($en, [$id]));
+    cfg_update(['plugins_enabled' => $new]);
+    log_action('plugin.toggle', ($on ? '启用' : '停用') . '插件「' . $all[$id]['name'] . '」（' . $id . '）', (int)$me['id'], (string)$me['name']);
+    act_ok('已' . ($on ? '启用' : '停用') . '插件「' . $all[$id]['name'] . '」' . ($on ? '，立即生效' : ''), u('p=admin&tab=ext'));
+}
+
+/** 删除插件（连同目录；已启用的先停用） */
+function act_admin_plugin_remove(): void
+{
+    $me = admin_tab_guard();
+    $id = (string)($_POST['pf'] ?? '');
+    if (!plugin_id_ok($id)) {
+        act_err('插件 id 不合法');
+        return;
+    }
+    $en = array_values(array_diff(plugins_enabled_ids(), [$id]));
+    cfg_update(['plugins_enabled' => $en]);
+    if (!plugin_remove($id)) {
+        act_err('删除失败：目录不存在或不可写（可尝试通过 FTP 删除 data/plugins/' . $id . '）');
+        return;
+    }
+    log_action('plugin.remove', '删除插件「' . $id . '」及其目录', (int)$me['id'], (string)$me['name']);
+    act_ok('插件「' . $id . '」已删除', u('p=admin&tab=ext'));
+}
+
+/** 安装插件（上传 zip；MiniZipRead 零依赖解析，zip-slip 全量校验） */
+function act_admin_plugin_install(): void
+{
+    $me = admin_tab_guard();
+    if (empty($_FILES['pfzip']) || !is_array($_FILES['pfzip'])) {
+        act_err('请选择插件 zip 包');
+        return;
+    }
+    $f = $_FILES['pfzip'];
+    if ((int)($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        act_err('上传失败（错误码 ' . (int)($f['error'] ?? -1) . '，可能超过服务器上传限制）');
+        return;
+    }
+    if ((int)($f['size'] ?? 0) <= 0 || (int)$f['size'] > 8 * 1024 * 1024) {
+        act_err('插件包大小需在 8MB 以内');
+        return;
+    }
+    $ext = strtolower((string)pathinfo((string)($f['name'] ?? ''), PATHINFO_EXTENSION));
+    if ($ext !== 'zip') {
+        act_err('仅支持 .zip 插件包');
+        return;
+    }
+    $tmp = (string)($f['tmp_name'] ?? '');
+    if (!is_uploaded_file($tmp)) {
+        act_err('读取上传文件失败，请重试');
+        return;
+    }
+    [$ok, $msg] = plugin_install_zip($tmp);
+    if (!$ok) {
+        act_err('安装失败：' . $msg);
+        return;
+    }
+    if (!is_dir(plugins_dir())) {
+        @mkdir(plugins_dir(), 0755, true);
+    }
+    log_action('plugin.install', '安装插件「' . $msg . '」（zip 包 ' . (int)$f['size'] . ' 字节）', (int)$me['id'], (string)$me['name']);
+    act_ok('插件「' . $msg . '」安装成功，请在列表中启用', u('p=admin&tab=ext'));
 }

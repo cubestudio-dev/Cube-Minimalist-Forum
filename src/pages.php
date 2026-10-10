@@ -106,6 +106,7 @@ function page_thread(): void
 
     thread_view_bump($tid); // 浏览量 +1（每会话每帖至多计一次）
     $t['views'] = (int)(thread_get($tid)['views'] ?? ($t['views'] ?? 0)); // 先计后渲染：首次浏览即显示新值
+    mf_do_action('thread_view', $t); /* v1.22.0 拓展钩子 */
 
     echo '<article class="card thread-art">';
     echo '<div class="art-head"><h1 class="art-title">' . e((string)$t['title']) . '</h1><div class="art-meta">' .
@@ -1310,4 +1311,27 @@ function page_sitemap(): void
     }
     echo $xml . '</urlset>';
     exit;
+}
+
+/* ================= v1.22.0 拓展：插件前台路由（p=plugin&pf=<id>） =================
+ * 插件用 mf_register_route('<id>', function (string $id): void { ... }) 注册处理函数；
+ * 未注册 / 未启用 / id 不合法一律 404。页面运行在登录态之后（受私密模式与协议门禁约束）。 */
+function page_plugin(): void
+{
+    $pf = preg_replace('/[^a-z0-9_]/', '', (string)($_GET['pf'] ?? ''));
+    if (!plugin_id_ok((string)$pf) || !plugin_on((string)$pf)) {
+        page_404();
+        return;
+    }
+    $fn = $GLOBALS['MF_PLUGIN_ROUTES'][$pf] ?? null;
+    if (!$fn instanceof Closure && !is_callable($fn)) {
+        page_404();
+        return;
+    }
+    try {
+        $fn((string)$pf);
+    } catch (Throwable $t) {
+        error_log('[mf] plugin route ' . $pf . ': ' . $t->getMessage());
+        page_404();
+    }
 }

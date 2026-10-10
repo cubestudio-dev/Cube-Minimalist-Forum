@@ -54,6 +54,8 @@ function layout_head_common(string $title = '', bool $forceInlineCss = false): v
         $tpl = '{page} · {site}';
     }
     $pageTitle = $title !== '' ? str_replace(['{page}', '{site}'], [$title, $siteName], $tpl) : $siteName;
+    /* v1.22.0 拓展：站点标题过滤器（插件可改写每页 <title> 文本） */
+    $pageTitle = (string)mf_apply_filters('site_title', $pageTitle, $title);
     $siteIcon = (string)($c['site_icon'] ?? '');
 ?>
 <meta charset="UTF-8">
@@ -129,6 +131,7 @@ function layout_header(string $title = '', int $boardId = 0): void
 <meta name="ping-interval" content="<?= $pingInt ?>">
 <meta name="monitor-interval" content="<?= max(0, min(300, (int)cfg('monitor_interval', 5))) ?>">
 <script src="<?= e(u('p=asset&f=app.js&v=' . app_version())) ?>" defer></script>
+<?php mf_do_action('page_head'); /* v1.22.0 拓展：插件自定义 <head> 输出（meta/样式等） */ ?>
 </head>
 <body>
 <div class="shell">
@@ -222,6 +225,7 @@ function layout_footer(): void
   </footer>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+<?php mf_do_action('page_footer'); /* v1.22.0 拓展：插件自定义 </body> 前输出（统计代码/悬浮组件等） */ ?>
 </body>
 </html>
 <?php

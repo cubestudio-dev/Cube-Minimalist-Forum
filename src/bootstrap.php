@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.21.0');
+    define('MF_VERSION', '1.22.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -53,6 +53,7 @@ require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/actions.php';
 require_once __DIR__ . '/pages.php';
 require_once __DIR__ . '/admin.php';
+require_once __DIR__ . '/plugins.php';
 
 /* 会话：保存路径置于 data/sessions（自包含、便于隔离与备份排除）；
    用 ensureDir 走自愈阶梯（建目录/修权限/整体搬移重建），属主异常时也能自动救回 */
@@ -113,6 +114,9 @@ if (!Store::writable()) {
 /* v1.21.0 多语言：解析当前语言（用户选择 > 资料偏好 > IP 自动判断 > 后台默认），
    必须在会话启动与全部类库就绪后执行；t() 全程可用 */
 i18n_init();
+
+/* v1.22.0 拓展：加载全部启用插件（失败自动跳过；钩子从这里开始可订阅） */
+plugins_load();
 
 /** 当前请求是否为 HTTPS（含反代透传场景；auth.php 会话续期也用它保持 Secure 一致性） */
 function app_is_https(): bool
