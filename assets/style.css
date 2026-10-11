@@ -308,6 +308,27 @@ textarea.input { resize: vertical; min-height: 80px; }
 .atab:hover { color: var(--text); background: var(--hover); }
 .atab.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .admin-body .card { margin-bottom: 14px; }
+/* v1.27.0 分组侧边导航（替代平铺标签条） */
+.admin-shell { display: flex; align-items: flex-start; gap: 18px; }
+.admin-nav {
+  width: 158px; flex: none; position: sticky; top: 76px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.admin-nav .nav-group { display: flex; flex-direction: column; gap: 2px; }
+.admin-nav .nav-group-t {
+  font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  color: var(--muted); padding: 0 13px 2px; text-transform: uppercase;
+}
+.admin-nav .atab {
+  display: block; text-align: left; padding: 6px 13px; border-radius: 9px;
+}
+.admin-body { flex: 1; min-width: 0; }
+@media (max-width: 880px) {
+  .admin-shell { flex-direction: column; }
+  .admin-nav { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; gap: 10px 18px; }
+  .admin-nav .nav-group { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .admin-nav .nav-group-t { width: 100%; padding: 0; }
+}
 .admin-row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 0; border-bottom: 1px dashed var(--border); flex-wrap: wrap;
@@ -983,7 +1004,8 @@ html.mf-leaving .main .flash { opacity: 1; } /* 提示条保持醒目 */
 .board-perm summary:hover { color: var(--accent); }
 .board-perm .perm-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0 2px; }
 .board-perm .hint { flex-basis: 100%; margin: 2px 0 0; }
-.restore-row { display: flex; justify-content: flex-end; margin-top: -6px; padding: 0 0 10px; }
+/* v1.27.0：修复还原默认按钮与保存按钮重叠（旧版负边距 -6px 上拉侵入表单区） */
+.restore-row { display: flex; justify-content: flex-end; margin-top: 0; padding: 2px 0 8px; }
 .restore-row .btn { color: var(--muted); }
 .restore-row .btn:hover { color: var(--accent); }
 .lv-now { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; flex-wrap: wrap; }

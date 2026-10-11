@@ -105,22 +105,26 @@ function board_move(int $id, string $dir): void
     Store::unlock($lk);
 }
 
-/* ================= v1.25.0 板块发帖权限 ================= */
+/* ================= v1.25.0 板块发帖权限（v1.27.0 简化：所有人 / 仅职员 / 白名单） ================= */
 
-/** 板块发帖权限默认结构（type: all=所有人 / admins=仅管理员 / level=指定等级及以上 / users=白名单用户） */
+/** 板块发帖权限默认结构（type: all=所有人 / staff=仅职员 / users=白名单用户） */
 function board_perm_default(): array
 {
-    return ['type' => 'all', 'level' => 0, 'uids' => []];
+    return ['type' => 'all', 'uids' => []];
 }
 
-/** 归一化板块 perm 结构（兼容旧数据缺键） */
+/** 归一化板块 perm 结构（兼容旧数据缺键；v1.25/1.26 的 admins / level 旧值统一归入 staff） */
 function board_perm_of(array $b): array
 {
     $p = is_array($b['perm'] ?? null) ? $b['perm'] : [];
     $type = (string)($p['type'] ?? 'all');
+    if ($type === 'users') {
+        $type = 'users';
+    } elseif ($type !== 'all') {
+        $type = 'staff'; /* admins / level / staff 及其它历史值 → 仅职员（保守回退） */
+    }
     return [
-        'type'  => in_array($type, ['all', 'admins', 'level', 'users'], true) ? $type : 'all',
-        'level' => max(0, (int)($p['level'] ?? 0)),
+        'type'  => $type,
         'uids'  => array_values(array_unique(array_map('intval', (array)($p['uids'] ?? [])))),
     ];
 }
@@ -147,11 +151,10 @@ function board_perm_save(int $id, array $perm): bool
 }
 
 /**
- * 某用户能否在某板块发新帖（回复不受此限制；管理员恒可）。
+ * 某用户能否在某板块发新帖（回复不受此限制；职员恒可，审核 / 管理需要）。
  * - all：所有人
- * - admins：仅管理员
- * - level：指定等级及以上（按等级「所需发帖数」比较，等级被删时保守回退为仅管理员可发）
- * - users：白名单用户（存用户 id 列表）
+ * - staff：仅职员（审核员 / 超级管理员）
+ * - users：白名单用户（存用户 id 列表；职员同样可发）
  */
 function board_can_post(int $bid, ?array $u): bool
 {
@@ -166,25 +169,16 @@ function board_can_post(int $bid, ?array $u): bool
     if (empty($u['id'])) {
         return false; /* 游客本就需登录发帖，这里统一拦 */
     }
-    if (!empty($u['admin'])) {
-        return true;
-    }
-    if ($perm['type'] === 'admins') {
-        return false;
+    if (role_at_least($u, 'mod')) {
+        return true; /* 职员（审核员 / 超级管理员）不受板块发帖权限限制 */
     }
     if ($perm['type'] === 'users') {
         return in_array((int)$u['id'], $perm['uids'], true);
     }
-    /* level：用户当前等级的 min ≥ 目标等级的 min 即视为「该等级及以上」 */
-    $mine = user_level($u);
-    $want = level_get($perm['level']);
-    if (!$mine || !$want) {
-        return false; /* 目标等级已被删除：保守处理，仅管理员可发 */
-    }
-    return (int)($mine['min'] ?? 0) >= (int)($want['min'] ?? 0);
+    return false; /* staff 及其它 */
 }
 
-/** 权限短标注（发帖页下拉 / 后台列表用）：所有人 / 仅管理员 / Lv2 及以上 / 白名单用户 */
+/** 权限短标注（发帖页下拉 / 后台列表用）：所有人 / 仅职员 / 白名单用户 */
 function board_perm_label(int $bid): string
 {
     $b = board_get($bid);
@@ -193,11 +187,8 @@ function board_perm_label(int $bid): string
     }
     $perm = board_perm_of($b);
     switch ($perm['type']) {
-        case 'admins':
-            return '仅管理员';
-        case 'level':
-            $l = level_get($perm['level']);
-            return $l ? 'Lv' . level_no((int)$l['id']) . ' 及以上' : '指定等级（已删除）';
+        case 'staff':
+            return '仅职员';
         case 'users':
             return count($perm['uids']) > 0 ? '白名单用户（' . count($perm['uids']) . ' 人）' : '白名单用户（未配置）';
         default:
@@ -214,16 +205,8 @@ function board_perm_reason(int $bid, ?array $u): string
     }
     $perm = board_perm_of($b);
     switch ($perm['type']) {
-        case 'admins':
-            return '该板块仅限管理员发帖';
-        case 'level':
-            $l = level_get($perm['level']);
-            if (!$l) {
-                return '该板块的发帖等级已被删除，暂时仅限管理员发帖，请联系管理员重新设置';
-            }
-            $mine = user_level($u);
-            return '该板块需要等级「' . (string)($l['name'] ?? '') . '」（Lv' . level_no((int)$l['id']) . '，需发帖 ' . (int)($l['min'] ?? 0) . ' 篇）及以上才可发帖'
-                . ($mine ? '，您当前为「' . (string)($mine['name'] ?? '') . '」' : '');
+        case 'staff':
+            return '该板块仅限职员（审核员 / 超级管理员）发帖';
         case 'users':
             return '该板块仅限白名单用户发帖';
         default:
@@ -337,8 +320,8 @@ function thread_delete(int $id): bool
 function threads_visible(array $idx): array
 {
     $u = current_user();
-    /* v1.26.0：职员 + 拥有「查看审核中的内容」权限的等级，列表中可看到审核中的帖子 */
-    $see = ($u && role_at_least($u, 'mod')) || ($u && level_can($u, 'view_hidden'));
+    /* v1.27.0：审核中的内容仅职员（审核员 / 超级管理员）可见 */
+    $see = $u && role_at_least($u, 'mod');
     $out = [];
     foreach ($idx as $t) {
         if (!empty($t['hidden']) && !$see) {
@@ -586,10 +569,6 @@ function thread_editable(array $t, ?array $u): bool
     if ((int)($t['author'] ?? 0) !== (int)$u['id']) {
         return false;
     }
-    /* v1.25.0 等级编辑权限 */
-    if (!level_can($u, 'edit_own')) {
-        return false;
-    }
     if (!empty($t['locked']) || !empty($t['hidden']) || (int)($t['replies'] ?? 0) > 0) {
         return false;
     }
@@ -606,10 +585,6 @@ function reply_editable(array $r, ?array $u, array $t): bool
         return true;
     }
     if ((int)($r['author'] ?? 0) !== (int)$u['id']) {
-        return false;
-    }
-    /* v1.25.0 等级编辑权限 */
-    if (!level_can($u, 'edit_own')) {
         return false;
     }
     if (!empty($r['hidden']) || !empty($t['locked'])) {
@@ -1123,9 +1098,9 @@ function ai_precheck_after_post(string $type, int $tid, int $rid, string $conten
     if ((int)cfg('ai_precheck', 1) !== 1 || !ai_ready()) {
         return '';
     }
-    /* v1.26.0 信任等级免 AI 审查：勾选「免 AI 审查」权限的等级，发布与编辑均跳过（用户名审查不跳过） */
+    /* v1.27.0 职员免 AI 审查：审核员 / 超级管理员发布与编辑均跳过（用户名审查不跳过） */
     $au = user_by_id($authorId);
-    if ($au && level_can($au, 'skip_ai')) {
+    if ($au && role_at_least($au, 'mod')) {
         return '';
     }
     $isEdit = $src === 'edit'; /* v1.24.0：'edit' = 编辑后审查（仅影响日志与通知文案） */

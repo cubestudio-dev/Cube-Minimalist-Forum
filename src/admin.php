@@ -7,15 +7,15 @@ defined('APP') or exit('Forbidden');
 
 function page_admin(): void
 {
-    /* v1.26.0：审核员可进后台（仅内容审核类标签页），其余标签页仍需管理员 */
+    /* v1.27.0：审核员可进后台（仅内容审核类标签页），其余标签页仅超级管理员 */
     $me = require_staff();
-    $tab = (string)($_GET['tab'] ?? (role_at_least($me, 'admin') ? 'basic' : 'content'));
+    $tab = (string)($_GET['tab'] ?? (is_super() ? 'basic' : 'content'));
     if (!preg_match('/^[a-z]{1,12}$/', $tab)) {
         $tab = 'basic';
     }
-    /* v1.26.0 角色可见范围：审核员仅限内容审核类标签页，越权访问重定向到其默认页 */
+    /* 角色可见范围：审核员仅限内容审核类标签页，越权访问重定向到其默认页 */
     if (!role_at_least($me, admin_tab_min_role($tab))) {
-        flash('err', t('该页面仅管理员可访问'));
+        flash('err', t('该页面仅超级管理员可访问'));
         redirect(u('p=admin&tab=content'));
     }
     /* v1.16.0：记录当前后台完整地址（tab/筛选/分页），动作保存后 admin_redirect 精确回跳；
@@ -25,23 +25,30 @@ function page_admin(): void
     echo page_head(t('后台管理'), t('所有修改即时生效'));
     mf_do_action('admin_head'); /* v1.22.0 拓展：插件向后台页面注入内容 */
 
-    $tabs = admin_tab_titles();
     /* v1.22.0 后台设置搜索框：跨全部标签页即时检索设置项，回车/点击跳转并高亮定位
-       v1.26.0：仅管理员可见（索引含大量审核员无权页面的条目） */
-    if (role_at_least($me, 'admin')) {
+       v1.27.0：仅超级管理员可见（索引含大量审核员无权页面的条目） */
+    if (is_super()) {
         echo '<div class="admin-search" id="adminSearch">';
         echo '<input class="input admin-search-input" id="adminSearchInput" type="search" placeholder="' . e(t('搜索设置：输入关键词，如「上限」「邮件」「语言」…')) . '" autocomplete="off" aria-label="' . e(t('搜索后台设置')) . '">';
         echo '<div class="admin-search-pop" id="adminSearchPop" hidden></div>';
         echo '</div>';
     }
-    echo '<div class="admin-tabs">';
-    foreach ($tabs as $k => $v) {
-        if (!role_at_least($me, admin_tab_min_role($k))) {
-            continue; /* v1.26.0：审核员看不到无权标签页 */
+    /* v1.27.0 分组侧边导航：21 个标签页按职责归为 5 组，替代原平铺标签条 */
+    echo '<div class="admin-shell">';
+    echo '<nav class="admin-nav" aria-label="' . e(t('后台导航')) . '">';
+    foreach (admin_tab_groups() as $gk => $gkTabs) {
+        $links = '';
+        foreach ($gkTabs as $k) {
+            if (!role_at_least($me, admin_tab_min_role($k))) {
+                continue; /* 审核员看不到无权标签页 */
+            }
+            $links .= '<a class="atab' . ($tab === $k ? ' on' : '') . '" href="' . e(u('p=admin&tab=' . $k)) . '">' . e(t(admin_tab_titles()[$k])) . '</a>';
         }
-        echo '<a class="atab' . ($tab === $k ? ' on' : '') . '" href="' . e(u('p=admin&tab=' . $k)) . '">' . e(t($v)) . '</a>';
+        if ($links !== '') {
+            echo '<div class="nav-group"><div class="nav-group-t">' . e(t($gk)) . '</div>' . $links . '</div>';
+        }
     }
-    echo '</div>';
+    echo '</nav>';
     echo '<div class="admin-body">';
 
     switch ($tab) {
@@ -52,7 +59,6 @@ function page_admin(): void
         case 'ai': admin_tab_ai(); break;
         case 'boards': admin_tab_boards(); break;
         case 'users': admin_tab_users(); break;
-        case 'levels': admin_tab_levels(); break;
         case 'content': admin_tab_content(); break;
         case 'queue': admin_tab_queue(); break;
         case 'manual': admin_tab_manual(); break;
@@ -69,6 +75,7 @@ function page_admin(): void
         default: admin_tab_basic();
     }
 
+    echo '</div>';
     echo '</div>';
     layout_footer();
 }
@@ -155,66 +162,95 @@ function admin_card_lang(): string
 
 /* ---------------- 功能总开关（v1.14.0，v1.15.0 扩展 @ 提及与 AI 开关） ---------------- */
 
-/** 后台标签 → 中文名（导航与访问日志共用） */
+/** 后台标签 → 中文名（导航与访问日志共用；v1.27.0 移除「等级」页） */
 function admin_tab_titles(): array
 {
     return [
         'basic' => '基本', 'feat' => '功能', 'storage' => '存储', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
-        'levels' => '等级',
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
         'anns' => '公告', 'theme' => '主题', 'ext' => '拓展', 'docs' => '协议', 'api' => '开放 API', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
 }
 
+/** v1.27.0 后台分组导航：分组名 → 标签页列表（按使用频率与职责归组，共 21 页） */
+function admin_tab_groups(): array
+{
+    return [
+        '内容审核' => ['content', 'queue', 'manual', 'reports'],
+        '用户与社区' => ['users', 'boards', 'anns', 'docs'],
+        '功能与外观' => ['feat', 'theme', 'ext'],
+        '站点设置' => ['basic', 'storage', 'mail', 'ai', 'api', 'security'],
+        '运行与系统' => ['monitor', 'logs', 'update', 'system'],
+    ];
+}
+
 /**
- * v1.26.0 各标签页的最低职员角色：
- * 审核员（mod）仅可见内容审核域 4 页；其余全部需要管理员（admin）；角色指派动作另由 require_super 把关。
+ * 各标签页的最低职员角色（v1.27.0 三级角色）：
+ * 审核员（mod）仅可见内容审核域 4 页；其余全部需要超级管理员（super）；角色指派动作另由 require_super 把关。
  */
 function admin_tab_min_role(string $tab): string
 {
     static $mod = ['content' => 1, 'queue' => 1, 'manual' => 1, 'reports' => 1];
-    return isset($mod[$tab]) ? 'mod' : 'admin';
+    return isset($mod[$tab]) ? 'mod' : 'super';
+}
+
+/**
+ * 功能开关页（v1.27.0 重构：三卡分组，覆盖全部可开/关的社区能力）。
+ * AI 两项直接绑定「AI」页原生配置键（ai_precheck / ai_autopilot），两处开关同一份，避免双开关不同步。
+ */
+function admin_feat_cards(): array
+{
+    return [
+        '基础功能' => [
+            'register'     => ['开放注册', '关闭后新用户无法注册，已有账号不受影响'],
+            'guest_browse' => ['游客可浏览', '关闭后未登录访客只能看到登录 / 注册 / 找回密码页（私密论坛模式）'],
+            'post'         => ['发帖', '关闭后所有人（含职员）都不能发新帖'],
+            'reply'        => ['回复', '关闭后所有人（含职员）都不能回复'],
+            'edit'         => ['内容编辑', '作者可在发布后 15 分钟内编辑自己的内容，职员不限时'],
+            'del_own'      => ['删除自己的内容', '允许用户删除自己的帖子 / 回复；关闭后只能联系职员删除（v1.27.0）'],
+            'signature'    => ['用户签名', '用户可在个人设置填写签名，展示在帖子 / 回复下方与个人主页'],
+            'titles'       => ['会员头衔', '按发帖数自动晋升的展示性称号（新成员 → 社区元老，无权限含义）；关闭后不再显示头衔徽章（v1.27.0）'],
+        ],
+        '互动与社区' => [
+            'like'    => ['点赞', ''],
+            'report'  => ['举报', '隐藏前台举报入口；AI 审核队列与防火墙不受影响'],
+            'mention' => ['@ 提及通知', '内容中 @用户名 时，系统自动给对方发送站内通知；被提及名字会高亮展示（v1.15.0）'],
+            'search'  => ['站内搜索', ''],
+            'emoji'   => ['表情选择器', '仅隐藏输入框上方的表情按钮，Markdown 表情短代码仍可正常渲染'],
+            'online'  => ['在线名单', '关闭后侧栏在线人数不再可点击查看名单页'],
+        ],
+        '界面与 AI' => [
+            'motion'       => ['界面动效', '页面切换过渡、进场动画、导航进度条与链接预取：高延迟服务器上依然顺滑流畅（v1.23.0）'],
+            'ai_precheck'  => ['AI 审查（发帖 / 编辑 / 用户名）', '每条帖子 / 回复发布后与内容编辑后都会交给 AI 审查；用户名在注册与修改时同步审查；违规自动隐藏 / 拒绝、通知作者可申诉；模型与严格程度在「AI」页配置'],
+            'ai_autopilot' => ['AI 自主管理', 'AI 无人值守巡逻：自主封禁风险 IP / 解除误封 / 邮件警报管理员；间隔与红线在「安全防护」页配置'],
+        ],
+    ];
 }
 
 function admin_tab_feat(): void
 {
-    $items = [
-        'register'     => ['开放注册', '关闭后新用户无法注册，已有账号不受影响'],
-        'guest_browse' => ['游客可浏览', '关闭后未登录访客只能看到登录 / 注册 / 找回密码页（私密论坛模式）'],
-        'post'         => ['发帖', '关闭后所有人（含管理员）都不能发新帖'],
-        'reply'        => ['回复', '关闭后所有人（含管理员）都不能回复'],
-        'edit'         => ['内容编辑', '作者可在发布后 15 分钟内编辑自己的内容，管理员不限时'],
-        'like'         => ['点赞', ''],
-        'report'       => ['举报', '隐藏前台举报入口；AI 审核队列与防火墙不受影响'],
-        'search'       => ['站内搜索', ''],
-        'emoji'        => ['表情选择器', '仅隐藏输入框上方的表情按钮，Markdown 表情短代码仍可正常渲染'],
-        'online'       => ['在线名单', '关闭后侧栏在线人数不再可点击查看名单页'],
-        'signature'    => ['用户签名', '用户可在个人设置填写签名，展示在帖子 / 回复下方与个人主页'],
-        'mention'      => ['@ 提及通知', '内容中 @用户名 时，系统自动给对方发送站内通知；被提及名字会高亮展示（v1.15.0）'],
-        'motion'       => ['界面动效', '页面切换过渡、进场动画、导航进度条与链接预取：高延迟服务器上依然顺滑流畅（v1.23.0）'],
-    ];
-    /* AI 两项直接绑定「AI」页的原生配置键（ai_precheck / ai_autopilot），两处开关同一份，避免双开关不同步 */
-    $aiItems = [
-        'ai_precheck'  => ['AI 审查（发帖 / 编辑 / 用户名）', '每条帖子 / 回复发布后与内容编辑后都会交给 AI 审查；用户名在注册与修改时同步审查；违规自动隐藏 / 拒绝、通知作者可申诉；模型与严格程度在「AI」页配置'],
-        'ai_autopilot' => ['AI 自主管理', 'AI 无人值守巡逻：自主封禁风险 IP / 解除误封 / 邮件警报管理员；间隔与红线在「安全防护」页配置'],
-    ];
-    echo '<div class="card form-card"><h2 class="card-title">' . t('功能总开关') . '</h2><p class="muted">勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。</p>' .
-        '<form method="post" action="' . e(u('a=admin_save_feat')) . '" data-ajax="1">' . csrf_field();
-    foreach ($items as $k => [$name, $desc]) {
-        $on = feat_on($k);
-        echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
-            '<span class="feat-txt"><b>' . e(t($name)) . '</b>' . ($desc !== '' ? '<span class="muted">' . e($desc) . '</span>' : '') . '</span>' .
-            '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . e(t($on ? '开启' : '关闭')) . '</span></label>';
+    $cards = admin_feat_cards();
+    $aiKeys = ['ai_precheck', 'ai_autopilot'];
+    echo '<p class="hint" style="margin-bottom:14px">' . e(t('勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。')) . '</p>';
+    /* 三卡共用一个表单：一次保存全部开关 */
+    echo '<form method="post" action="' . e(u('a=admin_save_feat')) . '" data-ajax="1">' . csrf_field();
+    $allKeys = [];
+    foreach ($cards as $cardName => $items) {
+        echo '<div class="card form-card"><h2 class="card-title">' . e(t($cardName)) . '</h2>';
+        foreach ($items as $k => [$name, $desc]) {
+            /* AI 两项的原生配置键不带 feat_ 前缀（还原默认注册表按原键登记） */
+            $allKeys[] = in_array($k, $aiKeys, true) ? $k : 'feat_' . $k;
+            $on = in_array($k, $aiKeys, true) ? (int)cfg($k, 1) === 1 : feat_on($k);
+            echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
+                '<span class="feat-txt"><b>' . e(t($name)) . '</b>' . ($desc !== '' ? '<span class="muted">' . e(t($desc)) . '</span>' : '') . '</span>' .
+                '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . e(t($on ? '开启' : '关闭')) . '</span></label>';
+        }
+        echo '</div>';
     }
-    foreach ($aiItems as $k => [$name, $desc]) {
-        $on = (int)cfg($k, 1) === 1;
-        echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
-            '<span class="feat-txt"><b>' . e(t($name)) . '</b><span class="muted">' . e($desc) . '</span></span>' .
-            '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . e(t($on ? '开启' : '关闭')) . '</span></label>';
-    }
-    echo '<div class="form-foot"><span class="muted">数据安全不受影响：关闭任何开关都不会删除数据，重新勾选即恢复</span>' .
-        '<button class="btn btn-primary" type="submit">' . t('保存功能开关') . '</button></div></form>' .
-        admin_restore_btn('feat_register,feat_guest_browse,feat_post,feat_reply,feat_edit,feat_like,feat_report,feat_search,feat_emoji,feat_online,feat_signature,feat_mention,feat_motion,ai_precheck,ai_autopilot') . '</div>';
+    echo '<div class="card form-card"><div class="form-foot"><span class="muted">' . e(t('数据安全不受影响：关闭任何开关都不会删除数据，重新勾选即恢复')) . '</span>' .
+        '<button class="btn btn-primary" type="submit">' . e(t('保存功能开关')) . '</button></div>' .
+        '<span class="test-msg muted"></span></form>' .
+        admin_restore_btn(implode(',', $allKeys)) . '</div>';
 }
 
 /* ---------------- v1.21.0 存储引擎（文件 ⇄ 数据库，双向无损迁移） ---------------- */
@@ -598,24 +634,18 @@ function admin_tab_boards(): void
             '<form method="post" action="' . e(u('a=admin_board_move')) . '" class="inline"><input type="hidden" name="id" value="' . $bid . '"><input type="hidden" name="dir" value="down">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit" title="下移">↓</button></form>' .
             '<form method="post" action="' . e(u('a=admin_board_del')) . '" class="inline" data-confirm="确认删除该板块？（板块下有帖子时无法删除）"><input type="hidden" name="id" value="' . $bid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('删除') . '</button></form>' .
             '</span>';
-        /* v1.25.0 板块发帖权限面板 */
+        /* v1.25.0 板块发帖权限面板（v1.27.0：所有人 / 仅职员 / 白名单用户） */
         echo '<details class="board-perm"><summary>' . t('发帖权限') . '：' . e(board_perm_label($bid)) . '</summary>' .
             '<form method="post" action="' . e(u('a=admin_board_perm')) . '" class="inline-form perm-form" data-perm-form>' . csrf_field() .
             '<input type="hidden" name="id" value="' . $bid . '">' .
             '<select class="input input-sm" name="perm_type" data-perm-type>' .
             '<option value="all"' . ($perm['type'] === 'all' ? ' selected' : '') . '>' . t('所有人') . '</option>' .
-            '<option value="admins"' . ($perm['type'] === 'admins' ? ' selected' : '') . '>' . t('仅管理员') . '</option>' .
-            '<option value="level"' . ($perm['type'] === 'level' ? ' selected' : '') . '>' . t('指定等级及以上') . '</option>' .
+            '<option value="staff"' . ($perm['type'] === 'staff' ? ' selected' : '') . '>' . t('仅职员（审核员及以上）') . '</option>' .
             '<option value="users"' . ($perm['type'] === 'users' ? ' selected' : '') . '>' . t('白名单用户') . '</option>' .
             '</select>' .
-            '<select class="input input-sm" name="perm_level" data-perm-level' . ($perm['type'] === 'level' ? '' : ' hidden') . '>';
-        foreach (levels_sorted() as $l) {
-            echo '<option value="' . (int)$l['id'] . '"' . ($perm['level'] === (int)$l['id'] ? ' selected' : '') . '>Lv' . level_no((int)$l['id']) . ' ' . e((string)$l['name']) . '（' . (int)$l['min'] . ' 帖）</option>';
-        }
-        echo '</select>' .
             '<input class="input input-sm" name="perm_users" data-perm-users' . ($perm['type'] === 'users' ? '' : ' hidden') . ' value="' . e(implode('、', array_map('uname', $perm['uids']))) . '" placeholder="' . e(t('用户名，逗号分隔，如：张三,李四')) . '" style="min-width:220px">' .
             '<button class="btn btn-ghost btn-sm" type="submit">' . t('保存权限') . '</button>' .
-            '<span class="hint">' . e(t('回复不受板块发帖权限限制；网页端与开放 API 同时生效')) . '</span>' .
+            '<span class="hint">' . e(t('回复不受板块发帖权限限制；网页端与开放 API 同时生效；职员不受限制')) . '</span>' .
             '</form></details>';
         echo '</div>';
     }
@@ -652,7 +682,7 @@ function admin_tab_users(): void
         echo '<div class="admin-row admin-user"><div class="u-info">' .
             '<a class="u-name" href="' . e(u('p=user&id=' . $uid)) . '">' . e((string)$x['name']) . '</a>' .
             '<span class="muted">' . e((string)$x['email']) . '</span>' .
-            level_badge($x) .
+            badge_for($x) .
             $status . '</div>';
         if (!$self) {
             echo '<span class="row-ops">' .
@@ -660,26 +690,13 @@ function admin_tab_users(): void
                 '<input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() .
                 '<select name="mins" class="input input-sm"><option value="10">' . t('10 分钟') . '</option><option value="60">' . t('1 小时') . '</option><option value="1440">' . t('1 天') . '</option><option value="10080">' . t('7 天') . '</option></select>' .
                 '<button class="btn btn-ghost btn-sm" type="submit">' . t('禁言') . '</button></form>';
-            /* v1.25.0 等级指派：自动（按发帖数）或手动指定某一等级（管理员账号不受等级限制，不显示） */
-            if (empty($x['admin'])) {
-                $ulv = (int)($x['level'] ?? 0);
-                echo '<form method="post" action="' . e(u('a=admin_user_level')) . '" class="inline">' .
-                    '<input type="hidden" name="uid" value="' . $uid . '">' .
-                    '<select name="level" class="input input-sm" aria-label="' . e(t('指派等级')) . '">' .
-                    '<option value="0"' . ($ulv === 0 ? ' selected' : '') . '>' . t('自动等级') . '</option>';
-                foreach (levels_sorted() as $l) {
-                    echo '<option value="' . (int)$l['id'] . '"' . ($ulv === (int)$l['id'] ? ' selected' : '') . '>Lv' . level_no((int)$l['id']) . ' ' . e((string)$l['name']) . '</option>';
-                }
-                echo '</select>' . csrf_field() .
-                    '<button class="btn btn-ghost btn-sm" type="submit">' . t('指派') . '</button></form>';
-            }
             if (!empty($x['banned'])) {
                 echo '<form method="post" action="' . e(u('a=admin_user_unban')) . '" class="inline"><input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit">' . t('解封') . '</button></form>';
             } else {
                 echo '<form method="post" action="' . e(u('a=admin_user_ban')) . '" class="inline" data-confirm="确认封禁该账号？封禁后无法登录。"><input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('封号') . '</button></form>';
             }
             if (is_super()) {
-                /* v1.26.0 角色指派：仅超级管理员可见（普通用户 / 审核员 / 管理员 / 超级管理员） */
+                /* v1.27.0 角色指派：仅超级管理员可见（普通用户 / 审核员 / 超级管理员，即坛主） */
                 $cur = user_role($x);
                 echo '<form method="post" action="' . e(u('a=admin_user_role')) . '" class="inline">' .
                     '<input type="hidden" name="uid" value="' . $uid . '">' .
@@ -697,47 +714,6 @@ function admin_tab_users(): void
         echo '</div>';
     }
     echo '</div></div>';
-}
-
-/* ---------------- v1.25.0 等级系统 ---------------- */
-function admin_tab_levels(): void
-{
-    echo '<div class="card form-card"><h2 class="card-title">' . t('等级系统') . '</h2>' .
-        '<p class="hint">' . t('用户等级：手动指派优先，未指派时按发帖数自动匹配「所需发帖数」达标的最高等级；管理员不受等级限制。全部等级均可删除（至少保留一个等级），删除后被指派用户自动回退为按发帖数自动等级，相关板块准入回退为仅管理员。每个等级可独立勾选权限，配合「板块 → 发帖权限」可实现精细的板块准入控制。成长等级管「自己能用什么」，职员角色（用户 / 审核员 / 管理员 / 超级管理员，见「用户」页）管「能管别人什么」。') . '</p></div>';
-
-    echo '<div class="card form-card"><h2 class="card-title">' . t('新建等级') . '</h2>' .
-        '<form method="post" action="' . e(u('a=admin_level_new')) . '" class="inline-form">' . csrf_field() .
-        '<input class="input" name="name" required maxlength="20" placeholder="' . e(t('等级名称（如：元老）')) . '">' .
-        '<input class="input" name="min" type="number" min="0" max="1000000" value="0" style="max-width:130px" aria-label="' . e(t('所需发帖数')) . '">' .
-        '<span class="muted">' . e(t('所需发帖数')) . '</span>' .
-        '<button class="btn btn-primary" type="submit">' . t('创建') . '</button></form>' .
-        '<p class="hint">' . e(t('新建等级的权限默认与最低等级一致，创建后可单独调整；所需发帖数填 0 表示所有人立即达到')) . '</p></div>';
-
-    $lvs = levels_sorted();
-    echo '<div class="card form-card"><h2 class="card-title">' . t('等级列表') . '（' . count($lvs) . '）</h2><div class="admin-list">';
-    foreach ($lvs as $l) {
-        $lid = (int)$l['id'];
-        $perms = is_array($l['perms'] ?? null) ? $l['perms'] : [];
-        echo '<div class="level-row"><form method="post" action="' . e(u('a=admin_level_save')) . '">' . csrf_field() .
-            '<input type="hidden" name="id" value="' . $lid . '">' .
-            '<div class="level-head">' .
-            '<span class="badge badge-info">Lv' . level_no($lid) . '</span>' .
-            '<input class="input input-sm" name="name" value="' . e((string)$l['name']) . '" maxlength="20" required>' .
-            (!empty($l['built_in']) ? '<span class="badge">' . t('内置') . '</span>' : '') .
-            '<label class="lv-min">' . e(t('所需发帖数')) . ' <input class="input input-sm" name="min" type="number" min="0" max="1000000" value="' . (int)$l['min'] . '" style="max-width:110px"></label>' .
-            '<label class="lv-min">' . e(t('发帖间隔覆盖（秒）')) . ' <input class="input input-sm" name="interval" type="number" min="0" max="3600" value="' . (int)($l['interval'] ?? 0) . '" style="max-width:110px" title="' . e(t('0 = 使用全局「发帖间隔」；大于 0 时该等级用户发帖 / 回复按此间隔执行')) . '"></label>' .
-            '</div>' .
-            '<div class="level-perms">';
-        foreach (LEVEL_PERMS as $pk => $pv) {
-            echo '<label class="check check-inline" title="' . e(t($pv[1])) . '"><input type="checkbox" name="perms[' . e($pk) . ']" value="1"' . (!empty($perms[$pk]) ? ' checked' : '') . '> ' . e(t($pv[0])) . '</label>';
-        }
-        echo '</div>' .
-            '<div class="form-foot"><span class="muted">' . e(t('所需发帖数 = 用户发帖数达到该值即自动晋升到此等级（0 = 默认等级）')) . '</span>' .
-            '<span><button class="btn btn-ghost btn-sm" type="submit">' . t('保存') . '</button>' .
-            ' <button class="btn btn-ghost btn-sm danger" type="submit" formaction="' . e(u('a=admin_level_del')) . '" data-confirm="' . e(t('确认删除该等级？被指派该等级的用户将回退为自动等级')) . '">' . t('删除') . '</button>' .
-            '</span></div></form></div>';
-    }
-    echo '</div><p class="hint">' . e(t('权限即时生效：取消勾选后，该等级用户的对应操作（发帖 / 回复 / 编辑 / 删除 / 签名 / 点赞 / 举报 / @ 提及 / 搜索 / 表情 / 免 AI 审查 / 查看审核中）会立即被拦截或生效，前台按钮同步隐藏')) . '</p></div>';
 }
 
 /* ---------------- 内容 ---------------- */
@@ -1902,11 +1878,12 @@ function admin_cfg_defaults(): array
         /* 功能总开关（默认全开） */
         'feat_register' => [1, '开放注册'], 'feat_guest_browse' => [1, '游客可浏览'],
         'feat_post' => [1, '发帖'], 'feat_reply' => [1, '回复'],
-        'feat_edit' => [1, '内容编辑'], 'feat_like' => [1, '点赞'],
-        'feat_report' => [1, '举报'], 'feat_search' => [1, '搜索'],
-        'feat_emoji' => [1, '表情'], 'feat_online' => [1, '在线名单'],
-        'feat_signature' => [1, '用户签名'], 'feat_mention' => [1, '@ 提及通知'],
-        'feat_motion' => [1, '界面动效'],
+        'feat_edit' => [1, '内容编辑'], 'feat_del_own' => [1, '删除自己的内容'],
+        'feat_like' => [1, '点赞'], 'feat_report' => [1, '举报'],
+        'feat_search' => [1, '搜索'], 'feat_emoji' => [1, '表情'],
+        'feat_online' => [1, '在线名单'], 'feat_signature' => [1, '用户签名'],
+        'feat_mention' => [1, '@ 提及通知'], 'feat_motion' => [1, '界面动效'],
+        'feat_titles' => [1, '会员头衔'],
         /* 邮件 */
         'smtp_host' => ['', 'SMTP 主机'], 'smtp_port' => [465, 'SMTP 端口'],
         'smtp_from' => ['', '发信邮箱'], 'smtp_pass' => ['', 'SMTP 授权码'],
@@ -2037,13 +2014,12 @@ function admin_search_index(): array
         /* 板块 */
         ['boards', '新建板块', '板块名称 / 简介', 'board new 创建板块'],
         ['boards', '板块列表', '板块排序 / 编辑 / 删除', 'board sort move'],
-        ['boards', '板块发帖权限', '所有人 / 仅管理员 / 指定等级及以上 / 白名单用户', 'board perm 发帖权限 白名单 受邀 准入'],
-        /* 等级 */
-        ['levels', '等级系统', '等级说明 / 自动晋升 / 手动指派 / 职员角色', 'level 等级 权限 升级 新手上路 活跃 资深 角色 审核员 管理员 超级管理员'],
-        ['levels', '新建等级', '自定义等级（名称 / 所需发帖数）', 'level new 自定义等级 创建'],
-        ['levels', '等级列表', '等级权限矩阵（发帖 / 回复 / 编辑 / 删除 / 签名 / 点赞 / 举报 / @ 提及 / 搜索 / 表情 / 免 AI 审查 / 查看审核中）与间隔覆盖，全部等级可删除', 'level perms 权限矩阵 间隔覆盖 内置 删除等级'],
+        ['boards', '板块发帖权限', '所有人 / 仅职员 / 白名单用户', 'board perm 发帖权限 白名单 受邀 准入 职员'],
         /* 用户 */
-        ['users', '用户', '用户搜索 / 封禁 / 禁言 / 等级指派 / 角色指派（用户 / 审核员 / 管理员 / 超级管理员，仅超级管理员）', 'user search ban admin role 审核员 moderator 角色'],
+        ['users', '用户', '用户搜索 / 封禁 / 禁言 / 角色指派（普通用户 / 审核员 / 超级管理员，仅超级管理员）', 'user search ban admin role 审核员 moderator 角色 坛主'],
+        /* 功能（v1.27.0 开关索引） */
+        ['feat', '删除自己的内容', '允许用户删除自己的帖子 / 回复', 'del_own delete 删除'],
+        ['feat', '会员头衔', '按发帖数自动晋升的展示性称号（新成员 / 正式成员 / 活跃成员 / 资深成员 / 社区元老）', 'title 头衔 称号 成员'],
         /* 内容 */
         ['content', '帖子', '帖子搜索 / 置顶 / 锁定 / 删除', 'thread pin lock delete'],
         ['content', '举报记录', '举报处理', 'report'],

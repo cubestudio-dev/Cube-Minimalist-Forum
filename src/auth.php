@@ -249,12 +249,9 @@ function require_login(string $next = ''): array
 
 function require_admin(): array
 {
-    $u = require_login();
-    if (empty($u['admin'])) {
-        flash('err', '无权访问后台');
-        redirect(u('p=home'));
-    }
-    return $u;
+    /* v1.27.0：三级角色下「管理员动作」一律需要超级管理员（原中间「管理员」层已并入超级管理员；
+       审核员走 require_staff，仅限内容审核域） */
+    return require_super();
 }
 
 /** v1.26.0：需要审核团队身份（审核员 / 管理员 / 超级管理员） */

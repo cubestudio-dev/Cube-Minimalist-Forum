@@ -939,15 +939,13 @@
     }
   }
 
-  /* ---------- v1.25.0 板块发帖权限面板：类型切换时联动显示等级 / 白名单输入 ---------- */
+  /* ---------- v1.25.0 板块发帖权限面板：类型切换时联动显示白名单输入（v1.27.0 三选） ---------- */
   $$('[data-perm-form]').forEach(function (form) {
     var type = form.querySelector('[data-perm-type]');
-    var lv = form.querySelector('[data-perm-level]');
     var us = form.querySelector('[data-perm-users]');
     if (!type) return;
     function sync() {
       var v = type.value;
-      if (lv) lv.hidden = v !== 'level';
       if (us) us.hidden = v !== 'users';
     }
     type.addEventListener('change', sync);

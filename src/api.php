@@ -730,12 +730,9 @@ function api_ep_threads_create(?array $u): void
     if ($board <= 0 || !board_get($board)) {
         api_err('validation', 'board 参数无效：板块不存在', 400);
     }
-    /* v1.25.0 板块发帖权限与等级权限（与网页端同规则） */
+    /* v1.25.0 板块发帖权限（与网页端同规则） */
     if (!board_can_post($board, $u)) {
         api_err('forbidden', board_perm_reason($board, $u), 403);
-    }
-    if (!level_can($u, 'post')) {
-        api_err('forbidden', '您当前等级不能发布新帖，请先参与互动提升等级', 403);
     }
     if ($title === '') {
         api_err('validation', 'title 不能为空（≤30 字）', 400);
@@ -783,10 +780,6 @@ function api_ep_replies_create(?array $u): void
     if (!$t || !empty($t['locked'])) {
         api_err('not_found', '该帖子已锁定或不存在，无法回复', 404);
     }
-    /* v1.25.0 等级回复权限 */
-    if (!level_can($u, 'reply')) {
-        api_err('forbidden', '您当前等级不能发表回复，请先参与互动提升等级', 403);
-    }
     $wait = api_flood_wait($u);
     if ($wait > 0) {
         header('Retry-After: ' . $wait);
@@ -816,10 +809,6 @@ function api_ep_likes_toggle(?array $u): void
     if (!feat_on('like')) {
         api_err('endpoint_disabled', '本站已关闭点赞功能', 403);
     }
-    /* v1.25.0 等级点赞权限 */
-    if (!level_can($u, 'like')) {
-        api_err('forbidden', '您当前等级不能点赞，请先参与互动提升等级', 403);
-    }
     $type = api_in('type') === 'r' ? 'r' : 't';
     $tid = api_in_int('tid', 0);
     $rid = api_in_int('rid', 0);
@@ -842,9 +831,9 @@ function api_ep_threads_delete(?array $u): void
     if (!$admin && (int)$t['author'] !== (int)$u['id']) {
         api_err('forbidden', '只能删除自己的帖子', 403);
     }
-    /* v1.25.0 等级删除权限 */
-    if (!$admin && !level_can($u, 'del_own')) {
-        api_err('forbidden', '您当前等级不能删除自己的内容，可联系管理员处理', 403);
+    /* v1.27.0 删除自己的内容：受「功能 → 删除自己的内容」开关约束 */
+    if (!$admin && !feat_on('del_own')) {
+        api_err('forbidden', '删除自己的内容功能已关闭，可联系管理员处理', 403);
     }
     $author = (int)$t['author'];
     if (!thread_delete($tid)) {
@@ -870,9 +859,9 @@ function api_ep_replies_delete(?array $u): void
     if (!$admin && (int)$r['author'] !== (int)$u['id']) {
         api_err('forbidden', '只能删除自己的回复', 403);
     }
-    /* v1.25.0 等级删除权限 */
-    if (!$admin && !level_can($u, 'del_own')) {
-        api_err('forbidden', '您当前等级不能删除自己的内容，可联系管理员处理', 403);
+    /* v1.27.0 删除自己的内容：受「功能 → 删除自己的内容」开关约束 */
+    if (!$admin && !feat_on('del_own')) {
+        api_err('forbidden', '删除自己的内容功能已关闭，可联系管理员处理', 403);
     }
     reply_delete($tid, $rid);
     log_action('reply_delete', ($admin && (int)$r['author'] !== (int)$u['id'] ? '管理员' : '作者') . '通过开放 API 删除《' . cut_str((string)(thread_get($tid)['title'] ?? ''), 40) . '》中的回复');
@@ -887,9 +876,11 @@ function api_ep_me_info(?array $u): void
     $pub['email'] = (string)$u['email'];
     $pub['mute_until'] = (int)($u['mute_until'] ?? 0);
     $pub['notifications_unread'] = notify_unread((int)$u['id']);
-    /* v1.25.0 等级信息 */
-    $myLv = user_level($u);
-    $pub['level'] = $myLv ? ['id' => (int)$myLv['id'], 'name' => (string)$myLv['name'], 'no' => level_no((int)$myLv['id']), 'manual' => (int)($u['level'] ?? 0) > 0] : null;
+    /* v1.27.0 会员头衔（替代成长等级） */
+    if (feat_on('titles')) {
+        $myTitle = user_title($u);
+        $pub['title'] = ['name' => t((string)$myTitle['name']), 'next' => next_title($u) !== null ? (int)next_title($u)['min'] : 0, 'posts' => max(0, (int)($u['threads'] ?? 0))];
+    }
     /* v1.26.0 职员角色 */
     $pub['role'] = user_role($u);
     $pub['token'] = [
