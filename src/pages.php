@@ -111,6 +111,7 @@ function page_thread(): void
     echo '<article class="card thread-art">';
     echo '<div class="art-head"><h1 class="art-title">' . e((string)$t['title']) . '</h1><div class="art-meta">' .
         '<a href="' . e(u('p=user&id=' . $author)) . '">' . e(uname($author)) . '</a>' .
+        level_badge_by_uid($author) .
         '<span>' . fmt_dt((int)$t['created']) . '</span>' .
         '<span class="muted">浏览 ' . (int)($t['views'] ?? 0) . '</span>' .
         (!empty($t['edited']) ? '<span class="muted" title="编辑于 ' . e(fmt_dt((int)$t['edited'])) . '">已编辑</span>' : '') .
@@ -134,7 +135,7 @@ function page_thread(): void
         if (thread_editable($t, $u)) {
             echo '<a class="btn btn-ghost btn-sm" href="' . e(u('p=edit&type=thread&id=' . $tid)) . '">编辑</a>';
         }
-        if ($author === $uid) {
+        if ($author === $uid && level_can($u, 'del_own')) {
             echo '<form method="post" action="' . e(u('a=thread_delete')) . '" class="inline" data-confirm="确认删除自己的这条帖子？此操作不可恢复。">' .
                 '<input type="hidden" name="tid" value="' . $tid . '">' . csrf_field() . hidden_back() .
                 '<button class="btn btn-ghost btn-sm danger" type="submit">删除</button></form>';
@@ -183,6 +184,7 @@ function page_thread(): void
         $rhidden = !empty($r['hidden']);
         echo '<div class="card reply-item" id="r' . $rid . '">';
         echo '<div class="reply-meta"><a href="' . e(u('p=user&id=' . (int)$r['author'])) . '">' . e(uname((int)$r['author'])) . '</a>' .
+            level_badge_by_uid((int)$r['author']) .
             '<span class="muted">' . fmt_time((int)$r['created']) . '</span>' .
             (!empty($r['edited']) ? '<span class="muted" title="编辑于 ' . e(fmt_dt((int)$r['edited'])) . '">已编辑</span>' : '') .
             ($rhidden ? '<span class="badge badge-warn">审核中</span>' : '') .
@@ -205,7 +207,7 @@ function page_thread(): void
             if (reply_editable($r, $u, $t)) {
                 echo '<a class="btn btn-ghost btn-sm" href="' . e(u('p=edit&type=reply&id=' . $tid . '&rid=' . $rid)) . '">编辑</a>';
             }
-            if ((int)$r['author'] === $uid) {
+            if ((int)$r['author'] === $uid && level_can($u, 'del_own')) {
                 echo '<form method="post" action="' . e(u('a=reply_delete')) . '" class="inline" data-confirm="确认删除自己的这条回复？">' .
                     '<input type="hidden" name="tid" value="' . $tid . '"><input type="hidden" name="rid" value="' . $rid . '">' .
                     csrf_field() . hidden_back() .
@@ -263,6 +265,11 @@ function page_new(): void
         flash('err', '您已被禁言，剩余 ' . ceil(mute_left($u) / 60) . ' 分钟');
         redirect(u('p=home'));
     }
+    /* v1.25.0 等级发帖权限预检：无发帖权限直接引导，不进表单 */
+    if (!level_can($u, 'post')) {
+        flash('err', '您当前等级不能发布新帖，请先参与互动提升等级');
+        redirect(u('p=home'));
+    }
     $pre = get_int('id', 0);
     /* v1.16.0：发言间隔被拒时内容已存会话草稿，回跳后自动填回，用户不必重打 */
     $draft = $_SESSION['post_draft'] ?? null;
@@ -274,15 +281,33 @@ function page_new(): void
     echo '<div class="card form-card"><form method="post" action="' . e(u('a=thread_new')) . '">' .
         csrf_field() . hidden_back() .
         '<label class="field"><span class="field-l">板块</span><select name="board" class="input" required>';
-    foreach (board_all() as $b) {
-        echo '<option value="' . (int)$b['id'] . '"' . ($pre === (int)$b['id'] ? ' selected' : '') . '>' . e((string)$b['name']) . '</option>';
+    /* v1.25.0 板块发帖权限：不可发的板块标注原因并禁选；预选板块不可发时自动改选第一个可发板块 */
+    $target = 0;
+    if ($pre > 0 && board_can_post($pre, $u)) {
+        $target = $pre;
+    } else {
+        foreach (board_all() as $b) {
+            if (board_can_post((int)$b['id'], $u)) {
+                $target = (int)$b['id'];
+                break;
+            }
+        }
     }
-    echo '</select></label>' .
+    $canAny = $target > 0;
+    foreach (board_all() as $b) {
+        $bid = (int)$b['id'];
+        $ok = board_can_post($bid, $u);
+        echo '<option value="' . $bid . '"' . ($ok && $bid === $target ? ' selected' : '') . ($ok ? '' : ' disabled') . '>'
+            . e((string)$b['name']) . ($ok ? '' : '（' . e(board_perm_label($bid)) . '）') . '</option>';
+    }
+    echo '</select>' .
+        ($canAny ? '' : '<span class="hint" style="color:var(--danger)">当前没有任何允许你发帖的板块：可发板块由管理员通过「板块 → 发帖权限」与等级体系控制</span>') .
+        '</label>' .
         '<label class="field"><span class="field-l">标题 <span class="cnt"><span id="t-count">0</span>/30</span></span>' .
         '<input class="input" name="title" id="title-input" maxlength="30" required data-counter="#t-count" value="' . e($dt) . '" placeholder="一句话说清主题"></label>' .
         '<label class="field"><span class="field-l">正文 <span class="cnt"><span id="c-count">0</span>/1500</span></span>' .
         '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1500" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮==；@用户名 会通知对方">' . e($dc) . '</textarea></label>' .
-        '<div class="form-foot"><span class="muted">两次发帖间隔不低于 ' . (int)cfg('post_interval', 30) . ' 秒</span>' .
+        '<div class="form-foot"><span class="muted">两次发帖间隔不低于 ' . (level_interval($u) > 0 ? level_interval($u) . ' 秒（当前等级）' : (int)cfg('post_interval', 30) . ' 秒') . '</span>' .
         '<button class="btn btn-primary" type="submit">发布</button></div></form></div>';
     layout_footer();
 }
@@ -402,7 +427,7 @@ function page_user(): void
     echo '<div class="card profile-card"><div class="profile-top">' .
         '<span class="avatar" aria-hidden="true">' . e(cut_str((string)$p['name'], 1)) . '</span>' .
         '<div class="profile-info"><b>' . e((string)$p['name']) . '</b>' .
-        '<span class="badge' . (!empty($p['admin']) ? ' badge-accent' : '') . '">' . e(role_name($p)) . '</span>' .
+        level_badge($p) .
         ($self ? '<a class="btn btn-ghost btn-sm" href="' . e(u('p=settings')) . '">编辑资料</a>' : '') .
         '</div></div>' .
         '<p class="profile-bio">' . ($p['bio'] !== '' ? e((string)$p['bio']) : '<span class="muted">这个人很懒，什么都没写</span>') . '</p>' .
@@ -437,11 +462,16 @@ function page_settings(): void
     $u = require_login('p=settings');
     layout_header('个人设置', 0);
     echo page_head('个人设置', '修改用户名、简介，或通过邮箱验证码修改密码');
+    /* v1.25.0 等级与进度卡 */
+    $lvHtml = level_progress_html($u);
+    if ($lvHtml !== '') {
+        echo '<div class="card form-card"><h2 class="card-title">我的等级</h2>' . $lvHtml . '</div>';
+    }
     echo '<div class="card form-card"><h2 class="card-title">基本资料</h2>' .
         '<form method="post" action="' . e(u('a=profile_save')) . '">' . csrf_field() .
         '<label class="field"><span class="field-l">用户名</span><input class="input" name="name" required maxlength="20" value="' . e((string)$u['name']) . '"></label>' .
         '<label class="field"><span class="field-l">个人简介</span><textarea class="input" name="bio" rows="3" maxlength="200" placeholder="一句话介绍自己">' . e((string)($u['bio'] ?? '')) . '</textarea></label>' .
-        (feat_on('signature')
+        (feat_on('signature') && level_can($u, 'sig')
             ? '<label class="field"><span class="field-l">用户签名（可选）</span><input class="input" name="sig" maxlength="60" value="' . e((string)($u['sig'] ?? '')) . '" placeholder="将展示在你的帖子与回复下方"><span class="hint">单行纯文本，最多 60 字</span></label>'
             : '') .
         '<div class="form-foot"><span class="muted">注册邮箱：' . e((string)$u['email']) . '（不可修改）</span>' .
@@ -815,6 +845,7 @@ function page_search(): void
             foreach ($uhits as $uu) {
                 echo '<a class="thread-card" href="' . e(u('p=user&id=' . (int)$uu['id'])) . '"><div class="tc-main"><b>' . e((string)$uu['name']) . '</b>' .
                     '<span class="badge' . (!empty($uu['admin']) ? ' badge-accent' : '') . '">' . e(role_name($uu)) . '</span>' .
+                    (!empty($uu['admin']) ? '' : level_badge($uu)) .
                     '<span class="muted">发帖 ' . (int)($uu['threads'] ?? 0) . ' · 回复 ' . (int)($uu['replies'] ?? 0) . '</span></div>' .
                     ((string)($uu['bio'] ?? '') !== '' || (string)($uu['sig'] ?? '') !== '' ? '<div class="tc-sub muted">' . e((string)($uu['bio'] ?? $uu['sig'])) . '</div>' : '') .
                     '</a>';

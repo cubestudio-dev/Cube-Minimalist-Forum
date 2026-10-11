@@ -40,6 +40,7 @@ function page_admin(): void
         case 'ai': admin_tab_ai(); break;
         case 'boards': admin_tab_boards(); break;
         case 'users': admin_tab_users(); break;
+        case 'levels': admin_tab_levels(); break;
         case 'content': admin_tab_content(); break;
         case 'queue': admin_tab_queue(); break;
         case 'manual': admin_tab_manual(); break;
@@ -79,7 +80,8 @@ function admin_tab_basic(): void
         '<label class="field"><span class="field-l">' . t('Ping 测量间隔（秒）') . '</span><input class="input" name="ping_interval" type="number" min="0" max="300" value="' . (int)cfg('ping_interval', 15) . '">' .
         '<span class="hint">侧栏「Ping」每 N 秒测量一次浏览器到服务器的往返延迟（绿 &lt;100ms / 琥珀 &lt;300ms / 红 ≥300ms）；设为 0 关闭整个 Ping 显示。间隔越短数据越实时，但心跳请求也越频繁（5-300 秒）</span></label>' .
         '</div>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存基本设置') . '</button></div></form></div>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存基本设置') . '</button></div></form>' .
+        admin_restore_btn('site_name,site_desc,site_url,bind_domains,per_page,post_interval,online_window,live_interval,ping_interval') . '</div>' .
         admin_card_seo() .
         admin_card_lang();
 }
@@ -110,6 +112,7 @@ function admin_card_seo(): string
         '<span class="hint">原样插入每个页面 &lt;/head&gt; 之前；请只填写可信内容</span></label>' .
         '<div class="form-foot"><span class="muted">别忘了同步服务器的 robots.txt（建议内容见下方）</span><button class="btn btn-primary" type="submit">' . t('保存 SEO 设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
+        admin_restore_btn('seo_title_tpl,seo_description,seo_keywords,seo_robots,seo_sitemap,seo_sitemap_limit,seo_og,seo_extra_head') .
         '<details><summary class="muted">robots.txt 建议内容（点击展开）</summary><pre class="code-hint">User-agent: *
 Disallow: /data/
 Disallow: /src/
@@ -135,7 +138,8 @@ function admin_card_lang(): string
         '</div>' .
         '<p class="hint">前台核心界面（导航 / 登录注册 / 发帖回复 / 时间显示等）已支持五语切换；未翻译的深度条目自动以简体中文显示，用户可在「个人设置」长期保存自己的语言。后台管理界面保持中文。</p>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存语言设置') . '</button></div>' .
-        '<span class="test-msg muted"></span></form></div>';
+        '<span class="test-msg muted"></span></form>' .
+        admin_restore_btn('lang_default,lang_auto_ip') . '</div>';
 }
 
 /* ---------------- 功能总开关（v1.14.0，v1.15.0 扩展 @ 提及与 AI 开关） ---------------- */
@@ -145,6 +149,7 @@ function admin_tab_titles(): array
 {
     return [
         'basic' => '基本', 'feat' => '功能', 'storage' => '存储', 'mail' => '邮件', 'ai' => 'AI', 'boards' => '板块', 'users' => '用户',
+        'levels' => '等级',
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
         'anns' => '公告', 'theme' => '主题', 'ext' => '拓展', 'docs' => '协议', 'api' => '开放 API', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
@@ -187,7 +192,8 @@ function admin_tab_feat(): void
             '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . e(t($on ? '开启' : '关闭')) . '</span></label>';
     }
     echo '<div class="form-foot"><span class="muted">数据安全不受影响：关闭任何开关都不会删除数据，重新勾选即恢复</span>' .
-        '<button class="btn btn-primary" type="submit">' . t('保存功能开关') . '</button></div></form></div>';
+        '<button class="btn btn-primary" type="submit">' . t('保存功能开关') . '</button></div></form>' .
+        admin_restore_btn('feat_register,feat_guest_browse,feat_post,feat_reply,feat_edit,feat_like,feat_report,feat_search,feat_emoji,feat_online,feat_signature,feat_mention,feat_motion,ai_precheck,ai_autopilot') . '</div>';
 }
 
 /* ---------------- v1.21.0 存储引擎（文件 ⇄ 数据库，双向无损迁移） ---------------- */
@@ -241,7 +247,8 @@ function admin_tab_storage(): void
         '<button class="btn btn-ghost" type="button" data-admin-test="db">测试连接（保存前可先验证）</button>' .
         '<button class="btn btn-primary" type="submit">' . t('保存连接信息') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
-        '<p class="hint">连接信息保存在文件侧配置（data/config.php）——引擎引导发生在读取数据库之前，这样即使数据库不可用，论坛也能读取配置并回退文件模式继续运行。测试连接会自动建表（若尚不存在）。SQLite 请放在 data/db/ 目录下以获得 .htaccess 保护。</p></div>';
+        admin_restore_btn('db_driver,db_prefix,db_sqlite_path,db_host,db_port,db_name,db_user,db_pass') .
+        '<p class="hint">连接信息保存在文件侧配置（data/config.php）——引擎引导发生在读取数据库之前，这样即使数据库不可用，论坛也能读取配置并回退文件模式继续运行。测试连接会自动建表（若尚不存在）。SQLite 请放在 data/db/ 目录下以获得 .htaccess 保护。还原默认不会改变当前存储引擎选择</p></div>';
 
     /* ---- 卡片 3：双向无损迁移 ---- */
     if (!$isDb) {
@@ -288,7 +295,8 @@ function admin_tab_mail(): void
         '</div></form>' .
         '<div class="field"><span class="field-l">' . t('测试收件邮箱') . '</span><div class="code-row"><input class="input" id="mail-test-to" type="email" placeholder="填写一个收件邮箱，当场发一封测试邮件">' .
         '<button class="btn btn-ghost" type="button" data-admin-test="mail" data-to="#mail-test-to">发送测试邮件</button></div>' .
-        '<span class="test-msg muted"></span></div></div>';
+        '<span class="test-msg muted"></span></div>' .
+        admin_restore_btn('smtp_host,smtp_port,smtp_from,smtp_pass') . '</div>';
 }
 
 /* ---------------- AI ---------------- */
@@ -394,6 +402,7 @@ function admin_tab_ai(): void
         '<button class="btn btn-ghost" type="button" data-admin-test="ai">测试主力模型</button>' .
         '</div>' .
         '<span class="test-msg muted"></span></form>' .
+        admin_restore_btn('ai_strict,ai_mode,ai_retries,ai_timeout,ai_fail_limit,ai_precheck,ai_autopilot,ai_patrol_interval,ai_patrol_ban_limit,ai_patrol_alert,ai_fullpower') .
         '<p class="hint">标准模式每次处理队列中的一条（先进先出，随页面访问自动触发）；并行火力模式每次并发处理多条；自动切换后仍全部失败时，内容保持隐藏并通知管理员人工处理（后台「AI 待审队列」）。发帖 AI 预检在下方勾选；AI 自主管理（无人值守巡逻）在「安全防护」页配置。</p></div>';
 
 }
@@ -503,7 +512,8 @@ function admin_tab_api(): void
         '<p class="hint">用户在「个人设置」签发令牌前必须阅读并勾选同意本条款；签发时记录同意时间与条款版本指纹。' . ($termsEmpty ? '当前展示的是内置模板（尚未保存过），可直接修改或原样保存生效。' : '条款文本更新不会自动影响已签发的令牌；如需收紧政策，可在此说明并撤销相关令牌。') . '</p>' .
         '<label class="field"><textarea class="input" name="api_terms" rows="12" style="min-height:220px">' . e($termsVal) . '</textarea></label>' .
         '<div class="form-foot"><span class="muted">保存后立即生效，无需重启</span><button class="btn btn-primary" type="submit">' . t('保存 API 设置') . '</button></div>' .
-        '</form></div>';
+        '</form>' .
+        admin_restore_btn('api_enabled,api_guest,api_log,api_rate_token,api_rate_guest,api_cors') . '</div>';
 
     /* 已签发令牌（审计与管控） */
     $toks = api_tokens_all();
@@ -556,6 +566,7 @@ function admin_tab_boards(): void
     }
     foreach ($bs as $b) {
         $bid = (int)$b['id'];
+        $perm = board_perm_of($b);
         echo '<div class="admin-row"><form method="post" action="' . e(u('a=admin_board_save')) . '" class="inline-form">' .
             '<input type="hidden" name="id" value="' . $bid . '">' . csrf_field() .
             '<input class="input" name="name" value="' . e((string)$b['name']) . '" maxlength="20" required>' .
@@ -565,7 +576,27 @@ function admin_tab_boards(): void
             '<form method="post" action="' . e(u('a=admin_board_move')) . '" class="inline"><input type="hidden" name="id" value="' . $bid . '"><input type="hidden" name="dir" value="up">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit" title="上移">↑</button></form>' .
             '<form method="post" action="' . e(u('a=admin_board_move')) . '" class="inline"><input type="hidden" name="id" value="' . $bid . '"><input type="hidden" name="dir" value="down">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit" title="下移">↓</button></form>' .
             '<form method="post" action="' . e(u('a=admin_board_del')) . '" class="inline" data-confirm="确认删除该板块？（板块下有帖子时无法删除）"><input type="hidden" name="id" value="' . $bid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('删除') . '</button></form>' .
-            '</span></div>';
+            '</span>';
+        /* v1.25.0 板块发帖权限面板 */
+        echo '<details class="board-perm"><summary>' . t('发帖权限') . '：' . e(board_perm_label($bid)) . '</summary>' .
+            '<form method="post" action="' . e(u('a=admin_board_perm')) . '" class="inline-form perm-form" data-perm-form>' . csrf_field() .
+            '<input type="hidden" name="id" value="' . $bid . '">' .
+            '<select class="input input-sm" name="perm_type" data-perm-type>' .
+            '<option value="all"' . ($perm['type'] === 'all' ? ' selected' : '') . '>' . t('所有人') . '</option>' .
+            '<option value="admins"' . ($perm['type'] === 'admins' ? ' selected' : '') . '>' . t('仅管理员') . '</option>' .
+            '<option value="level"' . ($perm['type'] === 'level' ? ' selected' : '') . '>' . t('指定等级及以上') . '</option>' .
+            '<option value="users"' . ($perm['type'] === 'users' ? ' selected' : '') . '>' . t('白名单用户') . '</option>' .
+            '</select>' .
+            '<select class="input input-sm" name="perm_level" data-perm-level' . ($perm['type'] === 'level' ? '' : ' hidden') . '>';
+        foreach (levels_sorted() as $l) {
+            echo '<option value="' . (int)$l['id'] . '"' . ($perm['level'] === (int)$l['id'] ? ' selected' : '') . '>Lv' . level_no((int)$l['id']) . ' ' . e((string)$l['name']) . '（' . (int)$l['min'] . ' 帖）</option>';
+        }
+        echo '</select>' .
+            '<input class="input input-sm" name="perm_users" data-perm-users' . ($perm['type'] === 'users' ? '' : ' hidden') . ' value="' . e(implode('、', array_map('uname', $perm['uids']))) . '" placeholder="' . e(t('用户名，逗号分隔，如：张三,李四')) . '" style="min-width:220px">' .
+            '<button class="btn btn-ghost btn-sm" type="submit">' . t('保存权限') . '</button>' .
+            '<span class="hint">' . e(t('回复不受板块发帖权限限制；网页端与开放 API 同时生效')) . '</span>' .
+            '</form></details>';
+        echo '</div>';
     }
     echo '</div></div>';
 }
@@ -600,7 +631,7 @@ function admin_tab_users(): void
         echo '<div class="admin-row admin-user"><div class="u-info">' .
             '<a class="u-name" href="' . e(u('p=user&id=' . $uid)) . '">' . e((string)$x['name']) . '</a>' .
             '<span class="muted">' . e((string)$x['email']) . '</span>' .
-            '<span class="badge' . (!empty($x['admin']) ? ' badge-accent' : '') . '">' . e(role_name($x)) . '</span>' .
+            level_badge($x) .
             $status . '</div>';
         if (!$self) {
             echo '<span class="row-ops">' .
@@ -608,6 +639,19 @@ function admin_tab_users(): void
                 '<input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() .
                 '<select name="mins" class="input input-sm"><option value="10">' . t('10 分钟') . '</option><option value="60">' . t('1 小时') . '</option><option value="1440">' . t('1 天') . '</option><option value="10080">' . t('7 天') . '</option></select>' .
                 '<button class="btn btn-ghost btn-sm" type="submit">' . t('禁言') . '</button></form>';
+            /* v1.25.0 等级指派：自动（按发帖数）或手动指定某一等级（管理员账号不受等级限制，不显示） */
+            if (empty($x['admin'])) {
+                $ulv = (int)($x['level'] ?? 0);
+                echo '<form method="post" action="' . e(u('a=admin_user_level')) . '" class="inline">' .
+                    '<input type="hidden" name="uid" value="' . $uid . '">' .
+                    '<select name="level" class="input input-sm" aria-label="' . e(t('指派等级')) . '">' .
+                    '<option value="0"' . ($ulv === 0 ? ' selected' : '') . '>' . t('自动等级') . '</option>';
+                foreach (levels_sorted() as $l) {
+                    echo '<option value="' . (int)$l['id'] . '"' . ($ulv === (int)$l['id'] ? ' selected' : '') . '>Lv' . level_no((int)$l['id']) . ' ' . e((string)$l['name']) . '</option>';
+                }
+                echo '</select>' . csrf_field() .
+                    '<button class="btn btn-ghost btn-sm" type="submit">' . t('指派') . '</button></form>';
+            }
             if (!empty($x['banned'])) {
                 echo '<form method="post" action="' . e(u('a=admin_user_unban')) . '" class="inline"><input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm" type="submit">' . t('解封') . '</button></form>';
             } else {
@@ -622,6 +666,49 @@ function admin_tab_users(): void
         echo '</div>';
     }
     echo '</div></div>';
+}
+
+/* ---------------- v1.25.0 等级系统 ---------------- */
+function admin_tab_levels(): void
+{
+    echo '<div class="card form-card"><h2 class="card-title">' . t('等级系统') . '</h2>' .
+        '<p class="hint">' . t('用户等级：手动指派优先，未指派时按发帖数自动匹配「所需发帖数」达标的最高等级；管理员不受等级限制。系统默认保留 3 个内置等级（不可删除，可改名、改条件与权限）。每个等级可独立勾选权限，配合「板块 → 发帖权限」可实现精细的板块准入控制；删除自定义等级时，被指派用户自动回退为按发帖数自动等级。') . '</p></div>';
+
+    echo '<div class="card form-card"><h2 class="card-title">' . t('新建等级') . '</h2>' .
+        '<form method="post" action="' . e(u('a=admin_level_new')) . '" class="inline-form">' . csrf_field() .
+        '<input class="input" name="name" required maxlength="20" placeholder="' . e(t('等级名称（如：元老）')) . '">' .
+        '<input class="input" name="min" type="number" min="0" max="1000000" value="0" style="max-width:130px" aria-label="' . e(t('所需发帖数')) . '">' .
+        '<span class="muted">' . e(t('所需发帖数')) . '</span>' .
+        '<button class="btn btn-primary" type="submit">' . t('创建') . '</button></form>' .
+        '<p class="hint">' . e(t('新建等级的权限默认与最低等级一致，创建后可单独调整；所需发帖数填 0 表示所有人立即达到')) . '</p></div>';
+
+    $lvs = levels_sorted();
+    echo '<div class="card form-card"><h2 class="card-title">' . t('等级列表') . '（' . count($lvs) . '）</h2><div class="admin-list">';
+    foreach ($lvs as $l) {
+        $lid = (int)$l['id'];
+        $perms = is_array($l['perms'] ?? null) ? $l['perms'] : [];
+        echo '<div class="level-row"><form method="post" action="' . e(u('a=admin_level_save')) . '">' . csrf_field() .
+            '<input type="hidden" name="id" value="' . $lid . '">' .
+            '<div class="level-head">' .
+            '<span class="badge badge-info">Lv' . level_no($lid) . '</span>' .
+            '<input class="input input-sm" name="name" value="' . e((string)$l['name']) . '" maxlength="20" required>' .
+            (!empty($l['built_in']) ? '<span class="badge">' . t('内置') . '</span>' : '') .
+            '<label class="lv-min">' . e(t('所需发帖数')) . ' <input class="input input-sm" name="min" type="number" min="0" max="1000000" value="' . (int)$l['min'] . '" style="max-width:110px"></label>' .
+            '<label class="lv-min">' . e(t('发帖间隔覆盖（秒）')) . ' <input class="input input-sm" name="interval" type="number" min="0" max="3600" value="' . (int)($l['interval'] ?? 0) . '" style="max-width:110px" title="' . e(t('0 = 使用全局「发帖间隔」；大于 0 时该等级用户发帖 / 回复按此间隔执行')) . '"></label>' .
+            '</div>' .
+            '<div class="level-perms">';
+        foreach (LEVEL_PERMS as $pk => $pv) {
+            echo '<label class="check check-inline" title="' . e(t($pv[1])) . '"><input type="checkbox" name="perms[' . e($pk) . ']" value="1"' . (!empty($perms[$pk]) ? ' checked' : '') . '> ' . e(t($pv[0])) . '</label>';
+        }
+        echo '</div>' .
+            '<div class="form-foot"><span class="muted">' . e(t('所需发帖数 = 用户发帖数达到该值即自动晋升到此等级（0 = 默认等级）')) . '</span>' .
+            '<span><button class="btn btn-ghost btn-sm" type="submit">' . t('保存') . '</button>';
+        if (empty($l['built_in'])) {
+            echo ' <button class="btn btn-ghost btn-sm danger" type="submit" formaction="' . e(u('a=admin_level_del')) . '" data-confirm="' . e(t('确认删除该等级？被指派该等级的用户将回退为自动等级')) . '">' . t('删除') . '</button>';
+        }
+        echo '</span></div></form></div>';
+    }
+    echo '</div><p class="hint">' . e(t('权限即时生效：取消勾选后，该等级用户的对应操作（发帖 / 回复 / 编辑 / 删除 / 签名 / 点赞）会立即被拦截，前台按钮同步隐藏')) . '</p></div>';
 }
 
 /* ---------------- 内容 ---------------- */
@@ -826,7 +913,8 @@ function admin_tab_theme(): void
         '<label class="field"><span class="field-l">' . t('页脚文字（左侧，留空显示默认）') . '</span><input class="input" name="footer_text" maxlength="120" placeholder="默认：' . e((string)cfg('site_name')) . ' · Cube Minimalist Forum v' . e(app_version()) . '" value="' . e((string)cfg('footer_text', '')) . '"></label>' .
         '<label class="field"><span class="field-l">' . t('页脚备注（右侧，留空显示默认）') . '</span><input class="input" name="footer_note" maxlength="120" placeholder="默认：纯文字 · 文件存储 · 无数据库" value="' . e((string)cfg('footer_note', '')) . '"></label>' .
         '<label class="field"><span class="field-l">' . t('自定义样式（CSS）') . '</span><textarea class="input" name="custom_css" rows="6" placeholder="/* 追加到页面尾部的自定义 CSS */">' . e((string)cfg('custom_css')) . '</textarea></label>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存主题设置') . '</button></div></form></div>';
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存主题设置') . '</button></div></form>' .
+        admin_restore_btn('theme_color,dark_default,custom_css,footer_text,footer_note') . '</div>';
 }
 
 /* ---------------- 监控 ---------------- */
@@ -1038,6 +1126,7 @@ function admin_tab_monitor(): void
         '<div class="form-foot"><button class="btn btn-ghost" type="button" data-admin-test="monitor">发送测试告警邮件</button>' .
         '<button class="btn btn-primary" type="submit">' . t('保存监控设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
+        admin_restore_btn('monitor_on,monitor_interval,monitor_mb') .
         '<p class="hint">总占用（程序 + 数据）超过阈值时自动给全部管理员发告警邮件。检查随论坛访问进行（每小时至多一次）；持续超限时每 6 小时提醒一次，回落到阈值下后自动重置。告警通过后台「邮件」中配置的 SMTP 发送。</p></div>';
 }
 
@@ -1107,6 +1196,7 @@ function admin_tab_logs(): void
         '<option value="0"' . ((int)cfg('log_views', 0) === 0 ? ' selected' : '') . '>' . t('关闭') . '</option>' .
         '<option value="1"' . ((int)cfg('log_views', 0) === 1 ? ' selected' : '') . '>' . t('开启') . '</option></select></label>' .
         '<button class="btn btn-primary" type="submit">' . t('保存设置') . '</button></form>' .
+        admin_restore_btn('log_views,log_days') .
         '<form method="post" action="' . e(u('a=admin_logs_clear')) . '" class="inline" data-confirm="确认清理过期日志？">' . csrf_field() .
         '<button class="btn btn-ghost btn-sm" type="submit">' . t('立即清理过期日志') . '</button></form>' .
         '<form method="post" action="' . e(u('a=admin_logs_export')) . '" class="inline" data-confirm="将导出全部操作日志、防火墙事件与运行错误为 TXT 文件（日志较多时可能需要数十秒），继续？">' . csrf_field() .
@@ -1224,7 +1314,8 @@ function admin_tab_security(): void
         '</div>' .
         '<p class="hint">每次登录都会记录设备名称、IP 与归属地（用户可在「个人设置 → 登录设备」查看并一键下线任意设备）；新设备登录成功后系统自动发送站内提醒，引导用户修改密码与下线设备。被下线的设备 30 天内无法借助「保持登录」静默重登，但用密码主动登录视为本人操作。</p>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="button" data-admin-save="security">保存账号安全设置</button></div>' .
-        '<span class="test-msg muted"></span></form></div>';
+        '<span class="test-msg muted"></span></form>' .
+        admin_restore_btn('dev_verify,sess_max') . '</div>';
 
     /* ================= v1.16.0：AI 自主防护（严全面模式）—— 从「AI」页移入本页（本质是安全防护功能） ================= */
     echo '<div class="card form-card ai-patrol-card"><h2 class="card-title">' . t('AI 自主防护（严全面模式）') . '</h2>' .
@@ -1238,6 +1329,7 @@ function admin_tab_security(): void
         '<label class="check"><input type="hidden" name="ai_patrol_alert" value="0"><input type="checkbox" name="ai_patrol_alert" value="1"' . (!empty(cfg('ai_patrol_alert', 1)) ? ' checked' : '') . '> <b>允许 AI 发邮件警报</b> —— 巡逻发现严重态势（持续攻击、封禁激增、审核服务异常）时给管理员发邮件（30 分钟节流，轻微事件不打扰）</label>' .
         '<div class="form-foot"><button class="btn btn-primary" type="button" data-admin-save="ai">保存自主防护设置</button></div>' .
         '<span class="test-msg muted"></span></form>' .
+        admin_restore_btn('ai_autopilot,ai_patrol_interval,ai_patrol_ban_limit,ai_patrol_alert') .
         '<p class="hint">「发帖 AI 预检」（内容审核开关）在「AI」页与「功能」页配置。</p></div>';
 
 
@@ -1306,6 +1398,7 @@ function admin_tab_security(): void
         '</div></form>' .
         '<form method="post" action="' . e(u('a=admin_daemon_stop')) . '" data-confirm="发送停止信号？巡逻器会在 30 秒内优雅退出（正在处理的任务不受影响）。">' . csrf_field() .
         '<div class="form-foot"><span></span><button class="btn btn-ghost" type="submit"' . (!$dAlive ? ' disabled title="巡逻器不在线"' : '') . '>停止巡逻器</button></div></form>' .
+        admin_restore_btn('daemon_php_bin') .
         '<p class="hint">启动原理：后台以「nohup php daemon.php」在服务器上创建常驻进程；虚拟主机等无法常驻的环境会给出明确提示，不影响论坛运行。停止原理：写入 data/daemon.stop 信号文件，巡逻器 30 秒内检测到后优雅退出并自行删除信号。</p></div>';
 
     // 访问统计已随每次计数原子落盘（fw_state_save），直接读 fw_state.php 即为最新数据
@@ -1342,6 +1435,7 @@ function admin_tab_security(): void
         '<option value="1"' . ($on ? ' selected' : '') . '>' . t('开启（推荐）') . '</option>' .
         '<option value="0"' . (!$on ? ' selected' : '') . '>' . t('关闭（仅统计不拦截）') . '</option></select></label>' .
         '<button class="btn btn-primary" type="submit">' . t('保存总开关') . '</button></form>' .
+        admin_restore_btn('fw_on') .
         '<p class="hint">此表单<b>只切换总开关</b>，不会改动下方「限流与自动策略 / 白名单 / 真实 IP 识别」等任何其他设置。五道防线依次执行：白名单 → 封禁名单 → 危险 IP 库 → 限流 → 自动策略。已登录的管理员不受拦截；危险 IP 库数据来自公开威胁情报源，误判时可把对方 IP 加入白名单。</p></div>';
 
     /* ---- 攻击告警（多次拦截 → 自动邮件通知管理员，v1.9.0） ---- */
@@ -1368,6 +1462,7 @@ function admin_tab_security(): void
         '<div class="form-foot"><button class="btn btn-ghost" type="button" data-admin-test="attack">发送测试告警邮件</button>' .
         '<button class="btn btn-primary" type="submit">' . t('保存攻击告警设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
+        admin_restore_btn('fw_atk_alert_on,fw_atk_alert_n,fw_atk_alert_cool') .
         '<p class="hint">开启后，' . FW_ATK_WIN_MIN . ' 分钟窗口内防火墙拦截（限流 429 / 封禁名单 / 危险 IP 库 / 自动策略自动封禁均计入）累计达到阈值，即自动向全部管理员邮箱发送告警：含今日拦截与请求统计、事件最多的来源 IP Top5、最近事件摘要与处置建议；冷却期内不重复发送，实际发信在响应完成后进行（绝不拖慢站点）。' . $atkLast .
         '邮件经后台「邮件」页配置的 SMTP 发送，收件人为全部管理员账号的邮箱。</p></div>';
 
@@ -1440,7 +1535,8 @@ function admin_tab_security(): void
         '④ <b>速率限制 / WAF</b>：可按需在 CF 面板加一层，但建议阈值放宽，程序内置防火墙已按真实 IP 限流；<br>' .
         '⑤ <b>「我正在被攻击」模式</b>：开启后人机验证可能拦截发帖与登录，仅在遭遇攻击时短期使用；<br>' .
         '⑥ 本程序无需任何 CF 侧配置即可取到真实 IP——装上本版本即自动生效，后台上方诊断卡可随时核验。</div></details>';
-    echo '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存防护设置') . '</button></div></form></div>';
+    echo '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存防护设置') . '</button></div></form>' .
+        admin_restore_btn('fw_rl_on,fw_rl_pm,fw_rl_ban_min,fw_score_on,fw_score_threshold,fw_auto_ban_hours,fw_r_empty_ua,fw_r_script_ua,fw_r_scan_path,fw_r_inject,fw_r_fake_spider,fw_r_bot_ua,fw_r_probe,fw_r_spoof_cf,fw_r_long_req,fw_spider_allow,fw_whitelist,fw_trust_cf,fw_trust_xff,fw_cf_ranges') . '</div>';
 
     /* ---- 危险 IP 库 ---- */
     $synced = (int)$intel['synced'];
@@ -1473,7 +1569,8 @@ function admin_tab_security(): void
     echo '</div>' .
         '<label class="field"><span class="field-l">' . t('自定义威胁情报源（每行一个 URL，最多 5 条，返回 IP/CIDR 纯文本列表）') . '</span>' .
         '<textarea class="input" name="fw_intel_custom" rows="2" placeholder="https://...">' . e((string)cfg('fw_intel_custom', '')) . '</textarea></label>' .
-        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存库设置') . '</button></div></form>';
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存库设置') . '</button></div></form>' .
+        admin_restore_btn('fw_intel_on,fw_intel_hours,fw_intel_custom,fw_src_et,fw_src_feodo,fw_src_blackbook');
     echo '<form method="post" action="' . e(u('a=admin_fw_intel_sync')) . '" class="inline" data-confirm="立即从公开威胁情报源同步危险 IP 库？">' . csrf_field() .
         '<button class="btn btn-ghost" type="submit">' . t('立即同步') . '</button></form> ';
     echo '<details style="margin-top:10px"><summary class="muted">手动导入黑名单（粘贴或上传 txt）</summary>' .
@@ -1722,6 +1819,108 @@ function admin_tab_security(): void
 
 /* ================= v1.22.0 后台设置搜索 ================= */
 
+/* ================= v1.25.0 配置默认值注册表（「还原默认」功能的数据源） ================= */
+
+/**
+ * 全部可还原的配置项注册表：key => [默认值, 标签]
+ * 仅收「设置类」配置；引擎选择（storage_engine）、版本号（version）、插件状态（plugins_enabled）、
+ * 协议内容（doc_u_*）、端点开关（api_ep_*）等有专门管理入口或属数据态的键不在还原范围。
+ */
+function admin_cfg_defaults(): array
+{
+    return [
+        /* 基本设置 */
+        'site_name'      => ['极简论坛', '论坛名称'],
+        'site_desc'      => ['', '论坛简介'],
+        'site_url'       => ['', '站点地址'],
+        'bind_domains'   => ['', '绑定域名'],
+        'per_page'       => [20, '每页帖子数'],
+        'post_interval'  => [30, '发帖间隔（秒）'],
+        'online_window'  => [300, '在线统计窗口（秒）'],
+        'live_interval'  => [20, '实时刷新间隔（秒）'],
+        'ping_interval'  => [15, 'Ping 测量间隔（秒）'],
+        /* SEO */
+        'seo_title_tpl'    => ['{page} · {site}', 'SEO 标题模板'],
+        'seo_description'  => ['', 'SEO 站点描述'],
+        'seo_keywords'     => ['', 'SEO 关键词'],
+        'seo_robots'       => ['', '搜索引擎收录'],
+        'seo_sitemap'      => [0, 'Sitemap 站点地图'],
+        'seo_sitemap_limit'=> [500, 'Sitemap 收录上限'],
+        'seo_og'           => [1, 'Open Graph 标签'],
+        'seo_extra_head'   => ['', '自定义 head 内容'],
+        /* 语言 */
+        'lang_default' => ['zh-cn', '默认论坛语言'],
+        'lang_auto_ip' => [0, '按 IP 自动切换语言'],
+        /* 功能总开关（默认全开） */
+        'feat_register' => [1, '开放注册'], 'feat_guest_browse' => [1, '游客可浏览'],
+        'feat_post' => [1, '发帖'], 'feat_reply' => [1, '回复'],
+        'feat_edit' => [1, '内容编辑'], 'feat_like' => [1, '点赞'],
+        'feat_report' => [1, '举报'], 'feat_search' => [1, '搜索'],
+        'feat_emoji' => [1, '表情'], 'feat_online' => [1, '在线名单'],
+        'feat_signature' => [1, '用户签名'], 'feat_mention' => [1, '@ 提及通知'],
+        'feat_motion' => [1, '界面动效'],
+        /* 邮件 */
+        'smtp_host' => ['', 'SMTP 主机'], 'smtp_port' => [465, 'SMTP 端口'],
+        'smtp_from' => ['', '发信邮箱'], 'smtp_pass' => ['', 'SMTP 授权码'],
+        /* AI（模型列表是数据不是配置键，不参与还原） */
+        'ai_strict' => ['standard', 'AI 审核严格程度'],
+        'ai_mode' => ['', 'AI 审核模式'], 'ai_retries' => [2, 'AI 单模型重试次数'],
+        'ai_timeout' => [20, 'AI 超时（秒）'], 'ai_precheck' => [1, 'AI 审查'],
+        'ai_autopilot' => [0, 'AI 自主管理'], 'ai_patrol_interval' => [15, 'AI 巡逻间隔（分钟）'],
+        'ai_patrol_ban_limit' => [3, 'AI 单轮封禁上限'], 'ai_patrol_alert' => [1, 'AI 巡逻告警邮件'],
+        'ai_fail_limit' => [3, 'AI 失败重试上限'], 'ai_fullpower' => [0, 'AI 严全面模式'],
+        /* 主题 */
+        'theme_color' => ['#0f766e', '主题色'], 'dark_default' => ['system', '深色模式默认值'],
+        'custom_css' => ['', '自定义样式 CSS'], 'footer_text' => ['', '页脚文字'], 'footer_note' => ['', '页脚备注'],
+        /* 日志 */
+        'log_views' => [0, '记录页面访问'], 'log_days' => [90, '日志保留天数'],
+        /* 安全防护 */
+        'fw_on' => [1, '防火墙总开关'],
+        'dev_verify' => [0, '新设备二次验证总闸'], 'sess_max' => [10, '同时在线设备上限'],
+        'fw_rl_on' => [1, '访问限流'], 'fw_rl_pm' => [60, '每 IP 每分钟请求上限'],
+        'fw_rl_ban_min' => [0, '超限自动临时封禁（分钟）'],
+        'fw_score_on' => [1, '自动策略引擎'], 'fw_score_threshold' => [100, '自动封禁风险阈值'],
+        'fw_auto_ban_hours' => [24, '自动封禁时长（小时）'], 'fw_log_keep' => [14, '防火墙日志保留天数'],
+        'fw_atk_alert_on' => [1, '攻击告警邮件'], 'fw_atk_alert_n' => [20, '告警触发阈值'],
+        'fw_atk_alert_cool' => [30, '告警冷却（分钟）'],
+        'fw_trust_xff' => [0, '信任 X-Forwarded-For'], 'fw_trust_cf' => [1, 'Cloudflare 网段识别'],
+        'fw_cf_ranges' => ['', 'Cloudflare 网段覆盖'], 'fw_spider_allow' => [1, '常见搜索引擎放行'],
+        'fw_whitelist' => ['', 'IP 白名单'],
+        'fw_intel_on' => [1, '危险 IP 库拦截'], 'fw_intel_hours' => [24, '情报自动同步间隔（小时）'],
+        'fw_intel_custom' => ['', '自定义威胁情报源'],
+        'fw_src_et' => [1, '情报源：Emerging Threats'], 'fw_src_feodo' => [1, '情报源：Feodo Tracker'],
+        'fw_src_blackbook' => [0, '情报源：Blackbook'],
+        /* 内置策略规则（默认全部开启） */
+        'fw_r_empty_ua' => [1, '空 UA 请求'], 'fw_r_script_ua' => [1, '脚本 / 攻击工具 UA'],
+        'fw_r_scan_path' => [1, '敏感路径探测'], 'fw_r_inject' => [1, '注入 / XSS 特征'],
+        'fw_r_fake_spider' => [1, '伪造搜索引擎蜘蛛'], 'fw_r_bot_ua' => [1, '未知爬虫 UA'],
+        'fw_r_probe' => [1, '敏感文件探测'], 'fw_r_spoof_cf' => [1, '伪造 CF 头'],
+        'fw_r_long_req' => [1, '超长请求'],
+        'daemon_php_bin' => ['', '巡逻器 PHP 路径'],
+        /* 监控 */
+        'monitor_on' => [1, '存储占用监控'], 'monitor_interval' => [5, '监控刷新间隔（秒）'],
+        'monitor_mb' => [95, '占用告警阈值（%）'],
+        /* 开放 API */
+        'api_enabled' => [0, 'API 总开关'], 'api_guest' => [0, '访客 API'],
+        'api_rate_guest' => [30, '访客限速（次 / 分钟）'], 'api_rate_token' => [120, '令牌限速（次 / 分钟）'],
+        'api_cors' => ['', 'API 跨域来源'], 'api_log' => [0, 'API 调用日志'],
+        /* 存储连接参数（不含 storage_engine：引擎切换是显式迁移操作，不参与一键还原） */
+        'db_driver' => ['sqlite', '数据库类型'], 'db_prefix' => ['mf_', '表前缀'],
+        'db_sqlite_path' => ['', 'SQLite 数据库文件'], 'db_host' => ['', '数据库主机'],
+        'db_port' => ['', '数据库端口'], 'db_name' => ['', '数据库名'],
+        'db_user' => ['', '数据库用户名'], 'db_pass' => ['', '数据库密码'],
+    ];
+}
+
+/** 「还原默认」按钮（放在卡片 </form> 之后；提交到统一还原动作，后端按注册表白名单校验） */
+function admin_restore_btn(string $csv): string
+{
+    return '<div class="restore-row"><form method="post" action="' . e(u('a=admin_restore_defaults')) . '" class="inline" data-ajax="1" data-confirm="' . e(t('确认把这组设置全部还原为默认值？当前填写的内容将被覆盖')) . '">' . csrf_field() .
+        '<input type="hidden" name="keys" value="' . e($csv) . '">' .
+        '<button class="btn btn-ghost btn-sm" type="submit">' . t('↺ 还原默认') . '</button>' .
+        '<span class="test-msg muted"></span></form></div>';
+}
+
 /**
  * 设置项全局索引（与各标签页卡片同步维护；card 供前端按前缀匹配定位卡片，动态尾部（N）不写入）。
  * 每项：[tab, card 卡片标题前缀, label 设置项名, kw 补充关键词（含英文/别名）]
@@ -1739,6 +1938,7 @@ function admin_search_index(): array
         ['basic', '基本设置', '在线统计窗口（秒）', 'online window 在线人数'],
         ['basic', '基本设置', '实时刷新间隔（秒）', 'live interval 自动刷新 轮询'],
         ['basic', '基本设置', 'Ping 测量间隔（秒）', 'ping 延迟 心跳'],
+        ['basic', '还原默认', '各设置卡片下方的「↺ 还原默认」按钮，把该组设置恢复为程序默认值', 'restore default 还原默认 恢复默认 复位 还原此组默认'],
         ['basic', 'SEO · 搜索引擎展示', '标题模板', 'seo title {page} {site}'],
         ['basic', 'SEO · 搜索引擎展示', '站点描述（搜索结果摘要）', 'seo description 摘要 meta'],
         ['basic', 'SEO · 搜索引擎展示', '关键词', 'seo keywords'],
@@ -1789,6 +1989,11 @@ function admin_search_index(): array
         /* 板块 */
         ['boards', '新建板块', '板块名称 / 简介', 'board new 创建板块'],
         ['boards', '板块列表', '板块排序 / 编辑 / 删除', 'board sort move'],
+        ['boards', '板块发帖权限', '所有人 / 仅管理员 / 指定等级及以上 / 白名单用户', 'board perm 发帖权限 白名单 受邀 准入'],
+        /* 等级 */
+        ['levels', '等级系统', '等级说明 / 自动晋升 / 手动指派', 'level 等级 权限 升级 新手上路 活跃 资深'],
+        ['levels', '新建等级', '自定义等级（名称 / 所需发帖数）', 'level new 自定义等级 创建'],
+        ['levels', '等级列表', '等级权限矩阵（发帖 / 回复 / 编辑 / 删除 / 签名 / 点赞）与间隔覆盖', 'level perms 权限矩阵 间隔覆盖 内置'],
         /* 用户 */
         ['users', '用户', '用户搜索 / 封禁 / 设为管理员', 'user search ban admin'],
         /* 内容 */

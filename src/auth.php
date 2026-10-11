@@ -112,6 +112,7 @@ function user_create(string $name, string $email, string $passHash, bool $admin 
         'id' => $id, 'name' => $name, 'email' => $email, 'pass' => $passHash, 'bio' => '',
         'admin' => $admin, 'created' => time(), 'banned' => 0, 'mute_until' => 0,
         'last_post' => 0, 'likes_recv' => 0, 'replies_recv' => 0, 'threads' => 0, 'remember' => '',
+        'level' => 0, /* v1.25.0 等级：0 = 自动按发帖数；>0 = 管理员指派的等级 id */
     ];
     Store::write('users.php', $us);
     Store::unlock($lk);

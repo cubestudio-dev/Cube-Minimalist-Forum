@@ -105,6 +105,132 @@ function board_move(int $id, string $dir): void
     Store::unlock($lk);
 }
 
+/* ================= v1.25.0 板块发帖权限 ================= */
+
+/** 板块发帖权限默认结构（type: all=所有人 / admins=仅管理员 / level=指定等级及以上 / users=白名单用户） */
+function board_perm_default(): array
+{
+    return ['type' => 'all', 'level' => 0, 'uids' => []];
+}
+
+/** 归一化板块 perm 结构（兼容旧数据缺键） */
+function board_perm_of(array $b): array
+{
+    $p = is_array($b['perm'] ?? null) ? $b['perm'] : [];
+    $type = (string)($p['type'] ?? 'all');
+    return [
+        'type'  => in_array($type, ['all', 'admins', 'level', 'users'], true) ? $type : 'all',
+        'level' => max(0, (int)($p['level'] ?? 0)),
+        'uids'  => array_values(array_unique(array_map('intval', (array)($p['uids'] ?? [])))),
+    ];
+}
+
+/** 保存板块发帖权限（锁内仅改 perm 键，不动名称 / 简介 / 排序） */
+function board_perm_save(int $id, array $perm): bool
+{
+    $lk = Store::lock('boards');
+    $bs = Store::read('boards.php', []);
+    $hit = false;
+    foreach ($bs as &$b) {
+        if ((int)($b['id'] ?? 0) === $id) {
+            $b['perm'] = $perm;
+            $hit = true;
+            break;
+        }
+    }
+    unset($b);
+    if ($hit) {
+        Store::write('boards.php', $bs);
+    }
+    Store::unlock($lk);
+    return $hit;
+}
+
+/**
+ * 某用户能否在某板块发新帖（回复不受此限制；管理员恒可）。
+ * - all：所有人
+ * - admins：仅管理员
+ * - level：指定等级及以上（按等级「所需发帖数」比较，等级被删时保守回退为仅管理员可发）
+ * - users：白名单用户（存用户 id 列表）
+ */
+function board_can_post(int $bid, ?array $u): bool
+{
+    $b = board_get($bid);
+    if (!$b) {
+        return false;
+    }
+    $perm = board_perm_of($b);
+    if ($perm['type'] === 'all') {
+        return true;
+    }
+    if (empty($u['id'])) {
+        return false; /* 游客本就需登录发帖，这里统一拦 */
+    }
+    if (!empty($u['admin'])) {
+        return true;
+    }
+    if ($perm['type'] === 'admins') {
+        return false;
+    }
+    if ($perm['type'] === 'users') {
+        return in_array((int)$u['id'], $perm['uids'], true);
+    }
+    /* level：用户当前等级的 min ≥ 目标等级的 min 即视为「该等级及以上」 */
+    $mine = user_level($u);
+    $want = level_get($perm['level']);
+    if (!$mine || !$want) {
+        return false; /* 目标等级已被删除：保守处理，仅管理员可发 */
+    }
+    return (int)($mine['min'] ?? 0) >= (int)($want['min'] ?? 0);
+}
+
+/** 权限短标注（发帖页下拉 / 后台列表用）：所有人 / 仅管理员 / Lv2 及以上 / 白名单用户 */
+function board_perm_label(int $bid): string
+{
+    $b = board_get($bid);
+    if (!$b) {
+        return '';
+    }
+    $perm = board_perm_of($b);
+    switch ($perm['type']) {
+        case 'admins':
+            return '仅管理员';
+        case 'level':
+            $l = level_get($perm['level']);
+            return $l ? 'Lv' . level_no((int)$l['id']) . ' 及以上' : '指定等级（已删除）';
+        case 'users':
+            return count($perm['uids']) > 0 ? '白名单用户（' . count($perm['uids']) . ' 人）' : '白名单用户（未配置）';
+        default:
+            return '所有人';
+    }
+}
+
+/** 不可发帖时的具体原因（前台 flash / API 错误文案） */
+function board_perm_reason(int $bid, ?array $u): string
+{
+    $b = board_get($bid);
+    if (!$b) {
+        return '板块不存在';
+    }
+    $perm = board_perm_of($b);
+    switch ($perm['type']) {
+        case 'admins':
+            return '该板块仅限管理员发帖';
+        case 'level':
+            $l = level_get($perm['level']);
+            if (!$l) {
+                return '该板块的发帖等级已被删除，暂时仅限管理员发帖，请联系管理员重新设置';
+            }
+            $mine = user_level($u);
+            return '该板块需要等级「' . (string)($l['name'] ?? '') . '」（Lv' . level_no((int)$l['id']) . '，需发帖 ' . (int)($l['min'] ?? 0) . ' 篇）及以上才可发帖'
+                . ($mine ? '，您当前为「' . (string)($mine['name'] ?? '') . '」' : '');
+        case 'users':
+            return '该板块仅限白名单用户发帖';
+        default:
+            return '无法在该板块发帖';
+    }
+}
+
 /* ================= 帖子 ================= */
 function thread_index(): array
 {
@@ -458,6 +584,10 @@ function thread_editable(array $t, ?array $u): bool
     if ((int)($t['author'] ?? 0) !== (int)$u['id']) {
         return false;
     }
+    /* v1.25.0 等级编辑权限 */
+    if (!level_can($u, 'edit_own')) {
+        return false;
+    }
     if (!empty($t['locked']) || !empty($t['hidden']) || (int)($t['replies'] ?? 0) > 0) {
         return false;
     }
@@ -474,6 +604,10 @@ function reply_editable(array $r, ?array $u, array $t): bool
         return true;
     }
     if ((int)($r['author'] ?? 0) !== (int)$u['id']) {
+        return false;
+    }
+    /* v1.25.0 等级编辑权限 */
+    if (!level_can($u, 'edit_own')) {
         return false;
     }
     if (!empty($r['hidden']) || !empty($t['locked'])) {

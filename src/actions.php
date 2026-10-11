@@ -112,6 +112,12 @@ function route_action(string $a): void
         case 'admin_board_save': admin_tab_guard(); act_admin_board_save(); return;
         case 'admin_board_del':  admin_tab_guard(); act_admin_board_del(); return;
         case 'admin_board_move': admin_tab_guard(); act_admin_board_move(); return;
+        case 'admin_board_perm': admin_tab_guard(); act_admin_board_perm(); return;
+        case 'admin_level_new':  admin_tab_guard(); act_admin_level_new(); return;
+        case 'admin_level_save': admin_tab_guard(); act_admin_level_save(); return;
+        case 'admin_level_del':  admin_tab_guard(); act_admin_level_del(); return;
+        case 'admin_user_level': admin_tab_guard(); act_admin_user_level(); return;
+        case 'admin_restore_defaults': admin_tab_guard(); act_admin_restore_defaults(); return;
         case 'admin_user_mute':  admin_tab_guard(); act_admin_user_mute(); return;
         case 'admin_user_ban':   admin_tab_guard(); act_admin_user_ban(); return;
         case 'admin_user_unban': admin_tab_guard(); act_admin_user_unban(); return;
@@ -384,7 +390,11 @@ function feat_guard(string $k, string $msg): void
  * v1.16.0：被拒时把内容存入会话草稿，回跳后自动填回，不再让用户重打一遍 */
 function flood_check(array $u, array $draft = []): bool
 {
-    $interval = max(0, (int)cfg('post_interval', 30));
+    /* v1.25.0 等级间隔覆盖：等级配置了「发帖间隔覆盖」（>0）时优先于全局设置 */
+    $interval = level_interval($u);
+    if ($interval <= 0) {
+        $interval = max(0, (int)cfg('post_interval', 30));
+    }
     if ($interval <= 0) {
         return true;
     }
@@ -879,8 +889,8 @@ function act_profile_save(): void
     $u = require_login();
     $name = post_str('name', 20);
     $bio = post_str('bio', 200);
-    // 用户签名（v1.14.0）：单行纯文本，展示在帖子与回复下方；开关关闭时保留旧值不修改
-    $sig = feat_on('signature') ? trim(str_replace(["\r", "\n", "\0"], ' ', post_str('sig', 60))) : (string)($u['sig'] ?? '');
+    // 用户签名（v1.14.0）：单行纯文本，展示在帖子与回复下方；功能关闭或等级无此权限时保留旧值不修改（v1.25.0）
+    $sig = (feat_on('signature') && level_can($u, 'sig')) ? trim(str_replace(["\r", "\n", "\0"], ' ', post_str('sig', 60))) : (string)($u['sig'] ?? '');
     if (!valid_name($name)) {
         flash('err', '用户名需 2-20 位，仅限中文、字母、数字、下划线');
         redirect(u('p=settings'));
@@ -918,6 +928,16 @@ function act_thread_new(): void
     if (!board_get($board)) {
         flash('err', '请选择有效板块');
         redirect(u('p=new'));
+    }
+    /* v1.25.0 板块发帖权限：所有人 / 仅管理员 / 指定等级及以上 / 白名单用户 */
+    if (!board_can_post($board, $u)) {
+        flash('err', board_perm_reason($board, $u));
+        redirect(u('p=new'));
+    }
+    /* v1.25.0 等级发帖权限 */
+    if (!level_can($u, 'post')) {
+        flash('err', '您当前等级不能发布新帖，请先参与互动提升等级');
+        redirect(u('p=home'));
     }
     $title = post_str('title', 30);
     $content = post_str('content', 1500);
@@ -966,6 +986,11 @@ function act_reply_new(): void
         flash('err', '该帖子已锁定或不存在，无法回复');
         redirect(u('p=thread&id=' . $tid));
     }
+    /* v1.25.0 等级回复权限 */
+    if (!level_can($u, 'reply')) {
+        flash('err', '您当前等级不能发表回复，请先参与互动提升等级');
+        redirect(u('p=thread&id=' . $tid));
+    }
     if (!flood_check($u, ['key' => 'reply' . $tid, 'content' => $content])) {
         redirect(u('p=thread&id=' . $tid));
     }
@@ -998,6 +1023,11 @@ function act_thread_delete(): void
         flash('err', '只能删除自己的帖子');
         redirect(u('p=thread&id=' . $tid));
     }
+    /* v1.25.0 等级删除权限：作者删除自己的内容需等级开启「删除自己的内容」 */
+    if (!$admin && !level_can($u, 'del_own')) {
+        flash('err', '您当前等级不能删除自己的内容，可联系管理员处理');
+        redirect(u('p=thread&id=' . $tid));
+    }
     $author = (int)$t['author'];
     if (thread_delete($tid)) {
         user_bump($author, 'threads', -1);
@@ -1024,6 +1054,11 @@ function act_reply_delete(): void
     }
     if (empty($u['admin']) && (int)$r['author'] !== (int)$u['id']) {
         flash('err', '只能删除自己的回复');
+        redirect(u('p=thread&id=' . $tid));
+    }
+    /* v1.25.0 等级删除权限 */
+    if (empty($u['admin']) && (int)$r['author'] === (int)$u['id'] && !level_can($u, 'del_own')) {
+        flash('err', '您当前等级不能删除自己的内容，可联系管理员处理');
         redirect(u('p=thread&id=' . $tid));
     }
     reply_delete($tid, $rid);
@@ -1090,6 +1125,10 @@ function act_like(): void
 {
     $u = require_login();
     feat_guard('like', '点赞功能已关闭');
+    /* v1.25.0 等级点赞权限 */
+    if (!level_can($u, 'like')) {
+        act_err('您当前等级不能点赞，请先参与互动提升等级');
+    }
     // type/tid/rid 位于动作链接的查询串中，同时兼容表单隐藏域提交
     $type = (($_POST['type'] ?? $_GET['type'] ?? '') === 'r') ? 'r' : 't';
     $tid = (int)($_POST['tid'] ?? $_GET['tid'] ?? 0);
@@ -1634,6 +1673,215 @@ function act_admin_board_move(): void
     board_move($id, ($_POST['dir'] ?? '') === 'up' ? 'up' : 'down');
     log_action('admin_board_move', '板块「' . board_name($id) . '」排序' . (($_POST['dir'] ?? '') === 'up' ? '上移' : '下移'));
     back_or(u('p=admin&tab=boards'));
+}
+
+/* ================= v1.25.0 管理员：板块发帖权限 ================= */
+
+function act_admin_board_perm(): void
+{
+    $id = (int)($_POST['id'] ?? 0);
+    if (!board_get($id)) {
+        act_err('板块不存在');
+    }
+    $type = (string)($_POST['perm_type'] ?? 'all');
+    if (!in_array($type, ['all', 'admins', 'level', 'users'], true)) {
+        $type = 'all';
+    }
+    $perm = ['type' => $type, 'level' => 0, 'uids' => []];
+    if ($type === 'level') {
+        $lid = (int)($_POST['perm_level'] ?? 0);
+        if (!level_get($lid)) {
+            act_err('请选择有效的等级');
+        }
+        $perm['level'] = $lid;
+    }
+    $names = '';
+    if ($type === 'users') {
+        /* 白名单：输入用户名（逗号 / 空白分隔），保存时解析为用户 id；无效名字忽略 */
+        $names = trim((string)($_POST['perm_users'] ?? ''));
+        $parts = preg_split('/[\s,，、]+/u', $names) ?: [];
+        $uids = [];
+        $bad = [];
+        foreach ($parts as $n) {
+            $n = trim($n);
+            if ($n === '') {
+                continue;
+            }
+            $x = user_by_name($n);
+            if ($x && empty($x['deleted'])) {
+                $uids[] = (int)$x['id'];
+            } else {
+                $bad[] = $n;
+            }
+        }
+        $perm['uids'] = array_values(array_unique($uids));
+        if ($bad) {
+            act_err('以下用户名不存在，已取消保存：' . cut_str(implode('、', $bad), 80));
+        }
+        if (!$perm['uids']) {
+            act_err('白名单至少填写一个有效用户名');
+        }
+    }
+    board_perm_save($id, $perm);
+    $typeCn = ['all' => '所有人', 'admins' => '仅管理员', 'level' => '等级及以上', 'users' => '白名单用户'][$type] ?? $type;
+    log_action('admin_board_perm', '板块「' . board_name($id) . '」发帖权限设为：' . $typeCn . ($type === 'users' ? '（' . count($perm['uids']) . ' 人）' : ''));
+    act_ok('板块发帖权限已保存', u('p=admin&tab=boards'));
+}
+
+/* ================= v1.25.0 管理员：等级系统 ================= */
+
+/** 从表单收集权限勾选（checkbox 未提交 = 0） */
+function admin_level_perms_from_post(): array
+{
+    $in = is_array($_POST['perms'] ?? null) ? $_POST['perms'] : [];
+    $out = [];
+    foreach (array_keys(LEVEL_PERMS) as $k) {
+        $out[$k] = !empty($in[$k]) ? 1 : 0;
+    }
+    return $out;
+}
+
+function act_admin_level_new(): void
+{
+    $name = cut_str(trim((string)($_POST['name'] ?? '')), 20);
+    $min = max(0, min(1000000, (int)($_POST['min'] ?? 0)));
+    if ($name === '') {
+        act_err('等级名称不能为空');
+    }
+    $all = levels_all();
+    $id = 1;
+    foreach ($all as $l) {
+        $id = max($id, (int)($l['id'] ?? 0) + 1);
+    }
+    $perms = admin_level_perms_from_post();
+    if (!array_filter($perms)) {
+        /* 新建等级未勾选任何权限时，继承最低等级的权限勾选（更符合直觉） */
+        $lowest = levels_sorted()[0] ?? null;
+        if ($lowest && is_array($lowest['perms'] ?? null)) {
+            foreach ($perms as $k => $v) {
+                $perms[$k] = !empty($lowest['perms'][$k]) ? 1 : 0;
+            }
+        }
+    }
+    $all[] = ['id' => $id, 'name' => $name, 'min' => $min, 'built_in' => 0, 'interval' => 0, 'perms' => $perms];
+    levels_save($all);
+    log_action('admin_level_new', '新建等级「' . $name . '」（Lv' . level_no($id) . '，需发帖 ' . $min . ' 篇）');
+    act_ok('等级已创建', u('p=admin&tab=levels'));
+}
+
+function act_admin_level_save(): void
+{
+    $id = (int)($_POST['id'] ?? 0);
+    $all = levels_all();
+    $hit = false;
+    foreach ($all as &$l) {
+        if ((int)($l['id'] ?? 0) === $id) {
+            $name = cut_str(trim((string)($_POST['name'] ?? '')), 20);
+            if ($name === '') {
+                act_err('等级名称不能为空');
+            }
+            $l['name'] = $name;
+            $l['min'] = max(0, min(1000000, (int)($_POST['min'] ?? 0)));
+            $l['interval'] = max(0, min(3600, (int)($_POST['interval'] ?? 0)));
+            $l['perms'] = admin_level_perms_from_post();
+            $hit = true;
+            break;
+        }
+    }
+    unset($l);
+    if (!$hit) {
+        act_err('等级不存在');
+    }
+    levels_save($all);
+    log_action('admin_level_save', '保存等级「' . $name . '」（Lv' . level_no($id) . '）');
+    act_ok('等级已保存', u('p=admin&tab=levels'));
+}
+
+function act_admin_level_del(): void
+{
+    $id = (int)($_POST['id'] ?? 0);
+    $l = level_get($id);
+    if (!$l) {
+        act_err('等级不存在');
+    }
+    if (!empty($l['built_in'])) {
+        act_err('内置默认等级不可删除（可改名、改条件与权限）');
+    }
+    $all = array_values(array_filter(levels_all(), function ($x) use ($id) {
+        return (int)($x['id'] ?? 0) !== $id;
+    }));
+    levels_save($all);
+    /* 引用清洗：手动指派该等级的用户回退为「自动按发帖数」 */
+    $n = 0;
+    $lk = Store::lock('users');
+    $us = user_all();
+    foreach ($us as &$u) {
+        if ((int)($u['level'] ?? 0) === $id) {
+            $u['level'] = 0;
+            $n++;
+        }
+    }
+    unset($u);
+    Store::write('users.php', $us);
+    Store::unlock($lk);
+    log_action('admin_level_del', '删除等级「' . (string)($l['name'] ?? $id) . '」' . ($n > 0 ? '（' . $n . ' 个指派用户已回退自动等级）' : ''));
+    act_ok('等级已删除' . ($n > 0 ? '，' . $n . ' 个指派用户已回退为自动等级' : ''), u('p=admin&tab=levels'));
+}
+
+function act_admin_user_level(): void
+{
+    $uid = (int)($_POST['uid'] ?? 0);
+    $lv = max(0, (int)($_POST['level'] ?? 0));
+    $u = user_by_id($uid);
+    if (!$u) {
+        act_err('用户不存在');
+    }
+    if ($lv > 0 && !level_get($lv)) {
+        act_err('等级不存在');
+    }
+    if (!empty($u['admin'])) {
+        act_err('管理员账号不受等级限制，无需指派');
+    }
+    user_update($uid, ['level' => $lv]);
+    $l = level_get($lv);
+    log_action('admin_user_level', '用户「' . (string)$u['name'] . '」等级' . ($lv > 0 ? '指派为「' . (string)($l['name'] ?? $lv) . '」' : '改为自动（按发帖数）'));
+    act_ok('用户等级已更新', u('p=admin&tab=users'));
+}
+
+/* ================= v1.25.0 管理员：还原默认设置 ================= */
+
+function act_admin_restore_defaults(): void
+{
+    $raw = trim((string)($_POST['keys'] ?? ''));
+    $want = array_values(array_filter(array_map('trim', explode(',', $raw)), function ($s) {
+        return preg_match('/^[a-z0-9_]{2,60}$/', $s) === 1;
+    }));
+    if (!$want) {
+        act_err('未指定要还原的设置项');
+    }
+    $defs = admin_cfg_defaults();
+    $kv = [];
+    $skipped = [];
+    foreach ($want as $k) {
+        if (!isset($defs[$k])) {
+            $skipped[] = $k; /* 不在注册表中的键拒绝还原（防误传 / 恶意构造） */
+            continue;
+        }
+        $kv[$k] = $defs[$k][0];
+    }
+    if (!$kv) {
+        act_err('这些设置项不支持一键还原');
+    }
+    cfg_update($kv);
+    log_action('admin_restore_defaults', '还原 ' . count($kv) . ' 项设置为默认值：' . cut_str(implode(', ', array_keys($kv)), 160));
+    act_ok('已还原 ' . count($kv) . ' 项设置为默认值' . ($skipped ? '（跳过不支持的 ' . count($skipped) . ' 项）' : ''), back_target());
+}
+
+/** 还原后回跳：优先回当前后台地址（session 里存的完整 tab/筛选） */
+function back_target(): string
+{
+    $b = (string)($_SESSION['admin_back'] ?? '');
+    return $b !== '' ? u('p=admin&' . $b) : u('p=admin');
 }
 
 /* ================= 管理员：用户 ================= */

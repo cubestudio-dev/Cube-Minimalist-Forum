@@ -939,6 +939,21 @@
     }
   }
 
+  /* ---------- v1.25.0 板块发帖权限面板：类型切换时联动显示等级 / 白名单输入 ---------- */
+  $$('[data-perm-form]').forEach(function (form) {
+    var type = form.querySelector('[data-perm-type]');
+    var lv = form.querySelector('[data-perm-level]');
+    var us = form.querySelector('[data-perm-users]');
+    if (!type) return;
+    function sync() {
+      var v = type.value;
+      if (lv) lv.hidden = v !== 'level';
+      if (us) us.hidden = v !== 'users';
+    }
+    type.addEventListener('change', sync);
+    sync();
+  });
+
   /* ---------- v1.23.0：行云流水 · 导航编排（高延迟网络动效层） ----------
      职责：让 200ms～7s 延迟下的页面切换依然平滑——
      · 点击瞬间（0ms）：顶部进度条启动 + 旧内容轻淡出（顶栏 / 侧栏不动，永不白屏）
