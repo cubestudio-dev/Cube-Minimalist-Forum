@@ -109,7 +109,7 @@ if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '
   不支持的浏览器自动走 app.js 的退场 / 进度条兼容方案 */ ?>
 <style>@view-transition{navigation:auto}</style>
 <?php endif; ?>
-<script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;window.MF_EMOJI=<?= feat_on('emoji') ? 'true' : 'false' ?>;window.MF_MOTION=<?= feat_on('motion') ? 'true' : 'false' ?>;</script>
+<script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;window.MF_EMOJI=<?= (feat_on('emoji') && (($mu = current_user()) === null || level_can($mu, 'emoji'))) ? 'true' : 'false' ?>;window.MF_MOTION=<?= feat_on('motion') ? 'true' : 'false' ?>;</script>
 <script>(function(){try{var d=localStorage.getItem('mf-theme')||window.THEME_DEFAULT||'system';if(d==='system'){d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',d);}catch(e){}})();</script>
 <style>:root{--accent:<?= e($accent) ?>;}</style>
 <?php if (!empty($c['custom_css'])): ?>
@@ -159,7 +159,7 @@ function layout_header(string $title = '', int $boardId = 0): void
       <button class="icon-btn" id="themeToggle" title="<?= e(t('切换深色 / 浅色模式')) ?>" aria-label="<?= e(t('切换深色模式')) ?>">◐</button>
       <?php if ($u): ?>
         <a class="nav-link" href="<?= e(u('p=user&id=' . (int)$u['id'])) ?>"><?= e((string)$u['name']) ?></a>
-        <?php if (!empty($u['admin'])): ?><a class="nav-link" href="<?= e(u('p=admin')) ?>"><?= e(t('后台')) ?></a><?php endif; ?>
+        <?php if ($u && role_at_least($u, 'mod')): ?><a class="nav-link" href="<?= e(u('p=admin')) ?>"><?= e(t('后台')) ?></a><?php endif; ?>
         <a class="nav-link hide-sm" href="<?= e(u('p=settings')) ?>"><?= e(t('个人设置')) ?></a>
         <form method="post" action="<?= e(u('a=logout')) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-ghost btn-sm" type="submit"><?= e(t('退出')) ?></button></form>
       <?php else: ?>

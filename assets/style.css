@@ -421,7 +421,13 @@ textarea.input { resize: vertical; min-height: 80px; }
   .form-foot { flex-wrap: wrap; }
 }
 @media (max-width: 480px) {
-  .nav-link { padding: 6px 7px; }
+  .nav-link { padding: 6px 5px; font-size: 13px; }
+  /* v1.26.0：更窄屏再紧凑一档（登录 + 后台链接 + 通知时仍可能挤满 390px） */
+  .topbar-in { gap: 5px; }
+  .topbar .icon-btn { width: 30px; height: 30px; padding: 0; }
+  .topbar .btn-ghost.btn-sm { padding: 5px 9px; }
+  .topbar .brand { gap: 5px; }
+  .topbar .brand .logo { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

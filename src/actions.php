@@ -39,6 +39,7 @@ function handle_action(string $a): void
 
     // 全局异常闸口：写入失败 / 环境异常不再白屏或静默丢失，而是给出可读原因并记入日志
     try {
+        $GLOBALS['MF_ACTION'] = $a; /* v1.26.0：admin_tab_guard 按动作名分级把关 */
         route_action($a);
     } catch (Throwable $t) {
         $why = $t instanceof RuntimeException || $t instanceof LogicException ? $t->getMessage() : '服务器内部错误（' . cut_str($t->getMessage(), 120) . '）';
@@ -138,6 +139,7 @@ function route_action(string $a): void
         case 'admin_backup':    admin_tab_guard(); act_admin_backup(); return;
         case 'admin_backup_del': admin_tab_guard(); act_admin_backup_del(); return;
         case 'admin_update':        admin_tab_guard(); act_admin_update(); return;
+        case 'admin_update_rollback': admin_tab_guard(); act_admin_update_rollback(); return;
         case 'admin_logs_settings': admin_tab_guard(); act_admin_logs_settings(); return;
         case 'admin_logs_clear':    admin_tab_guard(); act_admin_logs_clear(); return;
         case 'admin_fw_on':           admin_tab_guard(); act_admin_fw_on(); return;
@@ -219,6 +221,23 @@ function act_ok(string $msg, string $goto = ''): void
 
 function admin_tab_guard(): array
 {
+    /* v1.26.0 角色分级把关：
+       - 审核员可用：内容审核域动作（帖子操作 / 删回复 / AI 队列 / 人工待审）；
+       - 仅超级管理员：角色指派；
+       - 其余 admin_* 动作：管理员（与旧版一致）。 */
+    static $modActions = [
+        'admin_thread_op', 'admin_reply_delete',
+        'admin_queue_run', 'admin_queue_restore', 'admin_queue_delete',
+        'admin_manual_restore', 'admin_manual_delete',
+    ];
+    static $superActions = ['admin_user_role'];
+    $a = (string)($GLOBALS['MF_ACTION'] ?? '');
+    if (in_array($a, $superActions, true)) {
+        return require_super();
+    }
+    if (in_array($a, $modActions, true)) {
+        return require_staff();
+    }
     return require_admin();
 }
 
@@ -955,8 +974,10 @@ function act_thread_new(): void
     $tid = thread_create($board, $title, $content, (int)$u['id']);
     user_bump((int)$u['id'], 'threads', 1);
     log_action('thread_new', '发布《' . cut_str($title, 40) . '》（板块：' . board_name($board) . '）');
-    /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
-    mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title);
+    /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0；v1.26.0 受等级权限约束） */
+    if (level_can($u, 'mention')) {
+        mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title);
+    }
     mf_do_action('post_created', thread_get($tid) ?? ['id' => $tid, 'board' => $board, 'title' => $title, 'author' => (int)$u['id']]); /* v1.22.0 拓展钩子 */
     /* 严全面·消息审核：v1.16.0 改为响应后异步预检（register_shutdown_function），
        发帖立即返回不再被 AI 调用阻塞（此前同步调用会让整个服务等待数秒）；
@@ -1000,8 +1021,10 @@ function act_reply_new(): void
         redirect(u('p=home'));
     }
     log_action('reply_new', '在《' . cut_str((string)($t['title'] ?? ''), 40) . '》中发表回复');
-    /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
-    mentions_notify($content, (int)$u['id'], $tid, (int)$rid);
+    /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0；v1.26.0 受等级权限约束） */
+    if (level_can($u, 'mention')) {
+        mentions_notify($content, (int)$u['id'], $tid, (int)$rid);
+    }
     mf_do_action('reply_created', $tid, (int)$rid, (int)$u['id']); /* v1.22.0 拓展钩子 */
     /* 严全面·消息审核：v1.16.0 改为响应后异步预检，不再阻塞响应（同上） */
     register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id']);
@@ -1085,8 +1108,10 @@ function act_thread_edit(): void
     }
     thread_save($tid, ['title' => $title, 'content' => $content, 'edited' => time(), 'edited_by' => (int)$u['id']]);
     log_action('thread_edit', (($u['admin'] ?? false) && (int)$t['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str($title, 40) . '》', (int)$u['id'], (string)$u['name']);
-    /* @ 提及：编辑时只通知新增提及（旧内容已提及过的人不重复通知） */
-    mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title, mentions_extract((string)($t['content'] ?? '')));
+    /* @ 提及：编辑时只通知新增提及（旧内容已提及过的人不重复通知；v1.26.0 受等级权限约束） */
+    if (level_can($u, 'mention')) {
+        mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title, mentions_extract((string)($t['content'] ?? '')));
+    }
     /* v1.24.0 编辑后 AI 审查：与发布预检同一套机制（违规自动隐藏可申诉）；
        管理员编辑他人内容不触发（管理员操作本身即人工审核，避免二次藏帖困扰） */
     if (!((!empty($u['admin'])) && (int)$t['author'] !== (int)$u['id'])) {
@@ -1112,8 +1137,10 @@ function act_reply_edit(): void
     }
     reply_save($tid, $rid, ['content' => $content, 'edited' => time(), 'edited_by' => (int)$u['id']]);
     log_action('reply_edit', (($u['admin'] ?? false) && (int)$r['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str((string)($t['title'] ?? ''), 40) . '》中的回复', (int)$u['id'], (string)$u['name']);
-    /* @ 提及：编辑时只通知新增提及 */
-    mentions_notify($content, (int)$u['id'], $tid, (int)$rid, '', mentions_extract((string)($r['content'] ?? '')));
+    /* @ 提及：编辑时只通知新增提及（v1.26.0 受等级权限约束） */
+    if (level_can($u, 'mention')) {
+        mentions_notify($content, (int)$u['id'], $tid, (int)$rid, '', mentions_extract((string)($r['content'] ?? '')));
+    }
     /* v1.24.0 编辑后 AI 审查（同帖子编辑：管理员编辑他人回复不触发） */
     if (!((!empty($u['admin'])) && (int)$r['author'] !== (int)$u['id'])) {
         register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id'], '', 'edit');
@@ -1146,6 +1173,9 @@ function act_report(): void
 {
     $u = require_login();
     feat_guard('report', '举报功能已关闭');
+    if (!level_can($u, 'report')) {
+        act_err('当前等级不可举报内容'); /* v1.26.0 等级权限 */
+    }
     $type = ($_POST['type'] ?? '') === 'r' ? 'reply' : 'thread';
     $tid = (int)($_POST['tid'] ?? 0);
     $rid = (int)($_POST['rid'] ?? 0);
@@ -1804,8 +1834,9 @@ function act_admin_level_del(): void
     if (!$l) {
         act_err('等级不存在');
     }
-    if (!empty($l['built_in'])) {
-        act_err('内置默认等级不可删除（可改名、改条件与权限）');
+    /* v1.26.0：全部等级可删除，但至少保留一个（等级是权限判定的基础） */
+    if (count(levels_all()) <= 1) {
+        act_err('至少需要保留一个等级：请先新建另一个等级再删除');
     }
     $all = array_values(array_filter(levels_all(), function ($x) use ($id) {
         return (int)($x['id'] ?? 0) !== $id;
@@ -1884,6 +1915,27 @@ function back_target(): string
     return $b !== '' ? u('p=admin&' . $b) : u('p=admin');
 }
 
+/* ================= v1.26.0 管理员：回撤更新 ================= */
+
+function act_admin_update_rollback(): void
+{
+    $bk = (string)($_POST['bk'] ?? '');
+    if (!preg_match('/^pre-(update|rollback)-\d{8}-\d{6}\.zip$/', $bk)) {
+        act_err('备份文件名不合法');
+    }
+    $path = Store::path('backup/' . $bk);
+    if (!is_file($path)) {
+        act_err('备份文件不存在（可能已被清理）');
+    }
+    $res = [];
+    try {
+        update_rollback($path, $res);
+    } catch (RuntimeException $e) {
+        act_err($e->getMessage());
+    }
+    act_ok('已回滚到 v' . $res['version'] . '（恢复 ' . $res['files'] . ' 个文件），回滚前状态已另存为 ' . $res['new_backup'], u('p=admin&tab=update'));
+}
+
 /* ================= 管理员：用户 ================= */
 
 function act_admin_user_mute(): void
@@ -1925,18 +1977,30 @@ function act_admin_user_unban(): void
 
 function act_admin_user_role(): void
 {
-    $me = require_admin();
+    /* v1.26.0：角色指派（仅超级管理员）：普通用户 / 审核员 / 管理员 / 超级管理员 */
+    $me = admin_tab_guard();
     $uid = (int)($_POST['uid'] ?? 0);
-    $to = ($_POST['to'] ?? '0') === '1';
+    $role = (string)($_POST['role'] ?? 'user');
+    if (!isset(MF_ROLES[$role])) {
+        act_err('未知角色');
+    }
     if ($uid === (int)$me['id']) {
         act_err('不能修改自己的角色');
     }
-    if (!user_by_id($uid)) {
+    $t = user_by_id($uid);
+    if (!$t) {
         act_err('用户不存在');
     }
-    user_update($uid, ['admin' => $to ? 1 : 0]);
-    log_action('admin_user_role', '用户「' . uname($uid) . '」' . ($to ? '设为管理员' : '取消管理员'));
-    act_ok('角色已更新', u('p=admin&tab=users'));
+    if ($role === 'super' && !empty($t['banned'])) {
+        act_err('不能把已封禁的账号设为超级管理员，请先解封');
+    }
+    $old = user_role($t);
+    if ($old === $role) {
+        act_err('该用户已经是「' . t(MF_ROLES[$role][0]) . '」');
+    }
+    user_update($uid, role_sync_fields($role));
+    log_action('admin_user_role', '用户「' . (string)$t['name'] . '」角色：' . t(MF_ROLES[$old][0]) . ' → ' . t(MF_ROLES[$role][0]));
+    act_ok('角色已更新：' . (string)$t['name'] . ' → ' . t(MF_ROLES[$role][0]), u('p=admin&tab=users'));
 }
 
 /* ================= 管理员：内容 ================= */

@@ -99,8 +99,9 @@ class MiniZipRead
 
 /* ================= 程序文件备份 ================= */
 
-/** 把当前程序文件（不含 data/）打包为 pre-update-*.zip，返回文件名 */
-function program_backup_create(string &$name): bool
+/** 把当前程序文件（不含 data/）打包为备份 zip，返回文件名
+ *  v1.26.0：$prefix 可指定前缀（pre-update = 更新前备份 / pre-rollback = 回滚前备份） */
+function program_backup_create(string &$name, string $prefix = 'pre-update'): bool
 {
     $root = dirname(DATA_DIR);
     $files = [];
@@ -125,16 +126,16 @@ function program_backup_create(string &$name): bool
     } catch (Throwable $t) {
         return false;
     }
-    $name = 'pre-update-' . date('Ymd-His') . '.zip';
+    $name = $prefix . '-' . date('Ymd-His') . '.zip';
     Store::ensureDir('backup');
     return MiniZip::create(Store::path('backup/' . $name), $files);
 }
 
-/** 只保留最近 $keep 份 pre-update 备份 */
+/** 只保留最近 $keep 份 pre-update / pre-rollback 备份 */
 function program_backup_prune(int $keep = 3): void
 {
     $fs = array_values(array_filter(Store::scan('backup'), function ($f) {
-        return (bool)preg_match('/^pre-update-\d{8}-\d{6}\.zip$/', $f);
+        return (bool)preg_match('/^pre-(update|rollback)-\d{8}-\d{6}\.zip$/', $f);
     }));
     if (count($fs) <= $keep) {
         return;
@@ -143,6 +144,140 @@ function program_backup_prune(int $keep = 3): void
     foreach (array_slice($fs, 0, count($fs) - $keep) as $f) {
         @unlink(Store::path('backup/' . $f));
     }
+}
+
+/* ================= v1.26.0 回撤更新 ================= */
+
+/** 列出可回滚的备份（新在前）：file / version / time / size_h */
+function program_backup_list(): array
+{
+    $fs = array_values(array_filter(Store::scan('backup'), function ($f) {
+        return (bool)preg_match('/^pre-(update|rollback)-\d{8}-\d{6}\.zip$/', $f);
+    }));
+    rsort($fs);
+    $out = [];
+    foreach ($fs as $f) {
+        $path = Store::path('backup/' . $f);
+        $mtime = @filemtime($path) ?: 0;
+        /* 文件名里的时间戳比 mtime 可靠（同名优先）；两者都取 */
+        if (preg_match('/-(\d{8})-(\d{6})\.zip$/', $f, $m)) {
+            $ts = mktime((int)substr($m[2], 0, 2), (int)substr($m[2], 2, 2), (int)substr($m[2], 4, 2),
+                (int)substr($m[1], 4, 2), (int)substr($m[1], 6, 2), (int)substr($m[1], 0, 4));
+            if ($ts) {
+                $mtime = $ts;
+            }
+        }
+        $size = @filesize($path) ?: 0;
+        $out[] = [
+            'file'    => $f,
+            'version' => backup_detect_version($path),
+            'time'    => $mtime,
+            'size_h'  => $size > 0 ? ($size >= 1048576 ? round($size / 1048576, 1) . ' MB' : round($size / 1024, 1) . ' KB') : '?',
+        ];
+    }
+    return $out;
+}
+
+/** 识别备份包对应的版本号：优先读包内 src/bootstrap.php 的 MF_VERSION；
+ *  读不出时回退：取备份时间点之后最近的一条更新历史，其 from 即备份版本 */
+function backup_detect_version(string $path): string
+{
+    try {
+        $entries = MiniZipRead::read($path);
+        $boot = (string)($entries['src/bootstrap.php'] ?? '');
+        if ($boot !== '' && preg_match("/define\(\s*'MF_VERSION'\s*,\s*'([0-9][^']*)'/", $boot, $m)) {
+            return trim($m[1]);
+        }
+    } catch (Throwable $t) {
+        /* 包损坏则走历史回退 */
+    }
+    if (preg_match('/-(\d{8})-(\d{6})\.zip$/', $path, $m)) {
+        $ts = mktime((int)substr($m[2], 0, 2), (int)substr($m[2], 2, 2), (int)substr($m[2], 4, 2),
+            (int)substr($m[1], 4, 2), (int)substr($m[1], 6, 2), (int)substr($m[1], 0, 4));
+        foreach (update_history() as $h) {
+            if ((int)($h['time'] ?? 0) >= $ts && !empty($h['from'])) {
+                return (string)$h['from'];
+            }
+        }
+    }
+    return '';
+}
+
+/**
+ * 回撤更新：从指定备份包恢复程序文件，并把配置中的版本号回退为该备份的版本。
+ *  - 恢复前先把当前程序另存一份 pre-rollback-*.zip（可随时再恢复回来）；
+ *  - 只覆盖程序文件，data/ 数据（用户 / 帖子 / 设置）不受影响；
+ *  - 注意：更新包附带的数据迁移脚本无法自动回退（官方更新包目前均不含迁移脚本）。
+ * @param array $res 输出：['version','from','files','new_backup']
+ * @throws RuntimeException 失败原因
+ */
+function update_rollback(string $bkPath, array &$res): void
+{
+    $bkName = basename($bkPath);
+    $ver = backup_detect_version($bkPath);
+    if ($ver === '') {
+        throw new RuntimeException('无法识别该备份包的版本号（包可能已损坏）');
+    }
+    $cur = app_version();
+
+    $entries = MiniZipRead::read($bkPath);
+    $copy = [];
+    foreach ($entries as $name => $content) {
+        $name = str_replace('\\', '/', (string)$name);
+        if ($name === '' || $name[0] === '/' || strpos($name, ':') !== false
+            || preg_match('#(^|/)\.\.(/|$)#', $name) || preg_match('#(^|/)\.$#', $name)) {
+            throw new RuntimeException('备份包包含不安全的文件路径：' . $name);
+        }
+        if ($name === 'install.php' || strncmp($name, 'data/', 5) === 0) {
+            continue; /* 备份本就不含；防御性跳过 */
+        }
+        $copy[$name] = $content;
+    }
+    if (!$copy) {
+        throw new RuntimeException('备份包中没有可恢复的程序文件');
+    }
+
+    /* 恢复前把当前状态另存一份（可再恢复回来） */
+    $rbName = '';
+    if (!program_backup_create($rbName, 'pre-rollback')) {
+        throw new RuntimeException('回滚前备份失败：data/backup 不可写，已中止回滚');
+    }
+
+    /* 逐条原子写入（与更新应用同一套逻辑） */
+    $root = dirname(DATA_DIR);
+    $applied = 0;
+    foreach ($copy as $name => $content) {
+        $target = $root . '/' . $name;
+        $dir = dirname($target);
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+            throw new RuntimeException('无法创建目录：' . $name . '（请检查程序目录权限）');
+        }
+        $tmp = $target . '.uptmp' . getmypid();
+        if (@file_put_contents($tmp, $content) === false || !@rename($tmp, $target)) {
+            @unlink($tmp);
+            throw new RuntimeException('写入文件失败（权限不足？）：' . $name);
+        }
+        @chmod($target, 0644);
+        $applied++;
+    }
+
+    /* 版本号回退 + 历史 + 日志 */
+    cfg_update(['version' => $ver]);
+    $h = update_history();
+    $h[] = [
+        'version' => $ver, 'from' => $cur, 'time' => time(), 'files' => $applied,
+        'notes' => "回撤更新：从备份 {$bkName} 恢复程序文件；回滚前状态已另存为 {$rbName}",
+        'rollback' => 1,
+    ];
+    Store::write('updates.php', $h);
+    program_backup_prune(3);
+    if (function_exists('log_action')) {
+        log_action('update_rollback', 'v' . $cur . ' → v' . $ver . '，从 ' . $bkName . ' 恢复 ' . $applied . ' 个文件；回滚前状态另存为 ' . $rbName);
+    }
+    if (function_exists('opcache_reset')) {
+        @opcache_reset();
+    }
+    $res = ['version' => $ver, 'from' => $cur, 'files' => $applied, 'new_backup' => $rbName];
 }
 
 /* ================= 更新应用 ================= */

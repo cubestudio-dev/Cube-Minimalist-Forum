@@ -134,10 +134,7 @@ function uname(int $id): string
     return $c[$id];
 }
 
-function role_name(array $u): string
-{
-    return !empty($u['admin']) ? '管理员' : '注册用户';
-}
+/** 角色相关函数（user_role / role_name / role_badge 等）见 v1.26.0 src/roles.php */
 
 function mute_left(array $u): int
 {
@@ -255,6 +252,28 @@ function require_admin(): array
     $u = require_login();
     if (empty($u['admin'])) {
         flash('err', '无权访问后台');
+        redirect(u('p=home'));
+    }
+    return $u;
+}
+
+/** v1.26.0：需要审核团队身份（审核员 / 管理员 / 超级管理员） */
+function require_staff(): array
+{
+    $u = require_login();
+    if (!role_at_least($u, 'mod')) {
+        flash('err', '无权访问后台');
+        redirect(u('p=home'));
+    }
+    return $u;
+}
+
+/** v1.26.0：需要超级管理员身份（角色指派等） */
+function require_super(): array
+{
+    $u = require_login();
+    if (!role_at_least($u, 'super')) {
+        flash('err', '仅超级管理员可执行此操作');
         redirect(u('p=home'));
     }
     return $u;

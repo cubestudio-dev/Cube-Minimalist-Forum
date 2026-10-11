@@ -890,6 +890,8 @@ function api_ep_me_info(?array $u): void
     /* v1.25.0 等级信息 */
     $myLv = user_level($u);
     $pub['level'] = $myLv ? ['id' => (int)$myLv['id'], 'name' => (string)$myLv['name'], 'no' => level_no((int)$myLv['id']), 'manual' => (int)($u['level'] ?? 0) > 0] : null;
+    /* v1.26.0 职员角色 */
+    $pub['role'] = user_role($u);
     $pub['token'] = [
         'created' => (int)(api_token_of((int)$u['id'])['created'] ?? 0),
         'terms_version' => api_terms_fp(),

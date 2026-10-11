@@ -1,39 +1,67 @@
 <?php
 /**
- * 极简论坛 · 用户等级系统（v1.25.0）
+ * 极简论坛 · 用户成长等级系统（v1.25.0，v1.26.0 扩充）
  * 等级定义存储于 data/levels.php；用户等级 = 手动指派（users.php 的 level 键）优先，
  * 未指派（level=0 或缺键）时按发帖数自动匹配「满足 min 的最高等级」。
- * 管理员不受等级限制（一切权限恒通过）；内置 3 个默认等级不可删除。
+ * 管理员不受等级限制（一切权限恒通过）；全部等级均可删除（至少保留一个）。
+ * 与「职员角色」（roles.php：普通用户/审核员/管理员/超级管理员）正交：
+ * 等级管「自己能用什么」，角色管「能管别人什么」。
  */
 defined('APP') or exit('Forbidden');
 
 /** 权限项定义（后台勾选矩阵）：key => [名称, 说明] */
 const LEVEL_PERMS = [
-    'post'     => ['发新帖', '不勾选则该等级用户无法发布新帖（各板块还可另设发帖权限，两者同时满足才能发）'],
-    'reply'    => ['发表回复', '不勾选则该等级用户无法回复任何帖子'],
-    'edit_own' => ['编辑自己的内容', '发布后 15 分钟内可编辑自己的帖子 / 回复（管理员不限时）'],
-    'del_own'  => ['删除自己的内容', '允许该等级用户删除自己的帖子 / 回复'],
-    'sig'      => ['使用个人签名', '不勾选则该等级用户的个人设置不显示签名输入框（已填写的签名保留但不再展示）'],
-    'like'     => ['点赞', '不勾选则该等级用户无法点赞 / 取消点赞'],
+    'post'        => ['发新帖', '不勾选则该等级用户无法发布新帖（各板块还可另设发帖权限，两者同时满足才能发）'],
+    'reply'       => ['发表回复', '不勾选则该等级用户无法回复任何帖子'],
+    'edit_own'    => ['编辑自己的内容', '发布后 15 分钟内可编辑自己的帖子 / 回复（管理员不限时）'],
+    'del_own'     => ['删除自己的内容', '允许该等级用户删除自己的帖子 / 回复'],
+    'sig'         => ['使用个人签名', '不勾选则该等级用户的个人设置不显示签名输入框（已填写的签名保留但不再展示）'],
+    'like'        => ['点赞', '不勾选则该等级用户无法点赞 / 取消点赞'],
+    'report'      => ['举报内容', '不勾选则该等级用户无法举报帖子 / 回复'],
+    'mention'     => ['@ 提及他人', '不勾选则该等级用户发帖 / 回复时 @ 别人不会触发站内通知'],
+    'search'      => ['站内搜索', '不勾选则该等级用户无法使用站内搜索'],
+    'emoji'       => ['使用表情', '不勾选则发帖 / 回复编辑器不显示表情栏'],
+    'skip_ai'     => ['免 AI 审查', '勾选后该等级用户发布与编辑的内容跳过 AI 审查（信任机制；用户名审查不跳过）'],
+    'view_hidden' => ['查看审核中的内容', '勾选后该等级用户可看到正在审核中的帖子 / 回复（标注「审核中」，适合资深用户协助监督）'],
 ];
 
-/** 默认 3 个内置等级（built_in=1：可改名 / 改条件 / 改权限，不可删除） */
+/** 旧站升级兼容：等级数据里缺失的新权限键按此默认值补齐（v1.26.0 前这些能力人人可用，
+ *  故 report/mention/search/emoji 默认 1 保持原状；skip_ai/view_hidden 为新能力默认关，需手动开启） */
+const LEVEL_PERMS_COMPAT = ['report' => 1, 'mention' => 1, 'search' => 1, 'emoji' => 1, 'skip_ai' => 0, 'view_hidden' => 0];
+
+/** 默认 3 个内置等级（built_in=1 仅为标识；可改名 / 改条件 / 改权限 / 删除，至少保留一个等级） */
 function levels_default(): array
 {
     return [
         ['id' => 1, 'name' => '新手上路', 'min' => 0,  'built_in' => 1, 'interval' => 0,
-         'perms' => ['post' => 1, 'reply' => 1, 'edit_own' => 1, 'del_own' => 0, 'sig' => 0, 'like' => 1]],
+         'perms' => ['post' => 1, 'reply' => 1, 'edit_own' => 1, 'del_own' => 0, 'sig' => 0, 'like' => 1,
+                     'report' => 1, 'mention' => 1, 'search' => 1, 'emoji' => 1, 'skip_ai' => 0, 'view_hidden' => 0]],
         ['id' => 2, 'name' => '活跃用户', 'min' => 10, 'built_in' => 1, 'interval' => 0,
-         'perms' => ['post' => 1, 'reply' => 1, 'edit_own' => 1, 'del_own' => 1, 'sig' => 1, 'like' => 1]],
+         'perms' => ['post' => 1, 'reply' => 1, 'edit_own' => 1, 'del_own' => 1, 'sig' => 1, 'like' => 1,
+                     'report' => 1, 'mention' => 1, 'search' => 1, 'emoji' => 1, 'skip_ai' => 0, 'view_hidden' => 0]],
         ['id' => 3, 'name' => '资深用户', 'min' => 50, 'built_in' => 1, 'interval' => 0,
-         'perms' => ['post' => 1, 'reply' => 1, 'edit_own' => 1, 'del_own' => 1, 'sig' => 1, 'like' => 1]],
+         'perms' => ['post' => 1, 'reply' => 1, 'edit_own' => 1, 'del_own' => 1, 'sig' => 1, 'like' => 1,
+                     'report' => 1, 'mention' => 1, 'search' => 1, 'emoji' => 1, 'skip_ai' => 1, 'view_hidden' => 1]],
     ];
 }
 
-/** 读全部等级；文件不存在 / 为空时初始化默认 3 等级并写回（旧站升级零迁移） */
-function levels_all(): array
+/** 请求级 memo（可从外部失效；levels_save 后置空，避免同请求内读到旧数据把新等级编号算成 Lv0） */
+function &levels_memo_ref(): ?array
 {
     static $memo = null;
+    return $memo;
+}
+
+function levels_memo_reset(): void
+{
+    $m = &levels_memo_ref();
+    $m = null;
+}
+
+/** 读全部等级；文件不存在 / 为空时初始化默认 3 等级并写回（旧站升级零迁移；缺失的新权限键自动补默认值） */
+function levels_all(): array
+{
+    $memo = &levels_memo_ref();
     if (is_array($memo)) {
         return $memo;
     }
@@ -42,16 +70,31 @@ function levels_all(): array
         $lv = levels_default();
         levels_save($lv);
     }
-    $memo = array_values(array_filter($lv, 'is_array'));
+    $out = [];
+    foreach ($lv as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $perms = is_array($row['perms'] ?? null) ? $row['perms'] : [];
+        foreach (LEVEL_PERMS_COMPAT as $pk => $pv) {
+            if (!array_key_exists($pk, $perms)) {
+                $perms[$pk] = $pv;
+            }
+        }
+        $row['perms'] = $perms;
+        $out[] = $row;
+    }
+    $memo = $out;
     return $memo;
 }
 
-/** 全量保存等级（加锁 + 原子写） */
+/** 全量保存等级（加锁 + 原子写 + 失效请求级缓存） */
 function levels_save(array $all): void
 {
     $lk = Store::lock('levels');
     Store::write('levels.php', array_values($all));
     Store::unlock($lk);
+    levels_memo_reset();
 }
 
 /** 等级按升级条件升序（min 相同按 id） */
@@ -144,18 +187,18 @@ function level_interval(?array $u): int
     return max(0, min(3600, (int)($l['interval'] ?? 0)));
 }
 
-/** 等级徽章（管理员优先显示管理员徽章）；无等级数据时显示「注册用户」 */
+/** 等级徽章：职员（审核员 / 管理员 / 超级管理员）显示角色徽章；普通用户显示成长等级徽章 */
 function level_badge(?array $u): string
 {
     if (!$u || empty($u['id'])) {
         return '';
     }
-    if (!empty($u['admin'])) {
-        return '<span class="badge badge-accent">' . e(role_name($u)) . '</span>';
+    if (user_role($u) !== 'user') {
+        return role_badge($u);
     }
     $l = user_level($u);
     if (!$l) {
-        return '<span class="badge">' . e(role_name($u)) . '</span>';
+        return '<span class="badge">' . e(t('普通用户')) . '</span>';
     }
     $no = level_no((int)$l['id']);
     return '<span class="badge badge-info" title="' . e((string)($l['name'] ?? '')) . '">Lv' . $no . ' ' . e((string)($l['name'] ?? '')) . '</span>';

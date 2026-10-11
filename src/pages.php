@@ -91,14 +91,15 @@ function page_thread(): void
     }
     $u = current_user();
     $uid = $u ? (int)$u['id'] : 0;
-    $admin = is_admin();
+    $admin = is_mod(); /* v1.26.0：职员（审核员及以上）可用管理操作行 */
+    $canSee = $admin || ($u && level_can($u, 'view_hidden')); /* 审核中的内容可见性 */
     $author = (int)$t['author'];
     $hidden = !empty($t['hidden']);
 
     layout_header((string)$t['title'], (int)$t['board']);
     echo '<nav class="crumb"><a href="' . e(u('p=board&id=' . (int)$t['board'])) . '">' . e(board_name((int)$t['board'])) . '</a><span>/</span>正文</nav>';
 
-    if ($hidden && !$admin) {
+    if ($hidden && !$canSee) {
         echo '<div class="card notice-card"><b>该内容正在审核中</b><p>此帖子被举报后已暂时隐藏，等待审核结果。审核完成后将自动恢复展示或通知作者申诉。</p></div>';
         layout_footer();
         return;
@@ -129,7 +130,7 @@ function page_thread(): void
         if (feat_on('like')) {
             echo like_btn('t', $tid, 0, $t['likes'] ?? [], $uid);
         }
-        if (feat_on('report')) {
+        if (feat_on('report') && (!$u || level_can($u, 'report'))) {
             echo report_box('t', $tid, 0);
         }
         if (thread_editable($t, $u)) {
@@ -145,7 +146,7 @@ function page_thread(): void
     }
     echo '</div>';
 
-    // 管理员操作
+    // 管理员操作（v1.26.0：审核员及以上可见）
     if ($admin) {
         echo '<div class="admin-ops"><span class="muted">管理：</span>';
         echo '<form method="post" action="' . e(u('a=admin_thread_op')) . '" class="inline">' .
@@ -190,7 +191,7 @@ function page_thread(): void
             ($rhidden ? '<span class="badge badge-warn">审核中</span>' : '') .
             (!empty($r['appealed']) ? '<span class="badge badge-info">已申诉</span>' : '') .
             '<span class="muted">#' . $rid . '</span></div>';
-        if ($rhidden && !$admin) {
+        if ($rhidden && !$canSee) {
             echo '<div class="md reply-content muted">该回复正在审核中，暂时无法查看。</div>';
         } else {
             echo '<div class="md reply-content">' . md_render((string)$r['content']) . '</div>';
@@ -201,7 +202,7 @@ function page_thread(): void
             if (feat_on('like')) {
                 echo like_btn('r', $tid, $rid, $r['likes'] ?? [], $uid);
             }
-            if (feat_on('report')) {
+            if (feat_on('report') && (!$u || level_can($u, 'report'))) {
                 echo report_box('r', $tid, $rid);
             }
             if (reply_editable($r, $u, $t)) {
@@ -224,7 +225,7 @@ function page_thread(): void
     echo '</div>';
 
     // 回复表单
-    if ($hidden && !$admin) {
+    if ($hidden && !$canSee) {
         layout_footer();
         return;
     }
@@ -817,6 +818,11 @@ function page_search(): void
         flash('err', '站内搜索已关闭');
         redirect(u('p=home'));
     }
+    $mu = current_user();
+    if ($mu && !level_can($mu, 'search')) {
+        flash('err', '当前等级不可使用站内搜索'); /* v1.26.0 等级权限 */
+        redirect(u('p=home'));
+    }
     $q = trim((string)($_GET['q'] ?? ''));
     $q = cut_str((string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $q), 50);
     layout_header($q !== '' ? '搜索：' . $q : '站内搜索', 0);
@@ -844,8 +850,8 @@ function page_search(): void
             echo '<div class="list-head"><span class="muted">找到 ' . count($uhits) . ' 位相关用户</span></div><div class="thread-list">';
             foreach ($uhits as $uu) {
                 echo '<a class="thread-card" href="' . e(u('p=user&id=' . (int)$uu['id'])) . '"><div class="tc-main"><b>' . e((string)$uu['name']) . '</b>' .
-                    '<span class="badge' . (!empty($uu['admin']) ? ' badge-accent' : '') . '">' . e(role_name($uu)) . '</span>' .
-                    (!empty($uu['admin']) ? '' : level_badge($uu)) .
+                    role_badge($uu) .
+                    (user_role($uu) === 'user' ? level_badge($uu) : '') .
                     '<span class="muted">发帖 ' . (int)($uu['threads'] ?? 0) . ' · 回复 ' . (int)($uu['replies'] ?? 0) . '</span></div>' .
                     ((string)($uu['bio'] ?? '') !== '' || (string)($uu['sig'] ?? '') !== '' ? '<div class="tc-sub muted">' . e((string)($uu['bio'] ?? $uu['sig'])) . '</div>' : '') .
                     '</a>';

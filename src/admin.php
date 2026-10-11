@@ -7,10 +7,16 @@ defined('APP') or exit('Forbidden');
 
 function page_admin(): void
 {
-    $me = require_admin();
-    $tab = (string)($_GET['tab'] ?? 'basic');
+    /* v1.26.0：审核员可进后台（仅内容审核类标签页），其余标签页仍需管理员 */
+    $me = require_staff();
+    $tab = (string)($_GET['tab'] ?? (role_at_least($me, 'admin') ? 'basic' : 'content'));
     if (!preg_match('/^[a-z]{1,12}$/', $tab)) {
         $tab = 'basic';
+    }
+    /* v1.26.0 角色可见范围：审核员仅限内容审核类标签页，越权访问重定向到其默认页 */
+    if (!role_at_least($me, admin_tab_min_role($tab))) {
+        flash('err', t('该页面仅管理员可访问'));
+        redirect(u('p=admin&tab=content'));
     }
     /* v1.16.0：记录当前后台完整地址（tab/筛选/分页），动作保存后 admin_redirect 精确回跳；
        配合前端滚动位置恢复，保存后不再"从头刷新、回到顶部" */
@@ -20,13 +26,19 @@ function page_admin(): void
     mf_do_action('admin_head'); /* v1.22.0 拓展：插件向后台页面注入内容 */
 
     $tabs = admin_tab_titles();
-    /* v1.22.0 后台设置搜索框：跨全部标签页即时检索设置项，回车/点击跳转并高亮定位 */
-    echo '<div class="admin-search" id="adminSearch">';
-    echo '<input class="input admin-search-input" id="adminSearchInput" type="search" placeholder="' . e(t('搜索设置：输入关键词，如「上限」「邮件」「语言」…')) . '" autocomplete="off" aria-label="' . e(t('搜索后台设置')) . '">';
-    echo '<div class="admin-search-pop" id="adminSearchPop" hidden></div>';
-    echo '</div>';
+    /* v1.22.0 后台设置搜索框：跨全部标签页即时检索设置项，回车/点击跳转并高亮定位
+       v1.26.0：仅管理员可见（索引含大量审核员无权页面的条目） */
+    if (role_at_least($me, 'admin')) {
+        echo '<div class="admin-search" id="adminSearch">';
+        echo '<input class="input admin-search-input" id="adminSearchInput" type="search" placeholder="' . e(t('搜索设置：输入关键词，如「上限」「邮件」「语言」…')) . '" autocomplete="off" aria-label="' . e(t('搜索后台设置')) . '">';
+        echo '<div class="admin-search-pop" id="adminSearchPop" hidden></div>';
+        echo '</div>';
+    }
     echo '<div class="admin-tabs">';
     foreach ($tabs as $k => $v) {
+        if (!role_at_least($me, admin_tab_min_role($k))) {
+            continue; /* v1.26.0：审核员看不到无权标签页 */
+        }
         echo '<a class="atab' . ($tab === $k ? ' on' : '') . '" href="' . e(u('p=admin&tab=' . $k)) . '">' . e(t($v)) . '</a>';
     }
     echo '</div>';
@@ -79,7 +91,6 @@ function admin_tab_basic(): void
         '<span class="hint">前台自动刷新在线人数、未读通知，并提示新帖 / 新回复；设为 0 关闭。页面切到后台时自动暂停，不产生无效流量</span></label>' .
         '<label class="field"><span class="field-l">' . t('Ping 测量间隔（秒）') . '</span><input class="input" name="ping_interval" type="number" min="0" max="300" value="' . (int)cfg('ping_interval', 15) . '">' .
         '<span class="hint">侧栏「Ping」每 N 秒测量一次浏览器到服务器的往返延迟（绿 &lt;100ms / 琥珀 &lt;300ms / 红 ≥300ms）；设为 0 关闭整个 Ping 显示。间隔越短数据越实时，但心跳请求也越频繁（5-300 秒）</span></label>' .
-        '</div>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存基本设置') . '</button></div></form>' .
         admin_restore_btn('site_name,site_desc,site_url,bind_domains,per_page,post_interval,online_window,live_interval,ping_interval') . '</div>' .
         admin_card_seo() .
@@ -153,6 +164,16 @@ function admin_tab_titles(): array
         'content' => '内容', 'queue' => 'AI 队列', 'manual' => '人工待审', 'reports' => '举报记录',
         'anns' => '公告', 'theme' => '主题', 'ext' => '拓展', 'docs' => '协议', 'api' => '开放 API', 'logs' => '日志', 'security' => '安全防护', 'monitor' => '监控', 'update' => '更新升级', 'system' => '系统',
     ];
+}
+
+/**
+ * v1.26.0 各标签页的最低职员角色：
+ * 审核员（mod）仅可见内容审核域 4 页；其余全部需要管理员（admin）；角色指派动作另由 require_super 把关。
+ */
+function admin_tab_min_role(string $tab): string
+{
+    static $mod = ['content' => 1, 'queue' => 1, 'manual' => 1, 'reports' => 1];
+    return isset($mod[$tab]) ? 'mod' : 'admin';
 }
 
 function admin_tab_feat(): void
@@ -657,9 +678,19 @@ function admin_tab_users(): void
             } else {
                 echo '<form method="post" action="' . e(u('a=admin_user_ban')) . '" class="inline" data-confirm="确认封禁该账号？封禁后无法登录。"><input type="hidden" name="uid" value="' . $uid . '">' . csrf_field() . '<button class="btn btn-ghost btn-sm danger" type="submit">' . t('封号') . '</button></form>';
             }
-            echo '<form method="post" action="' . e(u('a=admin_user_role')) . '" class="inline"><input type="hidden" name="uid" value="' . $uid . '"><input type="hidden" name="to" value="' . (empty($x['admin']) ? '1' : '0') . '">' . csrf_field() .
-                '<button class="btn btn-ghost btn-sm" type="submit">' . (empty($x['admin']) ? '设为管理员' : '取消管理员') . '</button></form>' .
-                '</span>';
+            if (is_super()) {
+                /* v1.26.0 角色指派：仅超级管理员可见（普通用户 / 审核员 / 管理员 / 超级管理员） */
+                $cur = user_role($x);
+                echo '<form method="post" action="' . e(u('a=admin_user_role')) . '" class="inline">' .
+                    '<input type="hidden" name="uid" value="' . $uid . '">' .
+                    '<select name="role" class="input input-sm" aria-label="' . e(t('用户角色')) . '">';
+                foreach (MF_ROLES as $rk => $rv) {
+                    echo '<option value="' . e($rk) . '"' . ($cur === $rk ? ' selected' : '') . '>' . e(t($rv[0])) . '</option>';
+                }
+                echo '</select>' . csrf_field() .
+                    '<button class="btn btn-ghost btn-sm" type="submit">' . e(t('指派角色')) . '</button></form>';
+            }
+            echo '</span>';
         } else {
             echo '<span class="muted">（当前账号）</span>';
         }
@@ -672,7 +703,7 @@ function admin_tab_users(): void
 function admin_tab_levels(): void
 {
     echo '<div class="card form-card"><h2 class="card-title">' . t('等级系统') . '</h2>' .
-        '<p class="hint">' . t('用户等级：手动指派优先，未指派时按发帖数自动匹配「所需发帖数」达标的最高等级；管理员不受等级限制。系统默认保留 3 个内置等级（不可删除，可改名、改条件与权限）。每个等级可独立勾选权限，配合「板块 → 发帖权限」可实现精细的板块准入控制；删除自定义等级时，被指派用户自动回退为按发帖数自动等级。') . '</p></div>';
+        '<p class="hint">' . t('用户等级：手动指派优先，未指派时按发帖数自动匹配「所需发帖数」达标的最高等级；管理员不受等级限制。全部等级均可删除（至少保留一个等级），删除后被指派用户自动回退为按发帖数自动等级，相关板块准入回退为仅管理员。每个等级可独立勾选权限，配合「板块 → 发帖权限」可实现精细的板块准入控制。成长等级管「自己能用什么」，职员角色（用户 / 审核员 / 管理员 / 超级管理员，见「用户」页）管「能管别人什么」。') . '</p></div>';
 
     echo '<div class="card form-card"><h2 class="card-title">' . t('新建等级') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_level_new')) . '" class="inline-form">' . csrf_field() .
@@ -702,13 +733,11 @@ function admin_tab_levels(): void
         }
         echo '</div>' .
             '<div class="form-foot"><span class="muted">' . e(t('所需发帖数 = 用户发帖数达到该值即自动晋升到此等级（0 = 默认等级）')) . '</span>' .
-            '<span><button class="btn btn-ghost btn-sm" type="submit">' . t('保存') . '</button>';
-        if (empty($l['built_in'])) {
-            echo ' <button class="btn btn-ghost btn-sm danger" type="submit" formaction="' . e(u('a=admin_level_del')) . '" data-confirm="' . e(t('确认删除该等级？被指派该等级的用户将回退为自动等级')) . '">' . t('删除') . '</button>';
-        }
-        echo '</span></div></form></div>';
+            '<span><button class="btn btn-ghost btn-sm" type="submit">' . t('保存') . '</button>' .
+            ' <button class="btn btn-ghost btn-sm danger" type="submit" formaction="' . e(u('a=admin_level_del')) . '" data-confirm="' . e(t('确认删除该等级？被指派该等级的用户将回退为自动等级')) . '">' . t('删除') . '</button>' .
+            '</span></div></form></div>';
     }
-    echo '</div><p class="hint">' . e(t('权限即时生效：取消勾选后，该等级用户的对应操作（发帖 / 回复 / 编辑 / 删除 / 签名 / 点赞）会立即被拦截，前台按钮同步隐藏')) . '</p></div>';
+    echo '</div><p class="hint">' . e(t('权限即时生效：取消勾选后，该等级用户的对应操作（发帖 / 回复 / 编辑 / 删除 / 签名 / 点赞 / 举报 / @ 提及 / 搜索 / 表情 / 免 AI 审查 / 查看审核中）会立即被拦截或生效，前台按钮同步隐藏')) . '</p></div>';
 }
 
 /* ---------------- 内容 ---------------- */
@@ -1297,6 +1326,25 @@ function admin_tab_update(): void
             '</div>';
     }
     echo '</div></div>';
+
+    /* ================= v1.26.0 回撤更新 ================= */
+    $bks = program_backup_list();
+    echo '<div class="card form-card"><h2 class="card-title">' . t('回撤更新') . '</h2>';
+    echo '<p class="hint">' . t('每次安装更新包前，程序都会自动把当时的完整程序文件备份到 data/backup/（保留最近 3 份）。若新版本出现问题，可在下方一键回滚：只覆盖程序文件并把版本号回退，帖子 / 用户 / 设置等 data/ 数据不受影响。回滚前会先把当前状态另存一份备份（新版程序可用它再恢复回来；若回滚目标版本较旧、没有回撤功能，重新上传更新包即可回到新版。更新包附带的数据迁移脚本无法自动回退，官方更新包目前均不含迁移脚本）。') . '</p>';
+    if (!$bks) {
+        echo empty_state(t('还没有可回滚的更新备份（通过「上传更新包」升级过之后，这里会出现更新前的版本）'));
+    } else {
+        echo '<div class="admin-list">';
+        foreach ($bks as $b) {
+            echo '<div class="admin-row"><div class="u-info"><span class="badge badge-info">v' . e($b['version'] !== '' ? $b['version'] : '?') . '</span>' .
+                '<span class="muted">' . e($b['file']) . ' · ' . e(fmt_dt($b['time'])) . ' · ' . e($b['size_h']) . '</span></div>' .
+                '<form method="post" action="' . e(u('a=admin_update_rollback')) . '" class="inline" data-confirm="' . e(t('确认回滚到该版本？当前程序文件会先自动备份，再被覆盖为该备份的版本。')) . '">' . csrf_field() .
+                '<input type="hidden" name="bk" value="' . e($b['file']) . '">' .
+                '<button class="btn btn-ghost btn-sm" type="submit">' . t('回滚到此版本') . '</button></form></div>';
+        }
+        echo '</div>';
+    }
+    echo '</div>';
 }
 
 /* ================= 安全防护（防火墙） ================= */
@@ -1991,11 +2039,11 @@ function admin_search_index(): array
         ['boards', '板块列表', '板块排序 / 编辑 / 删除', 'board sort move'],
         ['boards', '板块发帖权限', '所有人 / 仅管理员 / 指定等级及以上 / 白名单用户', 'board perm 发帖权限 白名单 受邀 准入'],
         /* 等级 */
-        ['levels', '等级系统', '等级说明 / 自动晋升 / 手动指派', 'level 等级 权限 升级 新手上路 活跃 资深'],
+        ['levels', '等级系统', '等级说明 / 自动晋升 / 手动指派 / 职员角色', 'level 等级 权限 升级 新手上路 活跃 资深 角色 审核员 管理员 超级管理员'],
         ['levels', '新建等级', '自定义等级（名称 / 所需发帖数）', 'level new 自定义等级 创建'],
-        ['levels', '等级列表', '等级权限矩阵（发帖 / 回复 / 编辑 / 删除 / 签名 / 点赞）与间隔覆盖', 'level perms 权限矩阵 间隔覆盖 内置'],
+        ['levels', '等级列表', '等级权限矩阵（发帖 / 回复 / 编辑 / 删除 / 签名 / 点赞 / 举报 / @ 提及 / 搜索 / 表情 / 免 AI 审查 / 查看审核中）与间隔覆盖，全部等级可删除', 'level perms 权限矩阵 间隔覆盖 内置 删除等级'],
         /* 用户 */
-        ['users', '用户', '用户搜索 / 封禁 / 设为管理员', 'user search ban admin'],
+        ['users', '用户', '用户搜索 / 封禁 / 禁言 / 等级指派 / 角色指派（用户 / 审核员 / 管理员 / 超级管理员，仅超级管理员）', 'user search ban admin role 审核员 moderator 角色'],
         /* 内容 */
         ['content', '帖子', '帖子搜索 / 置顶 / 锁定 / 删除', 'thread pin lock delete'],
         ['content', '举报记录', '举报处理', 'report'],
@@ -2064,6 +2112,7 @@ function admin_search_index(): array
         ['update', '上传更新包', '更新包（.zip）', 'update zip 升级包'],
         ['update', '更新历史', '历史版本记录', 'update history'],
         ['update', '数据备份', '手动备份 / 自动备份', 'backup 备份'],
+        ['update', '回撤更新', '回滚到更新前的版本（升级出错时一键还原程序文件）', 'rollback 回滚 回撤 恢复 还原 更新出问题 降级'],
         /* 系统 */
         ['system', '系统信息', '程序版本 / 数据统计', 'system info 系统'],
         ['system', '注销账号管理', '注销请求', 'delete account 注销'],

@@ -336,10 +336,12 @@ function thread_delete(int $id): bool
 /* ---- 列表查询（只读索引） ---- */
 function threads_visible(array $idx): array
 {
-    $admin = is_admin();
+    $u = current_user();
+    /* v1.26.0：职员 + 拥有「查看审核中的内容」权限的等级，列表中可看到审核中的帖子 */
+    $see = ($u && role_at_least($u, 'mod')) || ($u && level_can($u, 'view_hidden'));
     $out = [];
     foreach ($idx as $t) {
-        if (!empty($t['hidden']) && !$admin) {
+        if (!empty($t['hidden']) && !$see) {
             continue;
         }
         $out[] = $t;
@@ -1119,6 +1121,11 @@ function ai_process_queue(bool $manual = false): array
 function ai_precheck_after_post(string $type, int $tid, int $rid, string $content, int $authorId, string $title = '', string $src = 'post'): string
 {
     if ((int)cfg('ai_precheck', 1) !== 1 || !ai_ready()) {
+        return '';
+    }
+    /* v1.26.0 信任等级免 AI 审查：勾选「免 AI 审查」权限的等级，发布与编辑均跳过（用户名审查不跳过） */
+    $au = user_by_id($authorId);
+    if ($au && level_can($au, 'skip_ai')) {
         return '';
     }
     $isEdit = $src === 'edit'; /* v1.24.0：'edit' = 编辑后审查（仅影响日志与通知文案） */
