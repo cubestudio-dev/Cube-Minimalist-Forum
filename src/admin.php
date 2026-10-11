@@ -169,7 +169,7 @@ function admin_tab_feat(): void
     ];
     /* AI 两项直接绑定「AI」页的原生配置键（ai_precheck / ai_autopilot），两处开关同一份，避免双开关不同步 */
     $aiItems = [
-        'ai_precheck'  => ['AI 审查（发帖预检）', '每条帖子 / 回复发布后立即交给 AI 审核，违规自动隐藏、通知作者可申诉；模型与严格程度在「AI」页配置'],
+        'ai_precheck'  => ['AI 审查（发帖 / 编辑 / 用户名）', '每条帖子 / 回复发布后与内容编辑后都会交给 AI 审查；用户名在注册与修改时同步审查；违规自动隐藏 / 拒绝、通知作者可申诉；模型与严格程度在「AI」页配置'],
         'ai_autopilot' => ['AI 自主管理', 'AI 无人值守巡逻：自主封禁风险 IP / 解除误封 / 邮件警报管理员；间隔与红线在「安全防护」页配置'],
     ];
     echo '<div class="card form-card"><h2 class="card-title">' . t('功能总开关') . '</h2><p class="muted">勾选即启用，取消勾选即关闭；保存后即时生效，被关闭的功能在前台隐藏入口、在后台直接拦截。</p>' .
@@ -409,9 +409,25 @@ function admin_tab_docs(): void
         'doc_disclaimer' => ['免责声明', '本站对用户发布内容的免责说明。UGC 站点建议填写'],
     ];
     echo '<div class="card form-card"><h2 class="card-title">' . t('协议管理') . '</h2>' .
-        '<p class="muted">填写内容后即自动启用该协议：出现在注册页确认、协议门禁与页脚入口（按下方开关）。支持直接输入多行纯文本；URL 会自动变成可点击链接。没有现成文案？点每栏的「填入内置模板」一键生成，替换其中的【站名】【站长邮箱】【更新日期】后保存即可。</p>' .
+        '<p class="muted">填写内容后即自动启用该协议：出现在注册页确认、协议门禁与页脚入口（按下方开关）。支持直接输入多行纯文本；URL 会自动变成可点击链接。没有现成文案？点每栏的「填入内置模板」一键生成——内置模板中的【站名】【站长邮箱】【更新日期】三个占位符<b>请勿手动替换</b>，系统会自动用下方预填项的值填入。</p>' .
         '<p class="hint">前台展示：访客通过页脚或 <a href="' . e(u('p=doc')) . '">协议中心</a> 查看协议——协议中心与每份协议都有独立的完整大页面（自动生成目录、版本号与更新时间，支持打印 / 保存 PDF）。</p>' .
         '<form method="post" action="' . e(u('a=admin_save_docs')) . '" data-ajax="1">' . csrf_field();
+    /* v1.24.0 内置模板预填项：站名 / 站长邮箱 / 更新日期自动替换模板占位符（请勿手动替换）；
+       站长邮箱默认取 SMTP 发信邮箱，未配置 SMTP 时回退第一个管理员账号的邮箱 */
+    $pfMail = (string)cfg('smtp_from', '');
+    if ($pfMail === '') {
+        foreach (user_all() as $au) {
+            if (!empty($au['admin']) && empty($au['deleted']) && (string)($au['email'] ?? '') !== '') {
+                $pfMail = (string)$au['email'];
+                break;
+            }
+        }
+    }
+    echo '<div class="grid3" id="doc-prefill">' .
+        '<label class="field"><span class="field-l">' . t('站名') . '</span><input class="input" id="doc-pf-site" type="text" value="' . e((string)cfg('site_name', '')) . '" placeholder="' . t('用于替换模板中的【站名】') . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('站长邮箱') . '</span><input class="input" id="doc-pf-mail" type="email" value="' . e($pfMail) . '" placeholder="' . t('用于替换模板中的【站长邮箱】') . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('更新日期') . '</span><input class="input" id="doc-pf-date" type="date" value="' . e(gmdate('Y-m-d', time() + 8 * 3600)) . '"><span class="hint">' . t('用于替换模板中的【更新日期】；修改预填项后重新点「填入内置模板」，内置模板即同步更新为新值') . '</span></label>' .
+        '</div>';
     $tpls = doc_templates();
     foreach ($defs as $key => [$name, $desc]) {
         $tk = substr($key, 4); // 模板短键：doc_terms → terms（与 doc_templates()/前端占位节点一致）
@@ -1741,7 +1757,7 @@ function admin_search_index(): array
         ['feat', '功能总开关', '点赞 / 举报 / 搜索 / 表情', 'like report search emoji'],
         ['feat', '功能总开关', '在线名单 / 用户签名 / @ 提及通知', 'online signature mention 提及'],
         ['feat', '功能总开关', '界面动效', 'motion 动画 过渡 进度条 预取 流畅'],
-        ['feat', '功能总开关', 'AI 审查（发帖预检）', 'ai precheck 审核'],
+        ['feat', '功能总开关', 'AI 审查（发帖 / 编辑 / 用户名）', 'ai precheck 审核 预检 编辑审查 用户名审查'],
         ['feat', '功能总开关', 'AI 自主管理', 'ai autopilot 巡逻'],
         /* 存储 */
         ['storage', '存储引擎', '当前存储引擎', 'storage engine 文件 数据库 切换'],
@@ -1793,6 +1809,7 @@ function admin_search_index(): array
         ['ext', '拓展（插件）', '开发者指南', 'developer api 钩子 hook 开发'],
         /* 协议 */
         ['docs', '协议管理', '用户协议 / 隐私政策 / 免责声明', 'doc 协议 privacy'],
+        ['docs', '协议模板预填项', '站名 / 站长邮箱 / 更新日期（自动替换模板占位符）', 'doc 预填 模板 站名 邮箱 更新日期 自动替换 doc-prefill'],
         ['docs', '「同意协议」是如何记录的', '协议门禁与同意留痕', 'gate 门禁 记录'],
         /* 开放 API */
         ['api', '开放 API', 'API 总开关 / 令牌签发', 'api token enable'],

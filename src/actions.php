@@ -645,6 +645,12 @@ function act_register(): void
         flash('err', $err);
         redirect(u('p=register'));
     }
+    /* v1.24.0 用户名 AI 审查：注册前同步审查，违规直接拒绝（用户名尚未占用，换一个即可）；AI 失败宁纵勿拉不阻塞 */
+    $aiNote = '';
+    if (!ai_name_check($name, $aiNote)) {
+        flash('err', '用户名未通过审核：' . cut_str($aiNote, 60) . '。请更换用户名后重试');
+        redirect(u('p=register'));
+    }
     $uid = user_create($name, $email, password_hash($pass, PASSWORD_DEFAULT), false);
     $user = user_by_id($uid);
     if ($user) {
@@ -884,6 +890,14 @@ function act_profile_save(): void
         flash('err', '新用户名已被占用');
         redirect(u('p=settings'));
     }
+    /* v1.24.0 用户名 AI 审查：仅在真正改名时审查（沿用旧名无需重复消耗 AI 调用） */
+    if ($name !== (string)($u['name'] ?? '')) {
+        $aiNote = '';
+        if (!ai_name_check($name, $aiNote)) {
+            flash('err', '新用户名未通过审核：' . cut_str($aiNote, 60) . '。请更换后重试');
+            redirect(u('p=settings'));
+        }
+    }
     user_update((int)$u['id'], ['name' => $name, 'bio' => $bio, 'sig' => $sig]);
     log_action('profile_save', '资料更新：用户名 ' . (string)$u['name'] . ' → ' . $name);
     flash('ok', '资料已更新');
@@ -1038,7 +1052,12 @@ function act_thread_edit(): void
     log_action('thread_edit', (($u['admin'] ?? false) && (int)$t['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str($title, 40) . '》', (int)$u['id'], (string)$u['name']);
     /* @ 提及：编辑时只通知新增提及（旧内容已提及过的人不重复通知） */
     mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title, mentions_extract((string)($t['content'] ?? '')));
-    act_ok('帖子已更新', u('p=thread&id=' . $tid));
+    /* v1.24.0 编辑后 AI 审查：与发布预检同一套机制（违规自动隐藏可申诉）；
+       管理员编辑他人内容不触发（管理员操作本身即人工审核，避免二次藏帖困扰） */
+    if (!((!empty($u['admin'])) && (int)$t['author'] !== (int)$u['id'])) {
+        register_shutdown_function('ai_precheck_after_post', 'thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title, 'edit');
+    }
+    act_ok('帖子已更新，AI 将在后台复查内容', u('p=thread&id=' . $tid));
 }
 
 function act_reply_edit(): void
@@ -1060,7 +1079,11 @@ function act_reply_edit(): void
     log_action('reply_edit', (($u['admin'] ?? false) && (int)$r['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str((string)($t['title'] ?? ''), 40) . '》中的回复', (int)$u['id'], (string)$u['name']);
     /* @ 提及：编辑时只通知新增提及 */
     mentions_notify($content, (int)$u['id'], $tid, (int)$rid, '', mentions_extract((string)($r['content'] ?? '')));
-    act_ok('回复已更新', u('p=thread&id=' . $tid) . '#r' . $rid);
+    /* v1.24.0 编辑后 AI 审查（同帖子编辑：管理员编辑他人回复不触发） */
+    if (!((!empty($u['admin'])) && (int)$r['author'] !== (int)$u['id'])) {
+        register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id'], '', 'edit');
+    }
+    act_ok('回复已更新，AI 将在后台复查内容', u('p=thread&id=' . $tid) . '#r' . $rid);
 }
 
 function act_like(): void

@@ -758,7 +758,9 @@
     }
   }
 
-  /* ---------- v1.17.0：协议内置模板一键填入（后台 · 协议页） ---------- */
+  /* ---------- v1.17.0：协议内置模板一键填入（后台 · 协议页） ----------
+     v1.24.0：填入时自动把模板中的【站名】【站长邮箱】【更新日期】替换为预填项的值——
+     站长无需（也不应）手动替换占位符；预填项为空的保留占位符并提示 */
   $$('[data-doc-tpl]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var key = btn.getAttribute('data-doc-tpl');            // 短键：terms / privacy / disclaimer
@@ -767,10 +769,15 @@
       if (!holder || !ta) return;
       var tpl = (holder.textContent || '').replace(/^\n+/, '').replace(/\s+$/, '');
       if (!tpl) return;
+      var pf = function (id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; };
+      var site = pf('doc-pf-site'), mail = pf('doc-pf-mail'), date = pf('doc-pf-date');
+      if (tpl.indexOf('【站名】') !== -1 && site === '') { toast('请先在「协议模板预填项」填写站名，再填入模板'); return; }
+      if (tpl.indexOf('【站长邮箱】') !== -1 && mail === '') { toast('请先在「协议模板预填项」填写站长邮箱，再填入模板'); return; }
+      tpl = tpl.replace(/【站名】/g, site).replace(/【站长邮箱】/g, mail).replace(/【更新日期】/g, date || '');
       if (ta.value.trim() !== '' && !window.confirm('当前已填写内容，填入内置模板将覆盖，确定？')) return;
       ta.value = tpl;
       ta.dispatchEvent(new Event('input', { bubbles: true }));
-      toast('内置模板已填入，可先修改再点「保存协议设置」生效');
+      toast('内置模板已按预填项自动替换站名 / 邮箱 / 更新日期，可先修改再点「保存协议设置」生效');
     });
   });
 

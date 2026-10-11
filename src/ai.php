@@ -250,8 +250,9 @@ function ai_call_model(array $m, string $content, string &$verdict, string &$not
         'stream' => false,
         'max_tokens' => 300,
         'messages' => [
-            ['role' => 'system', 'content' => ai_system_prompt($strict)],
-            ['role' => 'user', 'content' => "待审核内容：\n" . cut_str($content, 1200)],
+            /* v1.24.0：$ov['system'] 可替换内置内容审核提示词（用户名审查等专用场景）；$ov['subject'] 替换“待审核内容”主题词 */
+            ['role' => 'system', 'content' => ($ov['system'] ?? null) !== null ? (string)$ov['system'] : ai_system_prompt($strict)],
+            ['role' => 'user', 'content' => ($ov['subject'] ?? null) !== null ? ((string)$ov['subject'] . "：\n" . cut_str($content, 1200)) : ("待审核内容：\n" . cut_str($content, 1200))],
         ],
     ];
     $err = '';
@@ -591,7 +592,7 @@ function ai_moderate(string $content, string &$verdict = '', string &$note = '',
         $label = ai_model_label($m);
         $v = '';
         $sn = '';
-        if (ai_call_model($m, $content, $v, $sn, ['strict' => $strict])) {
+        if (ai_call_model($m, $content, $v, $sn, ['strict' => $strict, 'system' => ($ov['system'] ?? null), 'subject' => ($ov['subject'] ?? null)])) {
             $wasTripped = (int)($fail[$id] ?? 0) >= $limit;
             $fail[$id] = 0;
             $st['fail'] = $fail;
@@ -627,6 +628,17 @@ function ai_moderate(string $content, string &$verdict = '', string &$note = '',
 }
 
 /* ================= 测试调用 ================= */
+
+/**
+ * 用户名审查专用提示词（v1.24.0）：与内容审核（ai_system_prompt）口径不同——
+ * 用户名是身份标识而非内容，仅判违规身份类问题；普通昵称一律放行，避免误伤正常注册。
+ */
+function ai_name_system_prompt(): string
+{
+    return '你是论坛的用户名审核器。用户名是用户的身份标识，判定标准应比帖子内容宽松得多。仅以下情况判为违规（violation:true）：辱骂攻击或挑衅含义、色情低俗、政治敏感、暴力恐怖、赌博诈骗相关、明显的广告引流（含QQ/微信/手机号等联系方式或"加群""代理"等推广词）、冒充官方或管理员（含"官方""管理员""admin""站长""客服"等词的组合伪装）、仿冒知名品牌或公众人物、泄露他人隐私。
+以下情况一律放行（violation:false）：普通昵称、常见网名、中性词汇、数字与字母组合、重复字符、无实际含义的字符串。
+只输出 JSON，不要输出其他任何文字：{"violation":true或false,"reason":"简短中文理由，不超过20字"}';
+}
 
 /**
  * 「测试调用」：$m 为模型行（后台测试传已保存的行，安装向导传表单临时行）。

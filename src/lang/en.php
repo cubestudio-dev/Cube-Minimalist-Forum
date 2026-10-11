@@ -310,4 +310,10 @@ return [
         '颜色与页脚' => 'Colors & footer',
         '黑名单文本（每行一个 IP / CIDR / IP 区间，# 开头为注释，最多 5 万行）' => 'Blacklist text (one IP / CIDR / range per line, # comments, max 50k lines)',
         '默认论坛语言' => 'Default forum language',
+        '站名' => 'Site name',
+        '站长邮箱' => 'Owner email',
+        '更新日期' => 'Updated date',
+        '用于替换模板中的【站名】' => 'Replaces 【站名】 placeholder in the template',
+        '用于替换模板中的【站长邮箱】' => 'Replaces 【站长邮箱】 placeholder in the template',
+        '用于替换模板中的【更新日期】；修改预填项后重新点「填入内置模板」，内置模板即同步更新为新值' => 'Replaces 【更新日期】 in the template; after changing the prefill values, click \'Insert built-in template\' again and the template will be refilled with the new values',
 ];
