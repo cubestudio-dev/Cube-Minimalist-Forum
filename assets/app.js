@@ -632,11 +632,12 @@
     ta.addEventListener('blur', function () { setTimeout(close, 120); });
   })();
 
-  /* ---------- v1.16.0：后台保存后回到原位置 ----------
+  /* ---------- v1.16.0：保存后回到原位置 ----------
      后台动作保存后整页回跳（tab/筛选/分页由服务端 session 精确恢复）；
-     前端配合：页面带 flash 提示（保存成功 / 操作完成的回跳）时，恢复离开前的滚动位置。 */
+     前端配合：页面带 flash 提示（保存成功 / 操作完成 / 出错回跳）时，恢复离开前的滚动位置。
+     v1.28.0：从"仅后台"扩展到全站——前台个人设置等保存回跳同样锚定位置，用户要求
+     "每次保存、调整完以后必须在当前页面，位置不能变"。 */
   (function () {
-    if (location.search.indexOf('p=admin') === -1) return;
     var KEY = 'mf_admin_scroll';
     window.addEventListener('beforeunload', function () {
       try { sessionStorage.setItem(KEY, String(window.scrollY || 0)); } catch (e) {}

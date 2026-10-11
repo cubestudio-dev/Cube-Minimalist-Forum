@@ -106,8 +106,11 @@ if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '
 <?php echo layout_css_html($forceInlineCss); ?>
 <?php if (feat_on('motion')): /* v1.23.0 跨文档视图过渡（View Transitions）渐进增强：
   支持的浏览器（Chrome / Edge 126+）新旧页面交叉淡化由合成器接管，白屏被完全掩盖；
-  不支持的浏览器自动走 app.js 的退场 / 进度条兼容方案 */ ?>
+  不支持的浏览器自动走 app.js 的退场 / 进度条兼容方案
+  v1.28.0：VT 期间暂停入场动画（.mf-vt-hold），过渡结束再完整播放——
+  此前新页快照定格在"动画已播完"状态，切页时逐项渐入被整体淡化吞掉 */ ?>
 <style>@view-transition{navigation:auto}</style>
+<script>(function(){try{window.addEventListener('pagereveal',function(e){if(!(e.viewTransition&&window.MF_MOTION))return;var r=document.documentElement;r.classList.add('mf-vt-hold');var done=function(){r.classList.remove('mf-vt-hold');};if(e.viewTransition.finished&&e.viewTransition.finished.then){e.viewTransition.finished.then(done,done);}else{done();}});}catch(e){}})();</script>
 <?php endif; ?>
 <script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;window.MF_EMOJI=<?= feat_on('emoji') ? 'true' : 'false' ?>;window.MF_MOTION=<?= feat_on('motion') ? 'true' : 'false' ?>;</script>
 <script>(function(){try{var d=localStorage.getItem('mf-theme')||window.THEME_DEFAULT||'system';if(d==='system'){d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',d);}catch(e){}})();</script>

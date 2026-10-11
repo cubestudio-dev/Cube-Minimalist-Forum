@@ -970,7 +970,8 @@ function act_thread_new(): void
        发帖立即返回不再被 AI 调用阻塞（此前同步调用会让整个服务等待数秒）；
        判定违规后仍会自动隐藏 + 通知申诉，机制不变 */
     register_shutdown_function('ai_precheck_after_post', 'thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
-    flash('ok', '发布成功，AI 正在后台审核内容');
+    /* v1.28.0：提示与实际审查行为一致——未启用 AI / 无可用模型 / 职员免审时不再谎称「AI 正在审核」 */
+    flash('ok', ai_precheck_applies((int)$u['id']) ? '发布成功，AI 正在后台审核内容' : '发布成功');
     redirect(u('p=thread&id=' . $tid));
 }
 
@@ -1014,7 +1015,8 @@ function act_reply_new(): void
     mf_do_action('reply_created', $tid, (int)$rid, (int)$u['id']); /* v1.22.0 拓展钩子 */
     /* 严全面·消息审核：v1.16.0 改为响应后异步预检，不再阻塞响应（同上） */
     register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id']);
-    flash('ok', '回复成功，AI 正在后台审核内容');
+    /* v1.28.0：提示与实际审查行为一致（同发帖） */
+    flash('ok', ai_precheck_applies((int)$u['id']) ? '回复成功，AI 正在后台审核内容' : '回复成功');
     redirect(u('p=thread&id=' . $tid) . '#r' . $rid);
 }
 
@@ -1103,7 +1105,8 @@ function act_thread_edit(): void
     if (!((!empty($u['admin'])) && (int)$t['author'] !== (int)$u['id'])) {
         register_shutdown_function('ai_precheck_after_post', 'thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title, 'edit');
     }
-    act_ok('帖子已更新，AI 将在后台复查内容', u('p=thread&id=' . $tid));
+    /* v1.28.0：提示与实际审查行为一致（同发帖；职员免审时不再谎称「AI 将复查」） */
+    act_ok('帖子已更新' . (ai_precheck_applies((int)$u['id']) ? '，AI 将在后台复查内容' : ''), u('p=thread&id=' . $tid));
 }
 
 function act_reply_edit(): void
@@ -1131,7 +1134,8 @@ function act_reply_edit(): void
     if (!((!empty($u['admin'])) && (int)$r['author'] !== (int)$u['id'])) {
         register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id'], '', 'edit');
     }
-    act_ok('回复已更新，AI 将在后台复查内容', u('p=thread&id=' . $tid) . '#r' . $rid);
+    /* v1.28.0：提示与实际审查行为一致（同发帖） */
+    act_ok('回复已更新' . (ai_precheck_applies((int)$u['id']) ? '，AI 将在后台复查内容' : ''), u('p=thread&id=' . $tid) . '#r' . $rid);
 }
 
 function act_like(): void

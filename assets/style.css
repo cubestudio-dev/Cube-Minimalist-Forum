@@ -276,11 +276,14 @@ textarea.input { resize: vertical; min-height: 80px; }
 .profile-info { display: flex; align-items: center; gap: 10px; flex: 1; flex-wrap: wrap; }
 .profile-info b { font-size: 18px; }
 .profile-bio { margin: 12px 0 0; color: var(--muted); }
-.stat-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+/* v1.28.0：统计块改自适应网格（原 flex 单行挤成一长条）——
+   桌面宽容器自动换行（如系统页 7 块 → 4+3 两行），窄屏固定两列 */
+.stat-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 16px; }
 .stat {
-  flex: 1; min-width: 90px; background: var(--bg); border: 1px solid var(--border);
+  background: var(--bg); border: 1px solid var(--border);
   border-radius: var(--radius-s); padding: 10px 14px; text-align: center;
 }
+@media (max-width: 640px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
 .stat b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
 .stat span { font-size: 12px; color: var(--muted); }
 
@@ -308,12 +311,19 @@ textarea.input { resize: vertical; min-height: 80px; }
 .atab:hover { color: var(--text); background: var(--hover); }
 .atab.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .admin-body .card { margin-bottom: 14px; }
-/* v1.27.0 分组侧边导航（替代平铺标签条） */
+/* v1.27.0 分组侧边导航（替代平铺标签条）
+   v1.28.0：导航高于视口时独立滚动（不再跟随整页滚动，导航底部项目始终可达） */
 .admin-shell { display: flex; align-items: flex-start; gap: 18px; }
 .admin-nav {
   width: 158px; flex: none; position: sticky; top: 76px;
+  max-height: calc(100vh - 92px); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
   display: flex; flex-direction: column; gap: 14px;
+  padding: 2px; margin: -2px;
 }
+.admin-nav::-webkit-scrollbar { width: 5px; }
+.admin-nav::-webkit-scrollbar-thumb { border-radius: 99px; background: color-mix(in srgb, var(--muted) 35%, transparent); }
+.admin-nav::-webkit-scrollbar-track { background: transparent; }
 .admin-nav .nav-group { display: flex; flex-direction: column; gap: 2px; }
 .admin-nav .nav-group-t {
   font-size: 11px; font-weight: 600; letter-spacing: .06em;
@@ -325,7 +335,8 @@ textarea.input { resize: vertical; min-height: 80px; }
 .admin-body { flex: 1; min-width: 0; }
 @media (max-width: 880px) {
   .admin-shell { flex-direction: column; }
-  .admin-nav { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; gap: 10px 18px; }
+  /* 横排模式下取消独立滚动（自然流撑开，桌面才有 max-height 滚动） */
+  .admin-nav { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; gap: 10px 18px; max-height: none; overflow: visible; padding: 0; margin: 0; }
   .admin-nav .nav-group { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
   .admin-nav .nav-group-t { width: 100%; padding: 0; }
 }
@@ -948,9 +959,16 @@ a .mention, .mention a { text-decoration: none; }
 html.mf-leaving .main { opacity: .45; transform: translateY(3px); }
 html.mf-leaving .main .flash { opacity: 1; } /* 提示条保持醒目 */
 
-/* ---- 入场：主内容块按 DOM 序逐项渐入（流式输出天然错峰，不依赖 JS） ---- */
+/* ---- 入场：主内容块按 DOM 序逐项渐入（流式输出天然错峰，不依赖 JS） ----
+   v1.28.0：跨文档 View Transition 期间用 .mf-vt-hold 暂停入场动画——
+   此前 VT 快照定格的是"动画已播完"的画面，切换页面时逐项渐入被整体淡化吞掉；
+   现 app.js 在过渡结束后移除 hold，动画从头完整播放，两段动效先后可见 */
 @keyframes mfIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .mf-motion .main > :not(.thread-list):not(.reply-list) { animation: mfIn .34s cubic-bezier(.22, 1, .36, 1) both; }
+/* mf-vt-hold 加在 <html> 上（mf-motion 在 <body>），后代选择器匹配 */
+.mf-vt-hold .main > :not(.thread-list):not(.reply-list),
+.mf-vt-hold .thread-list > *,
+.mf-vt-hold .reply-list > * { animation-play-state: paused !important; }
 .mf-motion .main > :not(.thread-list):not(.reply-list):nth-child(2) { animation-delay: .04s; }
 .mf-motion .main > :not(.thread-list):not(.reply-list):nth-child(3) { animation-delay: .08s; }
 .mf-motion .main > :not(.thread-list):not(.reply-list):nth-child(4) { animation-delay: .11s; }

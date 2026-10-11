@@ -754,11 +754,13 @@ function api_ep_threads_create(?array $u): void
     log_action('thread_new', '通过开放 API 发布《' . cut_str($title, 40) . '》（板块：' . board_name($board) . '）');
     mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title);
     register_shutdown_function('ai_precheck_after_post', 'thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
+    /* v1.28.0：moderation 字段与提示随实际审查行为变化（未启用 / 无模型 / 职员免审 → none） */
+    $aiOn = ai_precheck_applies((int)$u['id']);
     api_out(['data' => [
         'id' => $tid,
         'url' => 'index.php?p=thread&id=' . $tid,
-        'moderation' => 'queued',
-        'message' => '发布成功，AI 正在后台审核内容（违规会被自动隐藏，可在站内申诉）',
+        'moderation' => $aiOn ? 'queued' : 'none',
+        'message' => $aiOn ? '发布成功，AI 正在后台审核内容（违规会被自动隐藏，可在站内申诉）' : '发布成功',
     ]]);
 }
 
@@ -796,11 +798,13 @@ function api_ep_replies_create(?array $u): void
     log_action('reply_new', '通过开放 API 在《' . cut_str((string)($t['title'] ?? ''), 40) . '》中发表回复');
     mentions_notify($content, (int)$u['id'], $tid, (int)$rid);
     register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id']);
+    /* v1.28.0：moderation 字段与提示随实际审查行为变化（同发帖） */
+    $aiOn = ai_precheck_applies((int)$u['id']);
     api_out(['data' => [
         'id' => $rid, 'thread_id' => $tid,
         'url' => 'index.php?p=thread&id=' . $tid . '#r' . $rid,
-        'moderation' => 'queued',
-        'message' => '回复成功，AI 正在后台审核内容',
+        'moderation' => $aiOn ? 'queued' : 'none',
+        'message' => $aiOn ? '回复成功，AI 正在后台审核内容' : '回复成功',
     ]]);
 }
 

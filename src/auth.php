@@ -254,24 +254,26 @@ function require_admin(): array
     return require_super();
 }
 
-/** v1.26.0：需要审核团队身份（审核员 / 管理员 / 超级管理员） */
+/** v1.26.0：需要审核团队身份（审核员 / 管理员 / 超级管理员）。
+ *  v1.28.0：无权时回到来源页提示（back_or），不再固定跳首页——错误反馈留在当前页面 */
 function require_staff(): array
 {
     $u = require_login();
     if (!role_at_least($u, 'mod')) {
         flash('err', '无权访问后台');
-        redirect(u('p=home'));
+        back_or(u('p=home'));
     }
     return $u;
 }
 
-/** v1.26.0：需要超级管理员身份（角色指派等） */
+/** v1.26.0：需要超级管理员身份（角色指派等）。
+ *  v1.28.0：无权时回到来源页提示（back_or），审核员在后台误触超管动作也能在当前页看到错误 */
 function require_super(): array
 {
     $u = require_login();
     if (!role_at_least($u, 'super')) {
         flash('err', '仅超级管理员可执行此操作');
-        redirect(u('p=home'));
+        back_or(u('p=home'));
     }
     return $u;
 }

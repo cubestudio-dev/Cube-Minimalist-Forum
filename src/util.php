@@ -63,7 +63,10 @@ function redirect(string $url): void
     exit;
 }
 
-/** 回到来源页（仅接受站内相对路径，且拒绝控制字符），否则回退 */
+/** 回到来源页（仅接受站内相对路径，且拒绝控制字符），否则回退。
+ *  v1.28.0：POST['back'] 缺失时增加同源 Referer 兜底——后台表单几乎都不带 back 字段，
+ *  此前动作出错一律回退到 $fallback（多数是前台首页），错误提示"跳到别的页面"展示；
+ *  现在浏览器对同站表单提交自动携带 Referer，错误反馈回到提交前的当前页面。 */
 function back_or(string $fallback): void
 {
     $b = isset($_POST['back']) && is_string($_POST['back']) ? trim($_POST['back']) : '';
@@ -71,6 +74,22 @@ function back_or(string $fallback): void
         && preg_match('#^/[A-Za-z0-9._~\-/?&=%:;\[\]@!$\'()*+,]+$#', $b);
     if ($safe) {
         redirect($b);
+    }
+    /* Referer 兜底：仅接受与本站同 host 的 index.php 入口（防开放跳转），query 同样过字符白名单；
+       兼容子目录部署（保留 /index.php 前的目录前缀） */
+    $ref = (string)($_SERVER['HTTP_REFERER'] ?? '');
+    if ($ref !== '') {
+        $rp = (string)(parse_url($ref, PHP_URL_PATH) ?: '');
+        $rq = (string)(parse_url($ref, PHP_URL_QUERY) ?: '');
+        $rh = parse_url($ref, PHP_URL_HOST);
+        /* HTTP_HOST 含端口（如 localhost:3001 / 域名:8080），parse_url host 不含——比较前统一剥端口 */
+        $myHost = preg_replace('/:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? ''));
+        if (($rh === null || strcasecmp((string)$rh, $myHost) === 0)
+            && str_ends_with($rp, '/index.php')
+            && preg_match('#^[A-Za-z0-9._~\-/&=%+:;\[\]@!$\'()*+,]*$#', $rq)
+            && $rq !== '' && str_contains($rq, 'p=')) {
+            redirect(substr($rp, 0, -strlen('index.php')) . 'index.php?' . $rq);
+        }
     }
     redirect($fallback);
 }

@@ -1278,6 +1278,14 @@ function admin_tab_update(): void
 {
     $cur = app_version();
     $his = update_history();
+    /* v1.28.0：查看更新页时顺手清理堆积的程序备份（此前只在安装更新 / 回滚时清理，
+       CLI 或旧版创建的历史备份会一直堆积，系统页备份列表被拉得很长） */
+    if (function_exists('program_backup_prune')) {
+        program_backup_prune(3);
+        $bks = program_backup_list();
+    } else {
+        $bks = [];
+    }
     echo '<div class="card form-card"><h2 class="card-title">' . t('当前版本') . '</h2><div class="stat-row">' .
         '<div class="stat"><b>v' . e($cur) . '</b><span>当前版本</span></div>' .
         '<div class="stat"><b>v' . e(MF_VERSION) . '</b><span>程序内置版本</span></div>' .
@@ -1303,8 +1311,7 @@ function admin_tab_update(): void
     }
     echo '</div></div>';
 
-    /* ================= v1.26.0 回撤更新 ================= */
-    $bks = program_backup_list();
+    /* ================= v1.26.0 回撤更新（$bks 已在函数开头取得并完成清理） ================= */
     echo '<div class="card form-card"><h2 class="card-title">' . t('回撤更新') . '</h2>';
     echo '<p class="hint">' . t('每次安装更新包前，程序都会自动把当时的完整程序文件备份到 data/backup/（保留最近 3 份）。若新版本出现问题，可在下方一键回滚：只覆盖程序文件并把版本号回退，帖子 / 用户 / 设置等 data/ 数据不受影响。回滚前会先把当前状态另存一份备份（新版程序可用它再恢复回来；若回滚目标版本较旧、没有回撤功能，重新上传更新包即可回到新版。更新包附带的数据迁移脚本无法自动回退，官方更新包目前均不含迁移脚本）。') . '</p>';
     if (!$bks) {

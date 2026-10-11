@@ -1086,6 +1086,17 @@ function ai_process_queue(bool $manual = false): array
     return [$handled, $msg];
 }
 
+/** v1.28.0：该作者此次提交是否真的会触发 AI 内容审查（提示层与实际审查行为保持一致）。
+ *  与 ai_precheck_after_post 的前置判定完全同步：总开关开 + 有可用模型 + 作者非职员。 */
+function ai_precheck_applies(int $authorId): bool
+{
+    if ((int)cfg('ai_precheck', 1) !== 1 || !ai_ready()) {
+        return false;
+    }
+    $au = user_by_id($authorId);
+    return !($au && role_at_least($au, 'mod'));
+}
+
 /**
  * 发帖 / 回复 AI 预检（严全面模式·消息审核）：内容发布后立即交给 AI 主动审一遍（后台可开关，默认开）。
  *  - 判定违规 → 立即隐藏 + 生成系统举报记录（status=ai_bad，走既有申诉 / 复核体系）+ 通知作者；
@@ -1098,9 +1109,14 @@ function ai_precheck_after_post(string $type, int $tid, int $rid, string $conten
     if ((int)cfg('ai_precheck', 1) !== 1 || !ai_ready()) {
         return '';
     }
-    /* v1.27.0 职员免 AI 审查：审核员 / 超级管理员发布与编辑均跳过（用户名审查不跳过） */
+    /* v1.27.0 职员免 AI 审查：审核员 / 超级管理员发布与编辑均跳过（用户名审查不跳过）。
+       v1.28.0：跳过时写一条日志——此前静默返回，管理员编辑自己的内容后提示「AI 将复查」
+       但日志里什么都没有，无法排查（用户反馈）；现在免审也有迹可循 */
     $au = user_by_id($authorId);
     if ($au && role_at_least($au, 'mod')) {
+        $isEditS = $src === 'edit';
+        $noS = $type === 'thread' ? '帖子《' . cut_str((string)(thread_get($tid)['title'] ?? ''), 40) . '》' : '帖子《' . cut_str((string)(thread_get($tid)['title'] ?? ''), 40) . '》中的回复';
+        log_action('ai_ok', ($isEditS ? '编辑审查' : '预检') . '跳过：作者为职员（' . e((string)($au['name'] ?? '')) . '），内容免 AI 审查（' . $noS . '）', 0, $isEditS ? 'AI 编辑审查' : 'AI 预检');
         return '';
     }
     $isEdit = $src === 'edit'; /* v1.24.0：'edit' = 编辑后审查（仅影响日志与通知文案） */
