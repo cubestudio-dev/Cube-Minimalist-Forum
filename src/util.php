@@ -1,1 +1,336 @@
-PD9waHAKLyoqCiAqIOaegeeugOiuuuWdmyDCtyDpgJrnlKjlt6Xlhbflh73mlbAKICog6Zu25L6d6LWWIMK3IOe6ryBQSFAgwrcg5peg5Lu75L2V56ys5LiJ5pa55bqTCiAqLwpkZWZpbmVkKCdBUFAnKSBvciBleGl0KCdGb3JiaWRkZW4nKTsKCi8qKiBIVE1MIOi9rOS5iei+k+WHuiAqLwpmdW5jdGlvbiBlKCRzKTogc3RyaW5nCnsKICAgIHJldHVybiBodG1sc3BlY2lhbGNoYXJzKChzdHJpbmcpJHMsIEVOVF9RVU9URVMsICdVVEYtOCcpOwp9CgovKiAtLS0tLS0tLS0tLS0tLS0tIOa8lOekuue9keWFs+mAgumFjSAtLS0tLS0tLS0tLS0tLS0tCiAqIOW9k+mAmui/h+W4piBYVHJhbnNmb3JtUG9ydCDmn6Xor6Llj4LmlbDnmoTnvZHlhbPorr/pl67ml7bvvIjmspnnrrHmvJTnpLrnjq/looPvvInvvIwKICog5omA5pyJ5YaF6YOo6ZO+5o6l6Ieq5Yqo5pC65bim6K+l5Y+C5pWw5Lul5L6/572R5YWz6L2s5Y+R44CC55Sf5Lqn6YOo572y5Lit5peg5q2k5Y+C5pWw77yMVVJMIOS/neaMgeW5suWHgOOAggogKi8KZnVuY3Rpb24gZGVtb19wb3J0KCk6IHN0cmluZwp7CiAgICBzdGF0aWMgJHAgPSBmYWxzZTsKICAgIGlmICgkcCA9PT0gZmFsc2UpIHsKICAgICAgICAkdiA9ICRfR0VUWydYVHJhbnNmb3JtUG9ydCddID8/ICgkX1BPU1RbJ1hUcmFuc2Zvcm1Qb3J0J10gPz8gJycpOwogICAgICAgICRwID0gaXNfc3RyaW5nKCR2KSAmJiBwcmVnX21hdGNoKCcvXlxkezEsNX0kLycsICR2KSA/ICR2IDogJyc7CiAgICB9CiAgICByZXR1cm4gJHA7Cn0KCi8qKiDnq5nlhoXpk77mjqXvvJp1KCdwPXRocmVhZCZpZD0xJykgPT4gaW5kZXgucGhwP3A9dGhyZWFkJmlkPTEgKi8KZnVuY3Rpb24gdShzdHJpbmcgJHFzID0gJycpOiBzdHJpbmcKewogICAgJHVybCA9ICdpbmRleC5waHAnIC4gKCRxcyAhPT0gJycgPyAnPycgLiAkcXMgOiAnJyk7CiAgICAkcCA9IGRlbW9fcG9ydCgpOwogICAgaWYgKCRwICE9PSAnJykgewogICAgICAgICR1cmwgLj0gKHN0cnBvcygkdXJsLCAnPycpID09PSBmYWxzZSA/ICc/JyA6ICcmJykgLiAnWFRyYW5zZm9ybVBvcnQ9JyAuICRwOwogICAgfQogICAgcmV0dXJuICR1cmw7Cn0KCi8qKiDpnZnmgIHotYTmupAgLyDot6jlhaXlj6Ppk77mjqXvvIjot6/lvoTkuK3lj6/lt7LlkKvmn6Xor6LkuLLvvIkgKi8KZnVuY3Rpb24gdWEoc3RyaW5nICRwYXRoKTogc3RyaW5nCnsKICAgICRwID0gZGVtb19wb3J0KCk7CiAgICBpZiAoJHAgPT09ICcnKSB7CiAgICAgICAgcmV0dXJuICRwYXRoOwogICAgfQogICAgcmV0dXJuICRwYXRoIC4gKHN0cnBvcygkcGF0aCwgJz8nKSA9PT0gZmFsc2UgPyAnPycgOiAnJicpIC4gJ1hUcmFuc2Zvcm1Qb3J0PScgLiAkcDsKfQoKLyoqIOi3s+i9rO+8iOW8uuWItuWJpeemu+aNouihjOespu+8jOadnOe7neS7u+S9lei+k+WFpeaLvOWFpSBMb2NhdGlvbiDpgKDmiJDnmoTlk43lupTmi4bliIbpo47pmanvvIkKICogIHYxLjE3LjDvvJpBSkFYIOihqOWNleaPkOS6pOaXtuS4jeWGjei3s+i9rO+8jOebtOaOpeS7pSBKU09OIOi/lOWbniBGbGFzaCDmtojmga/igJTigJQKICogIOmFjeWQiOWJjeerryBmb3JtW2RhdGEtYWpheF0g5YWN5Yi35paw5L+d5a2Y77yb5omA5pyJ5Yqo5L2c5YWx55So5q2k5a6J5YWo572R77yM5peg6ZyA6YCQ5Liq5pS56YCgICovCmZ1bmN0aW9uIHJlZGlyZWN0KHN0cmluZyAkdXJsKTogdm9pZAp7CiAgICBpZiAoZnVuY3Rpb25fZXhpc3RzKCdpc19hamF4JykgJiYgaXNfYWpheCgpKSB7CiAgICAgICAgJGYgPSB0YWtlX2ZsYXNoKCk7CiAgICAgICAganNvbl9yZXNwb25zZShbCiAgICAgICAgICAgICdvaycgICA9PiAhJGYgfHwgJGZbJ3QnXSAhPT0gJ2VycicsCiAgICAgICAgICAgICdtc2cnICA9PiAoc3RyaW5nKSgkZlsnbSddID8/ICfmk43kvZzlrozmiJAnKSwKICAgICAgICAgICAgJ3R5cGUnID0+IChzdHJpbmcpKCRmWyd0J10gPz8gJ29rJyksCiAgICAgICAgXSk7CiAgICB9CiAgICBoZWFkZXIoJ0xvY2F0aW9uOiAnIC4gc3RyX3JlcGxhY2UoWyJcciIsICJcbiIsICJcMCJdLCAnJywgKHN0cmluZykkdXJsKSk7CiAgICBleGl0Owp9CgovKiog5Zue5Yiw5p2l5rqQ6aG177yI5LuF5o6l5Y+X56uZ5YaF55u45a+56Lev5b6E77yM5LiU5ouS57ud5o6n5Yi25a2X56ym77yJ77yM5ZCm5YiZ5Zue6YCAICovCmZ1bmN0aW9uIGJhY2tfb3Ioc3RyaW5nICRmYWxsYmFjayk6IHZvaWQKewogICAgJGIgPSBpc3NldCgkX1BPU1RbJ2JhY2snXSkgJiYgaXNfc3RyaW5nKCRfUE9TVFsnYmFjayddKSA/IHRyaW0oJF9QT1NUWydiYWNrJ10pIDogJyc7CiAgICAkc2FmZSA9ICRiICE9PSAnJyAmJiAkYlswXSA9PT0gJy8nICYmICghaXNzZXQoJGJbMV0pIHx8ICRiWzFdICE9PSAnLycpCiAgICAgICAgJiYgcHJlZ19tYXRjaCgnI14vW0EtWmEtejAtOS5fflwtLz8mPSU6O1xbXF1AISRcJygpKissXSskIycsICRiKTsKICAgIGlmICgkc2FmZSkgewogICAgICAgIHJlZGlyZWN0KCRiKTsKICAgIH0KICAgIHJlZGlyZWN0KCRmYWxsYmFjayk7Cn0KCi8qIC0tLS0tLS0tLS0tLS0tLS0gRmxhc2gg5raI5oGvIC0tLS0tLS0tLS0tLS0tLS0gKi8KZnVuY3Rpb24gZmxhc2goc3RyaW5nICR0eXBlLCBzdHJpbmcgJG1zZyk6IHZvaWQKewogICAgJF9TRVNTSU9OWydmbGFzaCddID0gWyd0JyA9PiAkdHlwZSwgJ20nID0+ICRtc2ddOwp9CgpmdW5jdGlvbiB0YWtlX2ZsYXNoKCk6ID9hcnJheQp7CiAgICBpZiAoIWVtcHR5KCRfU0VTU0lPTlsnZmxhc2gnXSkpIHsKICAgICAgICAkZiA9ICRfU0VTU0lPTlsnZmxhc2gnXTsKICAgICAgICB1bnNldCgkX1NFU1NJT05bJ2ZsYXNoJ10pOwogICAgICAgIHJldHVybiAkZjsKICAgIH0KICAgIHJldHVybiBudWxsOwp9CgpmdW5jdGlvbiBmbGFzaF9yZW5kZXIoKTogc3RyaW5nCnsKICAgICRmID0gdGFrZV9mbGFzaCgpOwogICAgaWYgKCEkZikgewogICAgICAgIHJldHVybiAnJzsKICAgIH0KICAgIHJldHVybiAnPGRpdiBjbGFzcz0iZmxhc2ggZmxhc2gtJyAuIGUoJGZbJ3QnXSkgLiAnIiByb2xlPSJhbGVydCI+JyAuIGUoJGZbJ20nXSkgLiAnPC9kaXY+JzsKfQoKLyogLS0tLS0tLS0tLS0tLS0tLSBDU1JGIC0tLS0tLS0tLS0tLS0tLS0gKi8KZnVuY3Rpb24gY3NyZl90b2tlbigpOiBzdHJpbmcKewogICAgaWYgKGVtcHR5KCRfU0VTU0lPTlsnY3NyZiddKSkgewogICAgICAgICRfU0VTU0lPTlsnY3NyZiddID0gYmluMmhleChyYW5kb21fYnl0ZXMoMTYpKTsKICAgIH0KICAgIHJldHVybiAkX1NFU1NJT05bJ2NzcmYnXTsKfQoKZnVuY3Rpb24gY3NyZl9maWVsZCgpOiBzdHJpbmcKewogICAgcmV0dXJuICc8aW5wdXQgdHlwZT0iaGlkZGVuIiBuYW1lPSJjc3JmIiB2YWx1ZT0iJyAuIGUoY3NyZl90b2tlbigpKSAuICciPic7Cn0KCmZ1bmN0aW9uIGNzcmZfb2soKTogYm9vbAp7CiAgICAkdCA9ICRfUE9TVFsnY3NyZiddID8/ICgkX1NFUlZFUlsnSFRUUF9YX0NTUkZfVE9LRU4nXSA/PyAnJyk7CiAgICByZXR1cm4gaXNfc3RyaW5nKCR0KSAmJiAkdCAhPT0gJycgJiYgaGFzaF9lcXVhbHMoY3NyZl90b2tlbigpLCAkdCk7Cn0KCmZ1bmN0aW9uIGlzX2FqYXgoKTogYm9vbAp7CiAgICByZXR1cm4gKCRfU0VSVkVSWydIVFRQX1hfUkVRVUVTVEVEX1dJVEgnXSA/PyAnJykgPT09ICdmZXRjaCc7Cn0KCmZ1bmN0aW9uIGpzb25fcmVzcG9uc2UoYXJyYXkgJGQpOiB2b2lkCnsKICAgIC8qIHYxLjIzLjDvvJrkvJror53nvJPlrZjlpLTmjqXnrqHlkI7vvIxKU09OIOaVsOaNruerr+eCueaYvuW8j+WjsOaYjuS4jee8k+WtmAogICAgICDvvIjlnKjnur/kurrmlbAgLyDmnKror7vmlbAgLyDnm5Hmjqfor7vmlbAgLyDorr7nva7mkJzntKLntKLlvJXnrYnlrp7ml7bmlbDmja7vvIzmnZznu53mtY/op4jlmajlkK/lj5HlvI/nvJPlrZjvvIkgKi8KICAgIGhlYWRlcignQ2FjaGUtQ29udHJvbDogbm8tc3RvcmUnKTsKICAgIGhlYWRlcignQ29udGVudC1UeXBlOiBhcHBsaWNhdGlvbi9qc29uOyBjaGFyc2V0PXV0Zi04Jyk7CiAgICBlY2hvIGpzb25fZW5jb2RlKCRkLCBKU09OX1VORVNDQVBFRF9VTklDT0RFKTsKICAgIGV4aXQ7Cn0KCi8qIC0tLS0tLS0tLS0tLS0tLS0g6KGo5Y2V5Y+W5YC8IC0tLS0tLS0tLS0tLS0tLS0gKi8KZnVuY3Rpb24gcG9zdF9zdHIoc3RyaW5nICRrLCBpbnQgJG1heCA9IDApOiBzdHJpbmcKewogICAgJHYgPSBpc3NldCgkX1BPU1RbJGtdKSAmJiBpc19zdHJpbmcoJF9QT1NUWyRrXSkgPyB0cmltKCRfUE9TVFska10pIDogJyc7CiAgICBpZiAoJG1heCA+IDAgJiYgdV9zdHJsZW4oJHYpID4gJG1heCkgewogICAgICAgICR2ID0gY3V0X3N0cigkdiwgJG1heCk7CiAgICB9CiAgICByZXR1cm4gJHY7Cn0KCmZ1bmN0aW9uIGdldF9pbnQoc3RyaW5nICRrLCBpbnQgJGRlZiA9IDApOiBpbnQKewogICAgcmV0dXJuIGlzc2V0KCRfR0VUWyRrXSkgJiYgaXNfbnVtZXJpYygkX0dFVFska10pID8gKGludCkkX0dFVFska10gOiAkZGVmOwp9CgovKiAtLS0tLS0tLS0tLS0tLS0tIOWtl+espuS4su+8iOWkmuWtl+iKguWuieWFqO+8iSAtLS0tLS0tLS0tLS0tLS0tICovCmZ1bmN0aW9uIHVfc3RybGVuKHN0cmluZyAkcyk6IGludAp7CiAgICBpZiAoZnVuY3Rpb25fZXhpc3RzKCdtYl9zdHJsZW4nKSkgewogICAgICAgIHJldHVybiAoaW50KW1iX3N0cmxlbigkcywgJ1VURi04Jyk7CiAgICB9CiAgICAkbiA9IHByZWdfbWF0Y2hfYWxsKCcvLi91cycsICRzKTsKICAgIHJldHVybiAkbiA9PT0gZmFsc2UgPyBzdHJsZW4oJHMpIDogJG47Cn0KCmZ1bmN0aW9uIGN1dF9zdHIoc3RyaW5nICRzLCBpbnQgJG1heCk6IHN0cmluZwp7CiAgICBpZiAoZnVuY3Rpb25fZXhpc3RzKCdtYl9zdWJzdHInKSkgewogICAgICAgIHJldHVybiBtYl9zdWJzdHIoJHMsIDAsICRtYXgsICdVVEYtOCcpOwogICAgfQogICAgcHJlZ19tYXRjaF9hbGwoJy8uL3VzJywgJHMsICRtKTsKICAgIHJldHVybiBpbXBsb2RlKCcnLCBhcnJheV9zbGljZSgkbVswXSA/PyBbXSwgMCwgJG1heCkpOwp9CgovKiog5bCP5YaZ5YyW77yIbWJzdHJpbmcg57y65aSx5pe25Zue6YCAIHN0cnRvbG93ZXLvvIzku4XlvbHlk40gQVNDSUkg5Lul5aSW5a2X56ym55qE5aSn5bCP5YaZ6K+t5LmJ77yJICovCmZ1bmN0aW9uIHN0cl9sb3dlcihzdHJpbmcgJHMpOiBzdHJpbmcKewogICAgcmV0dXJuIGZ1bmN0aW9uX2V4aXN0cygnbWJfc3RydG9sb3dlcicpID8gbWJfc3RydG9sb3dlcigkcywgJ1VURi04JykgOiBzdHJ0b2xvd2VyKCRzKTsKfQoKLyogLS0tLS0tLS0tLS0tLS0tLSDmoKHpqowgLS0tLS0tLS0tLS0tLS0tLSAqLwpmdW5jdGlvbiB2YWxpZF9uYW1lKHN0cmluZyAkbik6IGJvb2wKewogICAgcmV0dXJuIChib29sKXByZWdfbWF0Y2goJy9eW1x4ezRlMDB9LVx4ezlmYTV9QS1aYS16MC05X117MiwyMH0kL3UnLCAkbik7Cn0KCmZ1bmN0aW9uIHZhbGlkX2VtYWlsKHN0cmluZyAkbSk6IGJvb2wKewogICAgcmV0dXJuIChib29sKWZpbHRlcl92YXIoJG0sIEZJTFRFUl9WQUxJREFURV9FTUFJTCk7Cn0KCi8qIC0tLS0tLS0tLS0tLS0tLS0g6KGo5Y2V5pen5YC877yI5qCh6aqM5aSx6LSl5Zue5aGr77yJIC0tLS0tLS0tLS0tLS0tLS0gKi8KZnVuY3Rpb24gc2V0X29sZChhcnJheSAkZGF0YSk6IHZvaWQKewogICAgJF9TRVNTSU9OWydvbGQnXSA9ICRkYXRhOwp9CgpmdW5jdGlvbiBvbGQoc3RyaW5nICRrLCBzdHJpbmcgJGRlZiA9ICcnKTogc3RyaW5nCnsKICAgICR2ID0gJF9TRVNTSU9OWydvbGQnXVska10gPz8gJGRlZjsKICAgIHJldHVybiBlKGlzX3NjYWxhcigkdikgPyAoc3RyaW5nKSR2IDogJycpOwp9CgpmdW5jdGlvbiBjbGVhcl9vbGQoKTogdm9pZAp7CiAgICB1bnNldCgkX1NFU1NJT05bJ29sZCddKTsKfQoKLyogLS0tLS0tLS0tLS0tLS0tLSDml7bpl7TkuI7kvZPnp68gLS0tLS0tLS0tLS0tLS0tLSAqLwpmdW5jdGlvbiBmbXRfdGltZShpbnQgJHRzKTogc3RyaW5nCnsKICAgIGlmICgkdHMgPD0gMCkgewogICAgICAgIHJldHVybiAnLSc7CiAgICB9CiAgICAkZCA9IHRpbWUoKSAtICR0czsKICAgIGlmICgkZCA8IDYwKSB7CiAgICAgICAgcmV0dXJuIHQoJ+WImuWImicpOwogICAgfQogICAgaWYgKCRkIDwgMzYwMCkgewogICAgICAgIHJldHVybiB0KCd7MH0g5YiG6ZKf5YmNJywgWyhpbnQpZmxvb3IoJGQgLyA2MCldKTsKICAgIH0KICAgIGlmICgkZCA8IDg2NDAwKSB7CiAgICAgICAgcmV0dXJuIHQoJ3swfSDlsI/ml7bliY0nLCBbKGludClmbG9vcigkZCAvIDM2MDApXSk7CiAgICB9CiAgICBpZiAoJGQgPCAxNzI4MDApIHsKICAgICAgICByZXR1cm4gdCgn5pio5aSpJykgLiAnICcgLiBkYXRlKCdIOmknLCAkdHMpOwogICAgfQogICAgaWYgKGRhdGUoJ1knLCAkdHMpID09PSBkYXRlKCdZJykpIHsKICAgICAgICByZXR1cm4gZGF0ZSgnbS1kIEg6aScsICR0cyk7CiAgICB9CiAgICByZXR1cm4gZGF0ZSgnWS1tLWQnLCAkdHMpOwp9CgpmdW5jdGlvbiBmbXRfZHQoaW50ICR0cyk6IHN0cmluZwp7CiAgICByZXR1cm4gJHRzID4gMCA/IGRhdGUoJ1ktbS1kIEg6aScsICR0cykgOiAnLSc7Cn0KCmZ1bmN0aW9uIGZtdF9ieXRlcyhpbnQgJG4pOiBzdHJpbmcKewogICAgJHUgPSBbJ0InLCAnS0InLCAnTUInLCAnR0InXTsKICAgICRpID0gMDsKICAgICR2ID0gKGZsb2F0KSRuOwogICAgd2hpbGUgKCR2ID49IDEwMjQgJiYgJGkgPCBjb3VudCgkdSkgLSAxKSB7CiAgICAgICAgJHYgLz0gMTAyNDsKICAgICAgICAkaSsrOwogICAgfQogICAgcmV0dXJuIHJvdW5kKCR2LCAkaSA9PT0gMCA/IDAgOiAxKSAuICcgJyAuICR1WyRpXTsKfQoKLyoqIOmAkuW9kue7n+iuoeebruW9leS9k+enr++8myRza2lwIOS4uui3r+W+hOWJjee8gOm7keWQjeWNlSAqLwpmdW5jdGlvbiBzaXplX29mX3BhdGgoc3RyaW5nICRwYXRoLCBhcnJheSAkc2tpcCA9IFtdKTogaW50CnsKICAgIGlmIChpc19maWxlKCRwYXRoKSkgewogICAgICAgIHJldHVybiAoaW50KUBmaWxlc2l6ZSgkcGF0aCk7CiAgICB9CiAgICBpZiAoIWlzX2RpcigkcGF0aCkpIHsKICAgICAgICByZXR1cm4gMDsKICAgIH0KICAgICRzdW0gPSAwOwogICAgdHJ5IHsKICAgICAgICAkaXQgPSBuZXcgUmVjdXJzaXZlSXRlcmF0b3JJdGVyYXRvcigKICAgICAgICAgICAgbmV3IFJlY3Vyc2l2ZURpcmVjdG9yeUl0ZXJhdG9yKCRwYXRoLCBGaWxlc3lzdGVtSXRlcmF0b3I6OlNLSVBfRE9UUyksCiAgICAgICAgICAgIFJlY3Vyc2l2ZUl0ZXJhdG9ySXRlcmF0b3I6OkxFQVZFU19PTkxZCiAgICAgICAgKTsKICAgICAgICBmb3JlYWNoICgkaXQgYXMgJGYpIHsKICAgICAgICAgICAgaWYgKCEkZi0+aXNGaWxlKCkpIHsKICAgICAgICAgICAgICAgIGNvbnRpbnVlOwogICAgICAgICAgICB9CiAgICAgICAgICAgICRwID0gJGYtPmdldFBhdGhuYW1lKCk7CiAgICAgICAgICAgIGZvcmVhY2ggKCRza2lwIGFzICRzKSB7CiAgICAgICAgICAgICAgICBpZiAoc3RycG9zKCRwLCAkcykgPT09IDApIHsKICAgICAgICAgICAgICAgICAgICBjb250aW51ZSAyOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICB9CiAgICAgICAgICAgICRzdW0gKz0gKGludCkkZi0+Z2V0U2l6ZSgpOwogICAgICAgIH0KICAgIH0gY2F0Y2ggKFRocm93YWJsZSAkdCkgewogICAgICAgIHJldHVybiAkc3VtOwogICAgfQogICAgcmV0dXJuICRzdW07Cn0KCi8qIC0tLS0tLS0tLS0tLS0tLS0g5YiG6aG1IC0tLS0tLS0tLS0tLS0tLS0gKi8KZnVuY3Rpb24gcGFnaW5hdGUoaW50ICR0b3RhbCwgaW50ICRwZXIsIGludCAkY3VyLCBzdHJpbmcgJHFzQmFzZSwgc3RyaW5nICRwYXJhbSA9ICdwYWdlJyk6IHN0cmluZwp7CiAgICAkcGFnZXMgPSAoaW50KWNlaWwoJHRvdGFsIC8gbWF4KDEsICRwZXIpKTsKICAgIGlmICgkcGFnZXMgPD0gMSkgewogICAgICAgIHJldHVybiAnJzsKICAgIH0KICAgICRjdXIgPSBtYXgoMSwgbWluKCRwYWdlcywgJGN1cikpOwogICAgLyogdjEuMTYuMO+8miRwYXJhbSDmlK/mjIHlkIzpobXlpJrkuKrni6znq4vliIbpobXliJfooajvvIjlpoLlronlhajpmLLmiqTpobXnmoTorr/pl67nu5/orqEgaXBwYWdlIOS4juS6i+S7tuaXpeW/lyBmd3BhZ2XvvInvvIwKICAgICAgIOS/ruWkjeatpOWJjeeUn+aIkOmTvuaOpeWbuuWumuS4uiBwYWdlPSDkuI7or7vlj5blj4LmlbDkuI3kuIDoh7Tlr7zoh7TnmoQi54K556ysIDIg6aG15LuN5YGc5Zyo56ysIDEg6aG1IiAqLwogICAgJGl0ZW0gPSBmdW5jdGlvbiAoaW50ICRuLCBzdHJpbmcgJGxhYmVsLCBib29sICRvbiA9IGZhbHNlLCBib29sICRkaXMgPSBmYWxzZSkgdXNlICgkcXNCYXNlLCAkcGFyYW0pOiBzdHJpbmcgewogICAgICAgIGlmICgkZGlzKSB7CiAgICAgICAgICAgIHJldHVybiAnPHNwYW4gY2xhc3M9InBnIHBnLWRpcyI+JyAuICRsYWJlbCAuICc8L3NwYW4+JzsKICAgICAgICB9CiAgICAgICAgcmV0dXJuICc8YSBjbGFzcz0icGcnIC4gKCRvbiA/ICcgb24nIDogJycpIC4gJyIgaHJlZj0iJyAuIGUodSgkcXNCYXNlIC4gJyYnIC4gJHBhcmFtIC4gJz0nIC4gJG4pKSAuICciPicgLiAkbGFiZWwgLiAnPC9hPic7CiAgICB9OwogICAgJGh0bWwgPSAnPG5hdiBjbGFzcz0icGFnZXIiIGFyaWEtbGFiZWw9IuWIhumhtSI+JzsKICAgICRodG1sIC49ICRpdGVtKCRjdXIgLSAxLCAn4oC5JywgZmFsc2UsICRjdXIgPD0gMSk7CiAgICAkd2luID0gW107CiAgICBmb3IgKCRpID0gJGN1ciAtIDI7ICRpIDw9ICRjdXIgKyAyOyAkaSsrKSB7CiAgICAgICAgaWYgKCRpID49IDEgJiYgJGkgPD0gJHBhZ2VzKSB7CiAgICAgICAgICAgICR3aW5bXSA9ICRpOwogICAgICAgIH0KICAgIH0KICAgIGlmICgkd2luICYmICR3aW5bMF0gPiAxKSB7CiAgICAgICAgJGh0bWwgLj0gJGl0ZW0oMSwgJzEnKTsKICAgICAgICBpZiAoJHdpblswXSA+IDIpIHsKICAgICAgICAgICAgJGh0bWwgLj0gJzxzcGFuIGNsYXNzPSJwZy1kb3RzIj7igKY8L3NwYW4+JzsKICAgICAgICB9CiAgICB9CiAgICBmb3JlYWNoICgkd2luIGFzICRuKSB7CiAgICAgICAgJGh0bWwgLj0gJGl0ZW0oJG4sIChzdHJpbmcpJG4sICRuID09PSAkY3VyKTsKICAgIH0KICAgIGlmICgkd2luICYmIGVuZCgkd2luKSA8ICRwYWdlcykgewogICAgICAgIGlmIChlbmQoJHdpbikgPCAkcGFnZXMgLSAxKSB7CiAgICAgICAgICAgICRodG1sIC49ICc8c3BhbiBjbGFzcz0icGctZG90cyI+4oCmPC9zcGFuPic7CiAgICAgICAgfQogICAgICAgICRodG1sIC49ICRpdGVtKCRwYWdlcywgKHN0cmluZykkcGFnZXMpOwogICAgfQogICAgJGh0bWwgLj0gJGl0ZW0oJGN1ciArIDEsICfigLonLCBmYWxzZSwgJGN1ciA+PSAkcGFnZXMpOwogICAgcmV0dXJuICRodG1sIC4gJzwvbmF2Pic7Cn0KCi8qIC0tLS0tLS0tLS0tLS0tLS0g5bCP57uE5Lu2IC0tLS0tLS0tLS0tLS0tLS0gKi8KZnVuY3Rpb24gZW1wdHlfc3RhdGUoc3RyaW5nICRtc2cpOiBzdHJpbmcKewogICAgcmV0dXJuICc8ZGl2IGNsYXNzPSJlbXB0eSI+PHNwYW4gY2xhc3M9ImVtcHR5LWljbyI+4pemPC9zcGFuPicgLiBlKCRtc2cpIC4gJzwvZGl2Pic7Cn0KCmZ1bmN0aW9uIGhpZGRlbl9iYWNrKCk6IHN0cmluZwp7CiAgICAkdXJpID0gKHN0cmluZykoJF9TRVJWRVJbJ1JFUVVFU1RfVVJJJ10gPz8gJycpOwogICAgLy8g5LuF5L+d55WZ5a6J5YWo55qEIFVSTCDlrZfnrKbvvIjpmLLmjaLooYwgLyDmjqfliLblrZfnrKbov5vlhaXlm57ot7PooajljZXvvIzlho3ov5sgTG9jYXRpb24g5aS077yJCiAgICAkdXJpID0gcHJlZ19yZXBsYWNlKCcvW15ceDIxLVx4N2VdLycsICcnLCAkdXJpKTsKICAgIHJldHVybiAnPGlucHV0IHR5cGU9ImhpZGRlbiIgbmFtZT0iYmFjayIgdmFsdWU9IicgLiBlKCR1cmkgIT09ICcnID8gJHVyaSA6IHUoJ3A9aG9tZScpKSAuICciPic7Cn0K
+<?php
+/**
+ * 极简论坛 · 通用工具函数
+ * 零依赖 · 纯 PHP · 无任何第三方库
+ */
+defined('APP') or exit('Forbidden');
+
+/** HTML 转义输出 */
+function e($s): string
+{
+    return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+}
+
+/* ---------------- 演示网关适配 ----------------
+ * 当通过带 XTransformPort 查询参数的网关访问时（沙箱演示环境），
+ * 所有内部链接自动携带该参数以便网关转发。生产部署中无此参数，URL 保持干净。
+ */
+function demo_port(): string
+{
+    static $p = false;
+    if ($p === false) {
+        $v = $_GET['XTransformPort'] ?? ($_POST['XTransformPort'] ?? '');
+        $p = is_string($v) && preg_match('/^\d{1,5}$/', $v) ? $v : '';
+    }
+    return $p;
+}
+
+/** 站内链接：u('p=thread&id=1') => index.php?p=thread&id=1 */
+function u(string $qs = ''): string
+{
+    $url = 'index.php' . ($qs !== '' ? '?' . $qs : '');
+    $p = demo_port();
+    if ($p !== '') {
+        $url .= (strpos($url, '?') === false ? '?' : '&') . 'XTransformPort=' . $p;
+    }
+    return $url;
+}
+
+/** 静态资源 / 跨入口链接（路径中可已含查询串） */
+function ua(string $path): string
+{
+    $p = demo_port();
+    if ($p === '') {
+        return $path;
+    }
+    return $path . (strpos($path, '?') === false ? '?' : '&') . 'XTransformPort=' . $p;
+}
+
+/** 跳转（强制剥离换行符，杜绝任何输入拼入 Location 造成的响应拆分风险）
+ *  v1.17.0：AJAX 表单提交时不再跳转，直接以 JSON 返回 Flash 消息——
+ *  配合前端 form[data-ajax] 免刷新保存；所有动作共用此安全网，无需逐个改造 */
+function redirect(string $url): void
+{
+    if (function_exists('is_ajax') && is_ajax()) {
+        $f = take_flash();
+        json_response([
+            'ok'   => !$f || $f['t'] !== 'err',
+            'msg'  => (string)($f['m'] ?? '操作完成'),
+            'type' => (string)($f['t'] ?? 'ok'),
+        ]);
+    }
+    header('Location: ' . str_replace(["\r", "\n", "\0"], '', (string)$url));
+    exit;
+}
+
+/** 回到来源页（仅接受站内相对路径，且拒绝控制字符），否则回退 */
+function back_or(string $fallback): void
+{
+    $b = isset($_POST['back']) && is_string($_POST['back']) ? trim($_POST['back']) : '';
+    $safe = $b !== '' && $b[0] === '/' && (!isset($b[1]) || $b[1] !== '/')
+        && preg_match('#^/[A-Za-z0-9._~\-/?&=%:;\[\]@!$\'()*+,]+$#', $b);
+    if ($safe) {
+        redirect($b);
+    }
+    redirect($fallback);
+}
+
+/* ---------------- Flash 消息 ---------------- */
+function flash(string $type, string $msg): void
+{
+    $_SESSION['flash'] = ['t' => $type, 'm' => $msg];
+}
+
+function take_flash(): ?array
+{
+    if (!empty($_SESSION['flash'])) {
+        $f = $_SESSION['flash'];
+        unset($_SESSION['flash']);
+        return $f;
+    }
+    return null;
+}
+
+function flash_render(): string
+{
+    $f = take_flash();
+    if (!$f) {
+        return '';
+    }
+    return '<div class="flash flash-' . e($f['t']) . '" role="alert">' . e($f['m']) . '</div>';
+}
+
+/* ---------------- CSRF ---------------- */
+function csrf_token(): string
+{
+    if (empty($_SESSION['csrf'])) {
+        $_SESSION['csrf'] = bin2hex(random_bytes(16));
+    }
+    return $_SESSION['csrf'];
+}
+
+function csrf_field(): string
+{
+    return '<input type="hidden" name="csrf" value="' . e(csrf_token()) . '">';
+}
+
+function csrf_ok(): bool
+{
+    $t = $_POST['csrf'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    return is_string($t) && $t !== '' && hash_equals(csrf_token(), $t);
+}
+
+function is_ajax(): bool
+{
+    return ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'fetch';
+}
+
+function json_response(array $d): void
+{
+    /* v1.23.0：会话缓存头接管后，JSON 数据端点显式声明不缓存
+      （在线人数 / 未读数 / 监控读数 / 设置搜索索引等实时数据，杜绝浏览器启发式缓存） */
+    header('Cache-Control: no-store');
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($d, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/* ---------------- 表单取值 ---------------- */
+function post_str(string $k, int $max = 0): string
+{
+    $v = isset($_POST[$k]) && is_string($_POST[$k]) ? trim($_POST[$k]) : '';
+    if ($max > 0 && u_strlen($v) > $max) {
+        $v = cut_str($v, $max);
+    }
+    return $v;
+}
+
+function get_int(string $k, int $def = 0): int
+{
+    return isset($_GET[$k]) && is_numeric($_GET[$k]) ? (int)$_GET[$k] : $def;
+}
+
+/* ---------------- 字符串（多字节安全） ---------------- */
+function u_strlen(string $s): int
+{
+    if (function_exists('mb_strlen')) {
+        return (int)mb_strlen($s, 'UTF-8');
+    }
+    $n = preg_match_all('/./us', $s);
+    return $n === false ? strlen($s) : $n;
+}
+
+function cut_str(string $s, int $max): string
+{
+    if (function_exists('mb_substr')) {
+        return mb_substr($s, 0, $max, 'UTF-8');
+    }
+    preg_match_all('/./us', $s, $m);
+    return implode('', array_slice($m[0] ?? [], 0, $max));
+}
+
+/** 小写化（mbstring 缺失时回退 strtolower，仅影响 ASCII 以外字符的大小写语义） */
+function str_lower(string $s): string
+{
+    return function_exists('mb_strtolower') ? mb_strtolower($s, 'UTF-8') : strtolower($s);
+}
+
+/* ---------------- 校验 ---------------- */
+function valid_name(string $n): bool
+{
+    return (bool)preg_match('/^[\x{4e00}-\x{9fa5}A-Za-z0-9_]{2,20}$/u', $n);
+}
+
+function valid_email(string $m): bool
+{
+    return (bool)filter_var($m, FILTER_VALIDATE_EMAIL);
+}
+
+/* ---------------- 表单旧值（校验失败回填） ---------------- */
+function set_old(array $data): void
+{
+    $_SESSION['old'] = $data;
+}
+
+function old(string $k, string $def = ''): string
+{
+    $v = $_SESSION['old'][$k] ?? $def;
+    return e(is_scalar($v) ? (string)$v : '');
+}
+
+function clear_old(): void
+{
+    unset($_SESSION['old']);
+}
+
+/* ---------------- 时间与体积 ---------------- */
+function fmt_time(int $ts): string
+{
+    if ($ts <= 0) {
+        return '-';
+    }
+    $d = time() - $ts;
+    if ($d < 60) {
+        return t('刚刚');
+    }
+    if ($d < 3600) {
+        return t('{0} 分钟前', [(int)floor($d / 60)]);
+    }
+    if ($d < 86400) {
+        return t('{0} 小时前', [(int)floor($d / 3600)]);
+    }
+    if ($d < 172800) {
+        return t('昨天') . ' ' . date('H:i', $ts);
+    }
+    if (date('Y', $ts) === date('Y')) {
+        return date('m-d H:i', $ts);
+    }
+    return date('Y-m-d', $ts);
+}
+
+function fmt_dt(int $ts): string
+{
+    return $ts > 0 ? date('Y-m-d H:i', $ts) : '-';
+}
+
+function fmt_bytes(int $n): string
+{
+    $u = ['B', 'KB', 'MB', 'GB'];
+    $i = 0;
+    $v = (float)$n;
+    while ($v >= 1024 && $i < count($u) - 1) {
+        $v /= 1024;
+        $i++;
+    }
+    return round($v, $i === 0 ? 0 : 1) . ' ' . $u[$i];
+}
+
+/** 递归统计目录体积；$skip 为路径前缀黑名单 */
+function size_of_path(string $path, array $skip = []): int
+{
+    if (is_file($path)) {
+        return (int)@filesize($path);
+    }
+    if (!is_dir($path)) {
+        return 0;
+    }
+    $sum = 0;
+    try {
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY
+        );
+        foreach ($it as $f) {
+            if (!$f->isFile()) {
+                continue;
+            }
+            $p = $f->getPathname();
+            foreach ($skip as $s) {
+                if (strpos($p, $s) === 0) {
+                    continue 2;
+                }
+            }
+            $sum += (int)$f->getSize();
+        }
+    } catch (Throwable $t) {
+        return $sum;
+    }
+    return $sum;
+}
+
+/* ---------------- 分页 ---------------- */
+function paginate(int $total, int $per, int $cur, string $qsBase, string $param = 'page'): string
+{
+    $pages = (int)ceil($total / max(1, $per));
+    if ($pages <= 1) {
+        return '';
+    }
+    $cur = max(1, min($pages, $cur));
+    /* v1.16.0：$param 支持同页多个独立分页列表（如安全防护页的访问统计 ippage 与事件日志 fwpage），
+       修复此前生成链接固定为 page= 与读取参数不一致导致的"点第 2 页仍停在第 1 页" */
+    $item = function (int $n, string $label, bool $on = false, bool $dis = false) use ($qsBase, $param): string {
+        if ($dis) {
+            return '<span class="pg pg-dis">' . $label . '</span>';
+        }
+        return '<a class="pg' . ($on ? ' on' : '') . '" href="' . e(u($qsBase . '&' . $param . '=' . $n)) . '">' . $label . '</a>';
+    };
+    $html = '<nav class="pager" aria-label="分页">';
+    $html .= $item($cur - 1, '‹', false, $cur <= 1);
+    $win = [];
+    for ($i = $cur - 2; $i <= $cur + 2; $i++) {
+        if ($i >= 1 && $i <= $pages) {
+            $win[] = $i;
+        }
+    }
+    if ($win && $win[0] > 1) {
+        $html .= $item(1, '1');
+        if ($win[0] > 2) {
+            $html .= '<span class="pg-dots">…</span>';
+        }
+    }
+    foreach ($win as $n) {
+        $html .= $item($n, (string)$n, $n === $cur);
+    }
+    if ($win && end($win) < $pages) {
+        if (end($win) < $pages - 1) {
+            $html .= '<span class="pg-dots">…</span>';
+        }
+        $html .= $item($pages, (string)$pages);
+    }
+    $html .= $item($cur + 1, '›', false, $cur >= $pages);
+    return $html . '</nav>';
+}
+
+/* ---------------- 小组件 ---------------- */
+function empty_state(string $msg): string
+{
+    return '<div class="empty"><span class="empty-ico">◦</span>' . e($msg) . '</div>';
+}
+
+function hidden_back(): string
+{
+    $uri = (string)($_SERVER['REQUEST_URI'] ?? '');
+    // 仅保留安全的 URL 字符（防换行 / 控制字符进入回跳表单，再进 Location 头）
+    $uri = preg_replace('/[^\x21-\x7e]/', '', $uri);
+    return '<input type="hidden" name="back" value="' . e($uri !== '' ? $uri : u('p=home')) . '">';
+}

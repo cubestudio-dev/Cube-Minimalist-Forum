@@ -1,1 +1,227 @@
-PD9waHAKLyoqCiAqIOaegeeugOiuuuWdmyDCtyDlupTnlKjlvJXlr7wKICog546v5aKD5bi46YePIC8g5Lya6K+dIC8g6YWN572u5Yqg6L29IC8g57G75bqT6KOF6L29CiAqLwplcnJvcl9yZXBvcnRpbmcoRV9BTEwpOwppbmlfc2V0KCdkaXNwbGF5X2Vycm9ycycsICcwJyk7CmluaV9zZXQoJ2xvZ19lcnJvcnMnLCAnMScpOwoKZGVmaW5lZCgnQVBQJykgb3IgZGVmaW5lKCdBUFAnLCAxKTsKCmlmICghZGVmaW5lZCgnREFUQV9ESVInKSkgewogICAgZGVmaW5lKCdEQVRBX0RJUicsIGRpcm5hbWUoX19ESVJfXykgLiAnL2RhdGEnKTsKfQppZiAoIWRlZmluZWQoJ01GX1ZFUlNJT04nKSkgewogICAgZGVmaW5lKCdNRl9WRVJTSU9OJywgJzEuMjMuMCcpOwp9CmlmICghaXNfZGlyKERBVEFfRElSKSkgewogICAgQG1rZGlyKERBVEFfRElSLCAwNzU1LCB0cnVlKTsKfQovKiB2MS4yMS4wIOWuieWFqOWKoOWbuu+8iOW5guetie+8ie+8mmRhdGEvIOebruW9leiHquW4piBBcGFjaGUg5ouS57ud5LiA5YiHIFdlYiDorr/pl67op4TliJnvvJsKICAgbmdpbngg55So5oi35oyJIFJFQURNRSDmi6bmiKogL2RhdGEv77yb5pWw5o2u5paH5Lu25pys6Lqr5Y+m5pyJIFBIUCDlrojljavliY3nvIDlj4zkv53pmakgKi8KJG1mSHQgPSBEQVRBX0RJUiAuICcvLmh0YWNjZXNzJzsKaWYgKCFpc19maWxlKCRtZkh0KSkgewogICAgQGZpbGVfcHV0X2NvbnRlbnRzKCRtZkh0LCAiPElmTW9kdWxlIG1vZF9hdXRoel9jb3JlLmM+XG4gIFJlcXVpcmUgYWxsIGRlbmllZFxuPC9JZk1vZHVsZT5cbjxJZk1vZHVsZSAhbW9kX2F1dGh6X2NvcmUuYz5cbiAgT3JkZXIgYWxsb3csZGVueVxuICBEZW55IGZyb20gYWxsXG48L0lmTW9kdWxlPlxuIik7Cn0KdW5zZXQoJG1mSHQpOwovKiDov5DooYzplJnor6/ml6Xlv5fnp7vlhaUgZGF0YS9sb2dzL++8iOS4jiAuaHRhY2Nlc3Mg5L+d5oqk6IyD5Zu05LiA6Ie077yM6YG/5YWN6KKrIFdlYiDnm7TmjqXor7vlj5bms4TpnLLot6/lvoTvvIkgKi8KaWYgKCFpc19kaXIoREFUQV9ESVIgLiAnL2xvZ3MnKSkgewogICAgQG1rZGlyKERBVEFfRElSIC4gJy9sb2dzJywgMDc3NSwgdHJ1ZSk7Cn0KaW5pX3NldCgnZXJyb3JfbG9nJywgREFUQV9ESVIgLiAnL2xvZ3MvZXJyb3IubG9nJyk7CmRhdGVfZGVmYXVsdF90aW1lem9uZV9zZXQoJ0FzaWEvU2hhbmdoYWknKTsKCi8qIOexu+W6k+ijhei9ve+8iOmhuuW6j+aVj+aEn++8iSAqLwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvdXRpbC5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvc3RvcmFnZS5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvZGJzdG9yZS5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvaTE4bi5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvbWFya2Rvd24ucGhwJzsKcmVxdWlyZV9vbmNlIF9fRElSX18gLiAnL21haWxlci5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvYWkucGhwJzsKcmVxdWlyZV9vbmNlIF9fRElSX18gLiAnL2NoYXJ0cy5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvbG9ncy5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvZmlyZXdhbGwucGhwJzsKcmVxdWlyZV9vbmNlIF9fRElSX18gLiAnL3VwZGF0ZS5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvc3lzbW9uLnBocCc7CnJlcXVpcmVfb25jZSBfX0RJUl9fIC4gJy9hdXRoLnBocCc7CnJlcXVpcmVfb25jZSBfX0RJUl9fIC4gJy9kZXZpY2VzLnBocCc7CnJlcXVpcmVfb25jZSBfX0RJUl9fIC4gJy9jb250ZW50LnBocCc7CnJlcXVpcmVfb25jZSBfX0RJUl9fIC4gJy9hcGkucGhwJzsKcmVxdWlyZV9vbmNlIF9fRElSX18gLiAnL2xheW91dC5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvYWN0aW9ucy5waHAnOwpyZXF1aXJlX29uY2UgX19ESVJfXyAuICcvcGFnZXMucGhwJzsKcmVxdWlyZV9vbmNlIF9fRElSX18gLiAnL2FkbWluLnBocCc7CnJlcXVpcmVfb25jZSBfX0RJUl9fIC4gJy9wbHVnaW5zLnBocCc7CgovKiDkvJror53vvJrkv53lrZjot6/lvoTnva7kuo4gZGF0YS9zZXNzaW9uc++8iOiHquWMheWQq+OAgeS+v+S6jumalOemu+S4juWkh+S7veaOkumZpO+8ie+8mwogICDnlKggZW5zdXJlRGlyIOi1sOiHquaEiOmYtuair++8iOW7uuebruW9lS/kv67mnYPpmZAv5pW05L2T5pCs56e76YeN5bu677yJ77yM5bGe5Li75byC5bi45pe25Lmf6IO96Ieq5Yqo5pWR5ZueICovCiRzZGlyID0gREFUQV9ESVIgLiAnL3Nlc3Npb25zJzsKaWYgKCFpc19kaXIoJHNkaXIpKSB7CiAgICBTdG9yZTo6ZW5zdXJlRGlyKCdzZXNzaW9ucycpOwp9CmlmIChpc19kaXIoJHNkaXIpICYmIGlzX3dyaXRhYmxlKCRzZGlyKSkgewogICAgc2Vzc2lvbl9zYXZlX3BhdGgoJHNkaXIpOwp9CnNlc3Npb25fbmFtZSgnTUZTRVNTJyk7Ci8qIEhUVFBTIOeOr+Wig+iHquWKqOe7meS8muivnSBDb29raWUg5Yqg5LiKIFNlY3VyZe+8iOmYsumZjee6p+eqg+WQrO+8ie+8m0hUVFAg56uZ54K55L+d5oyB5YW85a65ICovCiRtZkh0dHBzID0gYXBwX2lzX2h0dHBzKCk7Ci8qIOS8muivneaWh+S7tuacjeWKoeerr+WtmOa0u+acn+aPkOS4uiAzMCDlpKnvvJpQSFAg6buY6K6kIGdjX21heGxpZmV0aW1lPTE0NDAg56eS77yIMjQg5YiG6ZKf77yJ77yMCiAgIOWLvumAieOAjOS/neaMgeeZu+W9leOAjeeahOeUqOaIt+WcqOWuv+S4u+acuiBHQyDov5DooYzlkI7kvJror53mlofku7blsLHooqvor6/liKDvvIzlr7zoh7Tlh63nqbrmjonnur/jgIIKICAg77yI5pyq5Yu+6YCJ5L+d5oyB55m75b2V55qE55So5oi35LiN5Y+X5b2x5ZON77ya5Lya6K+dIENvb2tpZSDmnKzouqvku43mmK/mtY/op4jlmajlhbPpl63ljbPlpLHmlYjvvIkgKi8KQGluaV9zZXQoJ3Nlc3Npb24uZ2NfbWF4bGlmZXRpbWUnLCAoc3RyaW5nKSgzMCAqIDg2NDAwKSk7CnNlc3Npb25fc2V0X2Nvb2tpZV9wYXJhbXMoWydsaWZldGltZScgPT4gMCwgJ3BhdGgnID0+ICcvJywgJ2h0dHBvbmx5JyA9PiB0cnVlLCAnc2FtZXNpdGUnID0+ICdMYXgnLCAnc2VjdXJlJyA9PiAkbWZIdHRwc10pOwovKiB2MS4yMy4wIOihjOS6kea1geawtO+8muaOpeeuoeS8muivnee8k+WtmOWktOOAglBIUCDnmoQgc2Vzc2lvbl9zdGFydCDpu5jorqToh6rliqjlj5EKICAgIkNhY2hlLUNvbnRyb2w6IG5vLXN0b3JlIuKAlOKAlOi/meaYr+a1j+iniOWZqOW+gOi/lOe8k+WtmO+8iGJmY2FjaGXvvInnmoTlpLTlj7fnpoHnlKjljp/lm6DvvIwKICAg55u05o6l5ZCO5p6c5piv44CM5ZCO6YCA5LiA6aG15Lmf6KaB6YeN5paw55m95bGP562J5b6F5pW05pW05LiA5Liq5b6A6L+U44CN77yb6auY5bu26L+f5pyN5Yqh5Zmo5LiK5bCk5YW26Zq+5Y+X44CCCiAgIOaUueeUseW4g+WxgOWxguaJi+WKqOWPkSBDYWNoZS1Db250cm9sOiBwcml2YXRlLCBuby1jYWNoZe+8mgogICDCtyBwcml2YXRlIOKAlOKAlCDnpoHmraLlhbHkuqvnvJPlrZjor6/lrZjkuKrmgKfljJbpobXpnaIKICAgwrcgbm8tY2FjaGUg4oCU4oCUIOWFgeiuuOe8k+WtmOS9huavj+asoemHjemqjO+8iOaXoOmqjOivgeWZqOaXtuetieaViOWujOaVtOaLieWPlu+8jOWGheWuueS4jemZiOaXp++8iQogICDCtyDlhYHorrggYmZjYWNoZSDigJTigJQg5ZCO6YCAIC8g5YmN6L+b556s5pe25a6M5oiQ77yM5oiQ5Li66auY5bu26L+f5LiL5pyA5bmz5ruR55qE5a+86Iiq6YCa6YGTCiAgIEpTT04g56uv54K555SxIGpzb25fcmVzcG9uc2UoKSDnu5/kuIDlj5Egbm8tc3RvcmXvvJvpnZnmgIHotYTmupDmsr/nlKjlkIToh6rnmoTlvLrnvJPlrZjlpLQgKi8KQHNlc3Npb25fY2FjaGVfbGltaXRlcignJyk7CkBzZXNzaW9uX3N0YXJ0KCk7CnVuc2V0KCRtZkh0dHBzKTsKCi8qIOmFjee9riAqLwokR0xPQkFMU1snQ0ZHJ10gPSBTdG9yZTo6cmVhZCgnY29uZmlnLnBocCcsIFtdKTsKaWYgKCFpc19hcnJheSgkR0xPQkFMU1snQ0ZHJ10pKSB7CiAgICAkR0xPQkFMU1snQ0ZHJ10gPSBbXTsKfQoKLyogdjEuMjEuMCDlrZjlgqjlvJXmk47lvJXlr7zvvJrmlofku7bkvqcgY29uZmlnIOeahCBzdG9yYWdlX2VuZ2luZSDmmK/llK/kuIDlhrPnrZbplK7vvIgKICAg5byV5pOO6ZSu5LiN5YWl5bqT77yM5p2c57ud44CM5bqT6K+06K+l55So5bqTIC8g5paH5Lu26K+06K+l55So5paH5Lu244CN55qE5byV5a+86Ieq6ZSB77yJ44CCCiAgIOaVsOaNruW6k+i/nuaOpeWksei0peaXtuiHquWKqOWbnumAgOaWh+S7tuaooeW8j++8iOivu+aWh+S7tuW/q+eFp++8ie+8jOW5tue9ruWFqOWxgOmGkuebruitpuWRiuOAgiAqLwppZiAoKHN0cmluZyljZmcoJ3N0b3JhZ2VfZW5naW5lJywgJ2ZpbGUnKSA9PT0gJ2RiJykgewogICAgaWYgKFN0b3JlOjp1c2VEYigoYXJyYXkpY2ZnKCkpKSB7CiAgICAgICAgJGRiQ2ZnID0gRGJTdG9yZTo6cmVhZCgnY29uZmlnLnBocCcsIG51bGwpOwogICAgICAgIGlmIChpc19hcnJheSgkZGJDZmcpICYmICRkYkNmZykgewogICAgICAgICAgICAkZGJDZmdbJ3N0b3JhZ2VfZW5naW5lJ10gPSAnZGInOwogICAgICAgICAgICAkR0xPQkFMU1snQ0ZHJ10gPSAkZGJDZmc7CiAgICAgICAgfQogICAgfSBlbHNlIHsKICAgICAgICAkR0xPQkFMU1snRU5WX1dBUk4nXSA9ICfmlbDmja7lupPov57mjqXlpLHotKXvvIzlt7Loh6rliqjlm57pgIDliLDmlofku7blrZjlgqjmqKHlvI/vvIjor7vlhpnmmoLotbAgZGF0YS8g5paH5Lu25b+r54Wn77yJ44CCJwogICAgICAgICAgICAuICfljp/lm6DvvJonIC4gRGJTdG9yZTo6bGFzdENvbm5FcnJvcigpIC4gJ+OAgicKICAgICAgICAgICAgLiAn6K+35Yiw5ZCO5Y+w44CM5a2Y5YKo44CN5qOA5p+l6L+e5o6l6K6+572u77yb5oGi5aSN5ZCO5aaC5paH5Lu25b+r54Wn5pyf6Ze05pyJ5paw5Y+R5biW77yM6K+36YeN5paw5omn6KGM5LiA5qyh44CM5paH5Lu2IOKGkiDmlbDmja7lupPjgI3ov4Hnp7vku6Xlr7npvZDkuKTkvqfmlbDmja7jgIInOwogICAgICAgIGVycm9yX2xvZygnW1N0b3JhZ2VdIERCIOW8leaTjui/nuaOpeWksei0pe+8jOWbnumAgOaWh+S7tuaooeW8j++8micgLiBEYlN0b3JlOjpsYXN0Q29ubkVycm9yKCkpOwogICAgfQp9CgovKiDnu5Hlrprln5/lkI3lrojljavvvJrlkI7lj7DphY3nva7kuobmjojmnYPln5/lkI3ml7bvvIzlhbbku5bln5/lkI3vvIjmgbbmhI/op6PmnpAgLyDplZzlg4/nq5kgLyBJUCDnm7Tov57vvInkuIDlvosgMzAxIOi3s+i9rOWIsOaOiOadg+Wfn+WQjSAqLwpiaW5kX2RvbWFpbl9ndWFyZCgpOwoKLyog6Ziy54Gr5aKZ5YWl5Y+j77ya5a6J5YWo5ZON5bqU5aS0IOKGkiDnmb3lkI3ljZUg4oaSIOWwgeemgeWQjeWNlSDihpIg5Y2x6ZmpIElQIOW6kyDihpIg6ZmQ5rWBIOKGkiDoh6rliqjnrZbnlaXvvIjor6bop4Egc3JjL2ZpcmV3YWxsLnBocO+8iSAqLwpmd19ndWFyZCgpOwoKLyog546v5aKD6Ieq5qOA77ya5pWw5o2u55uu5b2V5LiN5Y+v5YaZ5pe2572u5YWo5bGA6K2m5ZGK77yI6aG16Z2i6aG26YOo5a+5566h55CG5ZGY5Y+v6KeB77yM5YaZ5YWl57G75pON5L2c5Lya57uZ5Ye65piO56Gu6ZSZ6K+v77yJICovCmlmICghU3RvcmU6OndyaXRhYmxlKCkpIHsKICAgICRHTE9CQUxTWydFTlZfV0FSTiddID0gJ2RhdGEvIOebruW9leS4jeWPr+WGme+8muWPkeW4luOAgeazqOWGjOOAgeiuvue9ruS/neWtmOetieWGmeWFpeexu+WKn+iDveWwhuaXoOazleS9v+eUqOOAgicKICAgICAgICAuICfor7fliLDlkI7lj7DjgIznm5Hmjqcg4oaSIOeOr+Wig+iHquajgOOAjeeCueOAjOS4gOmUruS/ruWkjeebruW9leadg+mZkOOAjeWwneivleiHquWKqOS/ruWkje+8m+iLpeaXoOaViO+8jOivt+mAmui/hyBGVFAg5bCGIGRhdGEvIOebruW9le+8iOWQq+WtkOebruW9le+8ieadg+mZkOiuvuS4uiA3NTUg5oiWIDc3Ne+8iFdpbmRvd3Mg5Li75py66K+357uZIElJUyDnlKjmiLfmjojmnYPvvInjgIInOwp9CgovKiB2MS4yMS4wIOWkmuivreiogO+8muino+aekOW9k+WJjeivreiogO+8iOeUqOaIt+mAieaLqSA+IOi1hOaWmeWBj+WlvSA+IElQIOiHquWKqOWIpOaWrSA+IOWQjuWPsOm7mOiupO+8ie+8jAogICDlv4XpobvlnKjkvJror53lkK/liqjkuI7lhajpg6jnsbvlupPlsLHnu6rlkI7miafooYzvvJt0KCkg5YWo56iL5Y+v55SoICovCmkxOG5faW5pdCgpOwoKLyogdjEuMjIuMCDmi5PlsZXvvJrliqDovb3lhajpg6jlkK/nlKjmj5Lku7bvvIjlpLHotKXoh6rliqjot7Pov4fvvJvpkqnlrZDku47ov5nph4zlvIDlp4vlj6/orqLpmIXvvIkgKi8KcGx1Z2luc19sb2FkKCk7CgovKiog5b2T5YmN6K+35rGC5piv5ZCm5Li6IEhUVFBT77yI5ZCr5Y+N5Luj6YCP5Lyg5Zy65pmv77ybYXV0aC5waHAg5Lya6K+d57ut5pyf5Lmf55So5a6D5L+d5oyBIFNlY3VyZSDkuIDoh7TmgKfvvIkgKi8KZnVuY3Rpb24gYXBwX2lzX2h0dHBzKCk6IGJvb2wKewogICAgcmV0dXJuICghZW1wdHkoJF9TRVJWRVJbJ0hUVFBTJ10pICYmICRfU0VSVkVSWydIVFRQUyddICE9PSAnb2ZmJykKICAgICAgICB8fCAoc3RyaW5nKSgkX1NFUlZFUlsnU0VSVkVSX1BPUlQnXSA/PyAnJykgPT09ICc0NDMnCiAgICAgICAgfHwgc3RydG9sb3dlcigoc3RyaW5nKSgkX1NFUlZFUlsnSFRUUF9YX0ZPUldBUkRFRF9QUk9UTyddID8/ICcnKSkgPT09ICdodHRwcyc7Cn0KCi8qKgogKiDlip/og73mgLvlvIDlhbPvvIh2MS4xNC4w77yJ77ya5ZCO5Y+w44CM5Yqf6IO944CN6aG15Y+v5Yu+6YCJ5ZCv5YGcCiAqIOm7mOiupOWFqOW8gCDigJTigJQg5pen56uZ5Y2H57qn6Zu26L+B56e744CB5paw6KOF6Zu26YWN572u77yb5YWz6Zet55qE5byA5YWz5YmN5ZCO5Y+w5Y+M56uv5oum5oiqCiAqLwpmdW5jdGlvbiBmZWF0X29uKHN0cmluZyAkaywgYm9vbCAkZGVmID0gdHJ1ZSk6IGJvb2wKewogICAgcmV0dXJuIChpbnQpY2ZnKCdmZWF0XycgLiAkaywgJGRlZiA/IDEgOiAwKSA9PT0gMTsKfQoKLyoqIOivu+WPlumFjee9ru+8mmNmZygnc2l0ZV9uYW1lJywg6buY6K6kKSDmiJYgY2ZnKCkg5Y+W5YWo6YOoICovCmZ1bmN0aW9uIGNmZyhzdHJpbmcgJGsgPSAnJywgJGRlZiA9IG51bGwpCnsKICAgICRjID0gJEdMT0JBTFNbJ0NGRyddID8/IFtdOwogICAgaWYgKCRrID09PSAnJykgewogICAgICAgIHJldHVybiAkYzsKICAgIH0KICAgIHJldHVybiAkY1ska10gPz8gJGRlZjsKfQoKLyoqIOabtOaWsOmFjee9ru+8iOWKoOmUgSArIOWOn+WtkOWGme+8iSAqLwpmdW5jdGlvbiBjZmdfdXBkYXRlKGFycmF5ICRrdik6IHZvaWQKewogICAgJGxrID0gU3RvcmU6OmxvY2soJ2NvbmZpZycpOwogICAgJGMgPSBTdG9yZTo6cmVhZCgnY29uZmlnLnBocCcsIFtdKTsKICAgIGlmICghaXNfYXJyYXkoJGMpKSB7CiAgICAgICAgJGMgPSBbXTsKICAgIH0KICAgIGZvcmVhY2ggKCRrdiBhcyAkayA9PiAkdikgewogICAgICAgICRjWyRrXSA9ICR2OwogICAgfQogICAgU3RvcmU6OndyaXRlKCdjb25maWcucGhwJywgJGMpOwogICAgJEdMT0JBTFNbJ0NGRyddID0gJGM7CiAgICBTdG9yZTo6dW5sb2NrKCRsayk7Cn0KCi8qKgogKiDnu5Hlrprln5/lkI3vvIjmjojmnYPln5/lkI3vvInlrojljasKICogLSDlkI7lj7DjgIzln7rmnKzorr7nva4g4oaSIOe7keWumuWfn+WQjeOAjeeVmeepuuaXtuS4jeWBmuS7u+S9lemZkOWItu+8iOm7mOiupO+8jOWFvOWuueS4gOWIh+eOr+Wig++8iQogKiAtIOmFjee9ruWQju+8muS7heWFgeiuuOWIl+ihqOWGheWfn+WQjeiuv+mXru+8m+WFtuS7luWfn+WQje+8iOS7luS6uuaBtuaEj+ino+aekOOAgemVnOWDj+ermeOAgUlQIOebtOi/nu+8ieS4gOW+iyAzMDEg5rC45LmFCiAqICAg6Lez6L2s5Yiw56ys5LiA5Liq5o6I5p2D5Z+f5ZCN77yM5Y6f6Lev5b6E5Y6f5qC35L+d55WZ77yI5pCc57Si5byV5pOO5p2D6YeN6Ieq5Yqo5b2S5oui5Yiw5o6I5p2D5Z+f5ZCN77yJCiAqIC0g5ZG95Luk6KGM77yIcGhwIC1s44CB6K6h5YiS5Lu75Yqh6ISa5pys77yJ5LiO5pegIEhUVFBfSE9TVCDnmoTnjq/looPoh6rliqjot7Pov4cKICogLSDoh6rmlZHvvJrkuIfkuIDmiorln5/lkI3lhpnplJnlr7zoh7Torr/pl67lvILluLjvvIzpgJrov4cgRlRQIOaJk+W8gCBkYXRhL2NvbmZpZy5waHAg5Yig5o6JCiAqICAgImJpbmRfZG9tYWlucyIg5LiA6KGM77yI5oiW5riF56m65YW25YC877yJ5Y2z5Y+v5oGi5aSNCiAqLwpmdW5jdGlvbiBiaW5kX2RvbWFpbl9ndWFyZCgpOiB2b2lkCnsKICAgICRyYXcgPSB0cmltKChzdHJpbmcpY2ZnKCdiaW5kX2RvbWFpbnMnLCAnJykpOwogICAgaWYgKCRyYXcgPT09ICcnIHx8IFBIUF9TQVBJID09PSAnY2xpJyB8fCBlbXB0eSgkX1NFUlZFUlsnSFRUUF9IT1NUJ10pKSB7CiAgICAgICAgcmV0dXJuOwogICAgfQogICAgJGFsbG93ID0gYmluZF9kb21haW5fbGlzdCgkcmF3KTsKICAgIGlmICghJGFsbG93KSB7CiAgICAgICAgcmV0dXJuOwogICAgfQogICAgJGN1ciA9IHN0cnRvbG93ZXIoKHN0cmluZylwYXJzZV91cmwoJ2h0dHA6Ly8nIC4gKHN0cmluZykkX1NFUlZFUlsnSFRUUF9IT1NUJ10sIFBIUF9VUkxfSE9TVCkpOwogICAgJGN1ciA9IHJ0cmltKCRjdXIsICcuJyk7IC8vIOWFvOWuuSBGUUROIOWwvueCueWGmeazle+8iEZPUlVNLkNPTS4g5LiOIGZvcnVtLmNvbSDop4bkuLrlkIzkuIDln5/lkI3vvIkKICAgIGlmICgkY3VyID09PSAnJyB8fCBpbl9hcnJheSgkY3VyLCAkYWxsb3csIHRydWUpKSB7CiAgICAgICAgcmV0dXJuOwogICAgfQogICAgJGh0dHBzID0gKCFlbXB0eSgkX1NFUlZFUlsnSFRUUFMnXSkgJiYgJF9TRVJWRVJbJ0hUVFBTJ10gIT09ICdvZmYnKQogICAgICAgIHx8IChzdHJpbmcpKCRfU0VSVkVSWydTRVJWRVJfUE9SVCddID8/ICcnKSA9PT0gJzQ0MycKICAgICAgICB8fCBzdHJ0b2xvd2VyKChzdHJpbmcpKCRfU0VSVkVSWydIVFRQX1hfRk9SV0FSREVEX1BST1RPJ10gPz8gJycpKSA9PT0gJ2h0dHBzJzsKICAgICR1cmkgPSAoc3RyaW5nKSgkX1NFUlZFUlsnUkVRVUVTVF9VUkknXSA/PyAnLycpOwogICAgaWYgKCR1cmkgPT09ICcnIHx8ICR1cmlbMF0gIT09ICcvJykgewogICAgICAgICR1cmkgPSAnLyc7IC8vIOmYsuW+oeaAp++8mkxvY2F0aW9uIOWAvOW/hemhu+aYr+acrOermei3r+W+hAogICAgfQogICAgaGVhZGVyKCdMb2NhdGlvbjogJyAuICgkaHR0cHMgPyAnaHR0cHMnIDogJ2h0dHAnKSAuICc6Ly8nIC4gJGFsbG93WzBdIC4gJHVyaSwgdHJ1ZSwgMzAxKTsKICAgIGV4aXQ7Cn0KCi8qKiDop6PmnpDmjojmnYPln5/lkI3phY3nva7vvJrmlK/mjIHpgJflj7cgLyDkuK3mlofpgJflj7cgLyDliIblj7cgLyDnqbrnmb3liIbpmpTvvIzpgJDkuKrljrvljY/orq7lpLTjgIHljrvnq6/lj6PkuI7ot6/lvoTjgIHovazlsI/lhpnjgIHljrvph43vvIjml6fniYjmjqXlj6PvvIzkvpvlpJbpg6josIPnlKjvvIkgKi8KZnVuY3Rpb24gYmluZF9kb21haW5fbGlzdChzdHJpbmcgJHJhdyk6IGFycmF5CnsKICAgICRvdXQgPSBbXTsKICAgICRwYXJ0cyA9IHByZWdfc3BsaXQoJy9bXHMs77yMO++8m10rL3UnLCB0cmltKCRyYXcpKSA/OiBbXTsKICAgIGZvcmVhY2ggKCRwYXJ0cyBhcyAkZCkgewogICAgICAgICRkID0gc3RydG9sb3dlcih0cmltKChzdHJpbmcpJGQpKTsKICAgICAgICBpZiAoJGQgPT09ICcnKSB7CiAgICAgICAgICAgIGNvbnRpbnVlOwogICAgICAgIH0KICAgICAgICAkZCA9IHByZWdfcmVwbGFjZSgnI15odHRwcz86Ly8jaScsICcnLCAkZCkgPz8gJGQ7IC8vIOWuuemUme+8muWOu+aOieivr+Whq+eahOWNj+iuruWktAogICAgICAgICRkID0gdHJpbSgkZCwgJy8nKTsgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgLy8g5a656ZSZ77ya5Y675o6J6K+v5aGr55qE5bC+5pac5p2gCiAgICAgICAgJGQgPSAoc3RyaW5nKXByZWdfcmVwbGFjZSgnL1tcLz8jOl0uKiQvJywgJycsICRkKTsgLy8g5a656ZSZ77ya5Y675o6J6K+v5aGr55qE56uv5Y+j5LiO6Lev5b6ECiAgICAgICAgJGQgPSBydHJpbSgkZCwgJy4nKTsgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAvLyDlrrnplJnvvJrljrvmjokgRlFETiDlsL7ngrnvvIhGT1JVTS5DT00uIOS4jiBmb3J1bS5jb20g57uf5LiA77yJCiAgICAgICAgaWYgKCRkICE9PSAnJyAmJiBwcmVnX21hdGNoKCcvXlthLXowLTkuXC1dKyQvJywgJGQpKSB7CiAgICAgICAgICAgICRvdXRbXSA9ICRkOwogICAgICAgIH0KICAgIH0KICAgIHJldHVybiBhcnJheV92YWx1ZXMoYXJyYXlfdW5pcXVlKCRvdXQpKTsKfQo=
+<?php
+/**
+ * 极简论坛 · 应用引导
+ * 环境常量 / 会话 / 配置加载 / 类库装载
+ */
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
+defined('APP') or define('APP', 1);
+
+if (!defined('DATA_DIR')) {
+    define('DATA_DIR', dirname(__DIR__) . '/data');
+}
+if (!defined('MF_VERSION')) {
+    define('MF_VERSION', '1.23.0');
+}
+if (!is_dir(DATA_DIR)) {
+    @mkdir(DATA_DIR, 0755, true);
+}
+/* v1.21.0 安全加固（幂等）：data/ 目录自带 Apache 拒绝一切 Web 访问规则；
+   nginx 用户按 README 拦截 /data/；数据文件本身另有 PHP 守卫前缀双保险 */
+$mfHt = DATA_DIR . '/.htaccess';
+if (!is_file($mfHt)) {
+    @file_put_contents($mfHt, "<IfModule mod_authz_core.c>\n  Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n  Order allow,deny\n  Deny from all\n</IfModule>\n");
+}
+unset($mfHt);
+/* 运行错误日志移入 data/logs/（与 .htaccess 保护范围一致，避免被 Web 直接读取泄露路径） */
+if (!is_dir(DATA_DIR . '/logs')) {
+    @mkdir(DATA_DIR . '/logs', 0775, true);
+}
+ini_set('error_log', DATA_DIR . '/logs/error.log');
+date_default_timezone_set('Asia/Shanghai');
+
+/* 类库装载（顺序敏感） */
+require_once __DIR__ . '/util.php';
+require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/dbstore.php';
+require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/markdown.php';
+require_once __DIR__ . '/mailer.php';
+require_once __DIR__ . '/ai.php';
+require_once __DIR__ . '/charts.php';
+require_once __DIR__ . '/logs.php';
+require_once __DIR__ . '/firewall.php';
+require_once __DIR__ . '/update.php';
+require_once __DIR__ . '/sysmon.php';
+require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/devices.php';
+require_once __DIR__ . '/content.php';
+require_once __DIR__ . '/api.php';
+require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/actions.php';
+require_once __DIR__ . '/pages.php';
+require_once __DIR__ . '/admin.php';
+require_once __DIR__ . '/plugins.php';
+
+/* 会话：保存路径置于 data/sessions（自包含、便于隔离与备份排除）；
+   用 ensureDir 走自愈阶梯（建目录/修权限/整体搬移重建），属主异常时也能自动救回 */
+$sdir = DATA_DIR . '/sessions';
+if (!is_dir($sdir)) {
+    Store::ensureDir('sessions');
+}
+if (is_dir($sdir) && is_writable($sdir)) {
+    session_save_path($sdir);
+}
+session_name('MFSESS');
+/* HTTPS 环境自动给会话 Cookie 加上 Secure（防降级窃听）；HTTP 站点保持兼容 */
+$mfHttps = app_is_https();
+/* 会话文件服务端存活期提为 30 天：PHP 默认 gc_maxlifetime=1440 秒（24 分钟），
+   勾选「保持登录」的用户在宿主机 GC 运行后会话文件就被误删，导致凭空掉线。
+   （未勾选保持登录的用户不受影响：会话 Cookie 本身仍是浏览器关闭即失效） */
+@ini_set('session.gc_maxlifetime', (string)(30 * 86400));
+session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => $mfHttps]);
+/* v1.23.0 行云流水：接管会话缓存头。PHP 的 session_start 默认自动发
+   "Cache-Control: no-store"——这是浏览器往返缓存（bfcache）的头号禁用原因，
+   直接后果是「后退一页也要重新白屏等待整整一个往返」；高延迟服务器上尤其难受。
+   改由布局层手动发 Cache-Control: private, no-cache：
+   · private —— 禁止共享缓存误存个性化页面
+   · no-cache —— 允许缓存但每次重验（无验证器时等效完整拉取，内容不陈旧）
+   · 允许 bfcache —— 后退 / 前进瞬时完成，成为高延迟下最平滑的导航通道
+   JSON 端点由 json_response() 统一发 no-store；静态资源沿用各自的强缓存头 */
+@session_cache_limiter('');
+@session_start();
+unset($mfHttps);
+
+/* 配置 */
+$GLOBALS['CFG'] = Store::read('config.php', []);
+if (!is_array($GLOBALS['CFG'])) {
+    $GLOBALS['CFG'] = [];
+}
+
+/* v1.21.0 存储引擎引导：文件侧 config 的 storage_engine 是唯一决策键（
+   引擎键不入库，杜绝「库说该用库 / 文件说该用文件」的引导自锁）。
+   数据库连接失败时自动回退文件模式（读文件快照），并置全局醒目警告。 */
+if ((string)cfg('storage_engine', 'file') === 'db') {
+    if (Store::useDb((array)cfg())) {
+        $dbCfg = DbStore::read('config.php', null);
+        if (is_array($dbCfg) && $dbCfg) {
+            $dbCfg['storage_engine'] = 'db';
+            $GLOBALS['CFG'] = $dbCfg;
+        }
+    } else {
+        $GLOBALS['ENV_WARN'] = '数据库连接失败，已自动回退到文件存储模式（读写暂走 data/ 文件快照）。'
+            . '原因：' . DbStore::lastConnError() . '。'
+            . '请到后台「存储」检查连接设置；恢复后如文件快照期间有新发帖，请重新执行一次「文件 → 数据库」迁移以对齐两侧数据。';
+        error_log('[Storage] DB 引擎连接失败，回退文件模式：' . DbStore::lastConnError());
+    }
+}
+
+/* 绑定域名守卫：后台配置了授权域名时，其他域名（恶意解析 / 镜像站 / IP 直连）一律 301 跳转到授权域名 */
+bind_domain_guard();
+
+/* 防火墙入口：安全响应头 → 白名单 → 封禁名单 → 危险 IP 库 → 限流 → 自动策略（详见 src/firewall.php） */
+fw_guard();
+
+/* 环境自检：数据目录不可写时置全局警告（页面顶部对管理员可见，写入类操作会给出明确错误） */
+if (!Store::writable()) {
+    $GLOBALS['ENV_WARN'] = 'data/ 目录不可写：发帖、注册、设置保存等写入类功能将无法使用。'
+        . '请到后台「监控 → 环境自检」点「一键修复目录权限」尝试自动修复；若无效，请通过 FTP 将 data/ 目录（含子目录）权限设为 755 或 775（Windows 主机请给 IIS 用户授权）。';
+}
+
+/* v1.21.0 多语言：解析当前语言（用户选择 > 资料偏好 > IP 自动判断 > 后台默认），
+   必须在会话启动与全部类库就绪后执行；t() 全程可用 */
+i18n_init();
+
+/* v1.22.0 拓展：加载全部启用插件（失败自动跳过；钩子从这里开始可订阅） */
+plugins_load();
+
+/** 当前请求是否为 HTTPS（含反代透传场景；auth.php 会话续期也用它保持 Secure 一致性） */
+function app_is_https(): bool
+{
+    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (string)($_SERVER['SERVER_PORT'] ?? '') === '443'
+        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+}
+
+/**
+ * 功能总开关（v1.14.0）：后台「功能」页可勾选启停
+ * 默认全开 —— 旧站升级零迁移、新装零配置；关闭的开关前后台双端拦截
+ */
+function feat_on(string $k, bool $def = true): bool
+{
+    return (int)cfg('feat_' . $k, $def ? 1 : 0) === 1;
+}
+
+/** 读取配置：cfg('site_name', 默认) 或 cfg() 取全部 */
+function cfg(string $k = '', $def = null)
+{
+    $c = $GLOBALS['CFG'] ?? [];
+    if ($k === '') {
+        return $c;
+    }
+    return $c[$k] ?? $def;
+}
+
+/** 更新配置（加锁 + 原子写） */
+function cfg_update(array $kv): void
+{
+    $lk = Store::lock('config');
+    $c = Store::read('config.php', []);
+    if (!is_array($c)) {
+        $c = [];
+    }
+    foreach ($kv as $k => $v) {
+        $c[$k] = $v;
+    }
+    Store::write('config.php', $c);
+    $GLOBALS['CFG'] = $c;
+    Store::unlock($lk);
+}
+
+/**
+ * 绑定域名（授权域名）守卫
+ * - 后台「基本设置 → 绑定域名」留空时不做任何限制（默认，兼容一切环境）
+ * - 配置后：仅允许列表内域名访问；其他域名（他人恶意解析、镜像站、IP 直连）一律 301 永久
+ *   跳转到第一个授权域名，原路径原样保留（搜索引擎权重自动归拢到授权域名）
+ * - 命令行（php -l、计划任务脚本）与无 HTTP_HOST 的环境自动跳过
+ * - 自救：万一把域名写错导致访问异常，通过 FTP 打开 data/config.php 删掉
+ *   "bind_domains" 一行（或清空其值）即可恢复
+ */
+function bind_domain_guard(): void
+{
+    $raw = trim((string)cfg('bind_domains', ''));
+    if ($raw === '' || PHP_SAPI === 'cli' || empty($_SERVER['HTTP_HOST'])) {
+        return;
+    }
+    $allow = bind_domain_list($raw);
+    if (!$allow) {
+        return;
+    }
+    $cur = strtolower((string)parse_url('http://' . (string)$_SERVER['HTTP_HOST'], PHP_URL_HOST));
+    $cur = rtrim($cur, '.'); // 兼容 FQDN 尾点写法（FORUM.COM. 与 forum.com 视为同一域名）
+    if ($cur === '' || in_array($cur, $allow, true)) {
+        return;
+    }
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (string)($_SERVER['SERVER_PORT'] ?? '') === '443'
+        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+    $uri = (string)($_SERVER['REQUEST_URI'] ?? '/');
+    if ($uri === '' || $uri[0] !== '/') {
+        $uri = '/'; // 防御性：Location 值必须是本站路径
+    }
+    header('Location: ' . ($https ? 'https' : 'http') . '://' . $allow[0] . $uri, true, 301);
+    exit;
+}
+
+/** 解析授权域名配置：支持逗号 / 中文逗号 / 分号 / 空白分隔，逐个去协议头、去端口与路径、转小写、去重（旧版接口，供外部调用） */
+function bind_domain_list(string $raw): array
+{
+    $out = [];
+    $parts = preg_split('/[\s,，;；]+/u', trim($raw)) ?: [];
+    foreach ($parts as $d) {
+        $d = strtolower(trim((string)$d));
+        if ($d === '') {
+            continue;
+        }
+        $d = preg_replace('#^https?://#i', '', $d) ?? $d; // 容错：去掉误填的协议头
+        $d = trim($d, '/');                               // 容错：去掉误填的尾斜杠
+        $d = (string)preg_replace('/[\/?#:].*$/', '', $d); // 容错：去掉误填的端口与路径
+        $d = rtrim($d, '.');                              // 容错：去掉 FQDN 尾点（FORUM.COM. 与 forum.com 统一）
+        if ($d !== '' && preg_match('/^[a-z0-9.\-]+$/', $d)) {
+            $out[] = $d;
+        }
+    }
+    return array_values(array_unique($out));
+}
