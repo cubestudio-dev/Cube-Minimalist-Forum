@@ -59,6 +59,7 @@ const LOG_ACTIONS = [
     'admin_ann_save'       => '后台·公告保存',
     'admin_ann_del'        => '后台·公告删除',
     'admin_save_theme'     => '后台·主题设置',
+    'admin_save_nav'       => '后台·导航布局',
     'admin_save_monitor'   => '后台·监控设置',
     'admin_test_monitor'   => '后台·测试告警',
     'admin_repair_dirs'    => '后台·修复目录权限',

@@ -340,6 +340,21 @@ textarea.input { resize: vertical; min-height: 80px; }
   .admin-nav .nav-group { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
   .admin-nav .nav-group-t { width: 100%; padding: 0; }
 }
+/* v1.29.0 后台导航布局可设（「主题」页）：
+   nav-flat = 平铺标签——分组横排铺在内容上方（同 v1.26 之前的平铺形态，保留分组标题）；
+   nav-cols-2/3 = 侧边导航多列——五个分组摊进 N 列，导航总高更短。
+   两者都把 max-height 放开为 none，app.js 的自适应高度逻辑检测到 none 自动退出。 */
+.admin-shell.nav-flat { flex-direction: column; }
+.admin-shell.nav-flat .admin-nav {
+  position: static; width: 100%; flex-direction: column; gap: 8px;
+  max-height: none; overflow: visible; padding: 0; margin: 0;
+}
+.admin-shell.nav-flat .admin-nav .nav-group { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.admin-shell.nav-flat .admin-nav .nav-group-t { width: auto; padding: 0 10px 0 2px; }
+@media (min-width: 881px) {
+  .admin-shell.nav-cols-2 .admin-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 342px; gap: 14px 18px; align-items: start; }
+  .admin-shell.nav-cols-3 .admin-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 518px; gap: 14px 18px; align-items: start; }
+}
 .admin-row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 0; border-bottom: 1px dashed var(--border); flex-wrap: wrap;

@@ -652,6 +652,36 @@
     try { sessionStorage.removeItem(KEY); } catch (e) {}
   })();
 
+  /* ---------- v1.29.0：后台侧边导航高度实时贴合视口 ----------
+     修复 v1.28.0 的残留问题：导航 max-height 按"吸附后"的位置（视口顶部 76px）计算，
+     但页面还没滚下去、sticky 尚未吸附时，导航底部会伸出视口——内部滚动条明明滑到了
+     最底下，最后一组标签却还在屏幕外；若当前标签页内容较短、整页不出滚动条，导航
+     永远不会吸附，底部标签就永远看不到。现在按导航当前在视口中的实际位置动态收放
+     max-height：未吸附时自动变矮、吸附后自动长高，任何位置"导航滚到底 = 视口里也到底"。
+     平铺布局 / 窄屏横排（CSS max-height:none）自动跳过，无 JS 时回退 CSS 固定计算。 */
+  (function () {
+    var nav = document.querySelector('.admin-nav');
+    if (!nav) return;
+    function fit() {
+      nav.style.maxHeight = ''; /* 先清内联值，让 CSS（布局设置 / 窄屏媒体查询）先说话 */
+      if (getComputedStyle(nav).maxHeight === 'none') return;
+      var h = Math.round(window.innerHeight - nav.getBoundingClientRect().top - 16);
+      if (h < 120) h = 120; /* 视口极矮时保底，导航自身仍可内部滚动 */
+      if (h > window.innerHeight - 16) h = window.innerHeight - 16; /* 惯性回弹等瞬态下不超出视口 */
+      nav.style.maxHeight = h + 'px';
+    }
+    var ticking = false;
+    function queue() {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; fit(); });
+    }
+    window.addEventListener('scroll', queue, { passive: true });
+    window.addEventListener('resize', queue);
+    window.addEventListener('load', fit); /* 字体 / 图标加载后页头高度可能微调 */
+    fit();
+  })();
+
   /* ---------- v1.17.0：注销账号 10 秒冷静期倒计时 ---------- */
   (function () {
     var btn = $('#del-go');

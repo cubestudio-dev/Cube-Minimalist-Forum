@@ -33,8 +33,21 @@ function page_admin(): void
         echo '<div class="admin-search-pop" id="adminSearchPop" hidden></div>';
         echo '</div>';
     }
-    /* v1.27.0 分组侧边导航：21 个标签页按职责归为 5 组，替代原平铺标签条 */
-    echo '<div class="admin-shell">';
+    /* v1.27.0 分组导航：21 个标签页按职责归为 5 组，替代原平铺标签条
+       v1.29.0 布局可设（后台「主题」页）：nav-flat = 平铺标签（分组横排铺在内容上方）；
+       侧边模式可选 2 / 3 列（nav-cols-N，把五个分组摊进多列、降低导航总高） */
+    $navLayout = (string)cfg('admin_nav_layout', 'side') === 'flat' ? 'flat' : 'side';
+    $navCols = (int)cfg('admin_nav_cols', 1);
+    if ($navCols < 1 || $navCols > 3) {
+        $navCols = 1;
+    }
+    $shellCls = 'admin-shell';
+    if ($navLayout === 'flat') {
+        $shellCls .= ' nav-flat';
+    } elseif ($navCols > 1) {
+        $shellCls .= ' nav-cols-' . $navCols;
+    }
+    echo '<div class="' . $shellCls . '">';
     echo '<nav class="admin-nav" aria-label="' . e(t('后台导航')) . '">';
     foreach (admin_tab_groups() as $gk => $gkTabs) {
         $links = '';
@@ -920,6 +933,32 @@ function admin_tab_theme(): void
         '<label class="field"><span class="field-l">' . t('自定义样式（CSS）') . '</span><textarea class="input" name="custom_css" rows="6" placeholder="/* 追加到页面尾部的自定义 CSS */">' . e((string)cfg('custom_css')) . '</textarea></label>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存主题设置') . '</button></div></form>' .
         admin_restore_btn('theme_color,dark_default,custom_css,footer_text,footer_note') . '</div>';
+    echo admin_card_nav();
+}
+
+/* ---------------- v1.29.0 后台导航布局卡片（侧边 / 平铺 + 侧边列数） ---------------- */
+function admin_card_nav(): string
+{
+    $layout = (string)cfg('admin_nav_layout', 'side') === 'flat' ? 'flat' : 'side';
+    $cols = (int)cfg('admin_nav_cols', 1);
+    if ($cols < 1 || $cols > 3) {
+        $cols = 1;
+    }
+    return '<div class="card form-card"><h2 class="card-title">' . t('后台导航布局') . '</h2>' .
+        '<form method="post" action="' . e(u('a=admin_save_nav')) . '">' . csrf_field() .
+        '<div class="grid2">' .
+        '<label class="field"><span class="field-l">' . t('布局方式') . '</span><select class="input" name="admin_nav_layout">' .
+        '<option value="side"' . ($layout === 'side' ? ' selected' : '') . '>' . t('侧边导航（分组竖排在左侧，跟随滚动）') . '</option>' .
+        '<option value="flat"' . ($layout === 'flat' ? ' selected' : '') . '>' . t('平铺标签（分组横排铺在内容上方，同 v1.26 之前）') . '</option>' .
+        '</select><span class="hint">' . t('保存后立即生效；窄屏（≤880px）两种布局都自动转为分组横排') . '</span></label>' .
+        '<label class="field"><span class="field-l">' . t('侧边导航列数') . '</span><select class="input" name="admin_nav_cols">' .
+        '<option value="1"' . ($cols === 1 ? ' selected' : '') . '>' . t('单列（默认）') . '</option>' .
+        '<option value="2"' . ($cols === 2 ? ' selected' : '') . '>' . t('两列') . '</option>' .
+        '<option value="3"' . ($cols === 3 ? ' selected' : '') . '>' . t('三列') . '</option>' .
+        '</select><span class="hint">' . t('仅「侧边导航」布局生效：把五个分组摊进多列，导航总高更短，多数屏幕不用滚动即可看全 21 个标签页') . '</span></label>' .
+        '</div>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存导航布局') . '</button></div></form>' .
+        admin_restore_btn('admin_nav_layout,admin_nav_cols') . '</div>';
 }
 
 /* ---------------- 监控 ---------------- */
@@ -1904,6 +1943,8 @@ function admin_cfg_defaults(): array
         /* 主题 */
         'theme_color' => ['#0f766e', '主题色'], 'dark_default' => ['system', '深色模式默认值'],
         'custom_css' => ['', '自定义样式 CSS'], 'footer_text' => ['', '页脚文字'], 'footer_note' => ['', '页脚备注'],
+        /* 后台导航布局（v1.29.0） */
+        'admin_nav_layout' => ['side', '后台导航布局'], 'admin_nav_cols' => [1, '后台导航列数'],
         /* 日志 */
         'log_views' => [0, '记录页面访问'], 'log_days' => [90, '日志保留天数'],
         /* 安全防护 */
@@ -2039,6 +2080,8 @@ function admin_search_index(): array
         ['theme', '颜色与页脚', '深色模式默认值', 'dark mode 深色'],
         ['theme', '颜色与页脚', '自定义样式（CSS）', 'custom css 样式'],
         ['theme', '颜色与页脚', '页脚文字 / 页脚备注', 'footer 文案'],
+        ['theme', '后台导航布局', '布局方式', 'nav layout 侧边 平铺 sidebar flat 导航'],
+        ['theme', '后台导航布局', '侧边导航列数', 'columns 多列 列数 两列 三列'],
         ['theme', '网站图标（favicon）', '上传新图标', 'favicon icon 图标'],
         /* 拓展 */
         ['ext', '拓展（插件）', '启用 / 停用 / 删除 / 安装插件', 'plugin 插件 拓展 扩展 enable disable install'],

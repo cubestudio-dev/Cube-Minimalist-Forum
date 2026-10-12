@@ -129,6 +129,7 @@ function route_action(string $a): void
         case 'admin_ann_save':  admin_tab_guard(); act_admin_ann_save(); return;
         case 'admin_ann_del':   admin_tab_guard(); act_admin_ann_del(); return;
         case 'admin_save_theme': admin_tab_guard(); act_admin_save_theme(); return;
+        case 'admin_save_nav':   admin_tab_guard(); act_admin_save_nav(); return;
         case 'admin_save_monitor': admin_tab_guard(); act_admin_save_monitor(); return;
         case 'admin_test_monitor': admin_tab_guard(); act_admin_test_monitor(); return;
         case 'admin_repair_dirs': admin_tab_guard(); act_admin_repair_dirs(); return;
@@ -2102,6 +2103,19 @@ function act_admin_save_theme(): void
     ]);
     log_action('admin_save_theme', '主题色 ' . $color . '，深色默认 ' . $dark . '，页脚' . (post_str('footer_text', 120) !== '' ? '已自定义' : '默认'));
     act_ok('主题设置已保存', u('p=admin&tab=theme'));
+}
+
+/** 后台导航布局（v1.29.0）：平铺 / 侧边 + 侧边列数 1~3；结构性变更走整页回跳，保存即生效 */
+function act_admin_save_nav(): void
+{
+    $layout = (string)($_POST['admin_nav_layout'] ?? 'side') === 'flat' ? 'flat' : 'side';
+    $cols = (int)($_POST['admin_nav_cols'] ?? 1);
+    if ($cols < 1 || $cols > 3) {
+        $cols = 1;
+    }
+    cfg_update(['admin_nav_layout' => $layout, 'admin_nav_cols' => $cols]);
+    log_action('admin_save_nav', '后台导航布局：' . ($layout === 'flat' ? '平铺标签' : '侧边导航（' . $cols . ' 列）'));
+    act_ok('导航布局已保存，立即生效', u('p=admin&tab=theme'));
 }
 
 function act_admin_backup(): void
