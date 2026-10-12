@@ -925,6 +925,31 @@ a .mention, .mention a { text-decoration: none; }
 .admin-search-pop .asr span { display: block; font-size: 12.5px; color: var(--muted, #888); margin-top: 1px; }
 .admin-search-pop .asr:hover, .admin-search-pop .asr.on { background: color-mix(in srgb, var(--accent, #0f766e) 8%, transparent); }
 .admin-search-pop .asr-empty { padding: 14px; font-size: 13px; color: var(--muted, #888); text-align: center; }
+/* v1.30.0 后台导航·布局快捷设置（菜单栏顶部，超管可见；平铺/侧边 + 列数一键切换） */
+.nav-quick { margin: 0 0 10px; padding: 9px 12px 10px; background: var(--hover); border: 1px solid var(--border); border-radius: var(--radius); }
+.nav-flat .nav-quick { margin: 0; flex: 0 0 auto; align-self: flex-start; }
+.nq-t { font-size: 11px; letter-spacing: .12em; color: var(--muted); margin-bottom: 7px; }
+.nq-row { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 6px; }
+.nq-row:last-child { margin-bottom: 0; }
+.nq-f { display: inline-flex; margin: 0; }
+.nq-b { font: inherit; font-size: 12px; line-height: 1; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: inherit; cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.nq-b:hover { border-color: var(--accent); color: var(--accent); }
+.nq-b.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.nq-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 多列网格下快捷区跨全列；≤880px 横排时占整行，避免与分组挤作一团 */
+.admin-shell.nav-cols-2 .admin-nav .nav-quick,
+.admin-shell.nav-cols-3 .admin-nav .nav-quick { grid-column: 1 / -1; }
+@media (max-width: 880px) { .admin-nav .nav-quick { width: 100%; } }
+/* v1.30.0 前台搜索预览（侧栏搜索框输入联想，点击直达帖子） */
+.side-search { position: relative; }
+.srs-pop { position: absolute; top: calc(100% + 6px); left: 0; width: min(360px, 92vw); z-index: 85; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.16); max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+.srs-pop .srs { display: block; padding: 8px 12px; border-top: 1px solid var(--border); text-decoration: none; }
+.srs-pop .srs:first-child { border-top: 0; border-radius: 12px 12px 0 0; }
+.srs-pop .srs:last-child { border-radius: 0 0 12px 12px; }
+.srs-pop .srs b { display: block; font-size: 13.5px; font-weight: 600; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srs-pop .srs span { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.srs-pop .srs:hover, .srs-pop .srs.on { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+@media (max-width: 860px) { .srs-pop { width: 100%; } }
 .mf-flash { animation: mfFlash 1.6s ease-out 1; }
 @keyframes mfFlash { 0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #0f766e) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 .mf-flash-l { color: var(--accent, #0f766e); transition: color .2s; }

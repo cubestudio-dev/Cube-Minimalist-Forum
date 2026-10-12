@@ -658,6 +658,46 @@ function search_threads(string $q, int $scan = 500): array
     return $out;
 }
 
+/**
+ * v1.30.0 搜索预览（输入联想）：轻量版站内搜索。
+ * 标题命中零文件读优先返回；不足 $limit 条再补正文命中（只对未命中标题的帖子读正文）。
+ * @return array 线索行数组（最多 $limit 条，按发布时间倒序）
+ */
+function search_suggest_items(string $q, int $limit = 8): array
+{
+    $q = trim($q);
+    if ($q === '' || !feat_on('search') || !feat_on('search_suggest')) {
+        return [];
+    }
+    $all = threads_visible(thread_index());
+    usort($all, function ($a, $b) {
+        return (int)($b['created'] ?? 0) <=> (int)($a['created'] ?? 0);
+    });
+    $all = array_slice($all, 0, 300);
+    $out = [];
+    $pending = [];
+    foreach ($all as $t) {
+        if (txt_contains((string)($t['title'] ?? ''), $q)) {
+            $out[] = $t;
+            if (count($out) >= $limit) {
+                return $out;
+            }
+        } else {
+            $pending[] = $t;
+        }
+    }
+    foreach ($pending as $t) {
+        if (count($out) >= $limit) {
+            break;
+        }
+        $c = thread_get((int)($t['id'] ?? 0));
+        if ($c && txt_contains((string)($c['content'] ?? ''), $q)) {
+            $out[] = $t;
+        }
+    }
+    return $out;
+}
+
 /* ================= 举报 / 审核队列 ================= */
 function reports_all(): array
 {

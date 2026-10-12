@@ -190,8 +190,11 @@ function layout_header(string $title = '', int $boardId = 0): void
       <form method="get" action="index.php" role="search">
         <input type="hidden" name="p" value="search">
         <?php if (demo_port() !== ''): ?><input type="hidden" name="XTransformPort" value="<?= e(demo_port()) ?>"><?php endif; ?>
-        <input class="input input-sm" type="search" name="q" maxlength="50" placeholder="<?= e(t('搜索帖子…')) ?>" aria-label="<?= e(t('站内搜索')) ?>">
+        <input class="input input-sm" type="search" name="q" maxlength="50" placeholder="<?= e(t('搜索帖子…')) ?>" aria-label="<?= e(t('站内搜索')) ?>" <?= feat_on('search_suggest') ? 'autocomplete="off"' : '' ?>>
       </form>
+      <?php if (feat_on('search_suggest')): /* v1.30.0 搜索预览：输入时实时下拉显示匹配帖子，app.js 渲染 */ ?>
+      <div class="srs-pop" id="srsPop" hidden></div>
+      <?php endif; ?>
     </div>
     <?php endif; ?>
       <div class="side-block side-online"><?php if (feat_on('online')): ?><a class="online-link" href="<?= e(u('p=online')) ?>" title="<?= e(t('查看在线名单')) ?>"><span class="live-dot" aria-hidden="true"></span><b id="onlineNum"><?= (int)$online ?></b>&nbsp;<?= e(t('人在线')) ?><span class="online-more" aria-hidden="true">›</span></a><?php else: ?><span class="online-link"><span class="live-dot" aria-hidden="true"></span><b><?= (int)$online ?></b>&nbsp;<?= e(t('人在线')) ?></span><?php endif; ?></div>

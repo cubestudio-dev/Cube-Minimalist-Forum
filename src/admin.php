@@ -49,6 +49,10 @@ function page_admin(): void
     }
     echo '<div class="' . $shellCls . '">';
     echo '<nav class="admin-nav" aria-label="' . e(t('后台导航')) . '">';
+    /* v1.30.0 导航布局快捷设置：直接放在菜单栏顶部（仅超管可见），不用去「主题」页找 */
+    if (is_super()) {
+        echo admin_nav_quick($tab);
+    }
     foreach (admin_tab_groups() as $gk => $gkTabs) {
         $links = '';
         foreach ($gkTabs as $k) {
@@ -229,6 +233,7 @@ function admin_feat_cards(): array
             'report'  => ['举报', '隐藏前台举报入口；AI 审核队列与防火墙不受影响'],
             'mention' => ['@ 提及通知', '内容中 @用户名 时，系统自动给对方发送站内通知；被提及名字会高亮展示（v1.15.0）'],
             'search'  => ['站内搜索', ''],
+            'search_suggest' => ['搜索预览', '搜索框输入时实时下拉显示匹配的帖子（标题优先，近 300 帖内），点击直达帖子；关闭后搜索仍可用但不显示预览（v1.30.0）'],
             'emoji'   => ['表情选择器', '仅隐藏输入框上方的表情按钮，Markdown 表情短代码仍可正常渲染'],
             'online'  => ['在线名单', '关闭后侧栏在线人数不再可点击查看名单页'],
         ],
@@ -959,6 +964,42 @@ function admin_card_nav(): string
         '</div>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存导航布局') . '</button></div></form>' .
         admin_restore_btn('admin_nav_layout,admin_nav_cols') . '</div>';
+}
+
+/**
+ * v1.30.0 导航布局快捷设置：直接放在菜单栏（后台导航）顶部，超管随时一键切换，
+ * 不必进「主题」页找卡片。服务端渲染的迷你表单（无 JS 可用）；
+ * 保存动作复用 act_admin_save_nav（back 参数回当前标签页），改动写日志。
+ */
+function admin_nav_quick(string $tab): string
+{
+    $layout = (string)cfg('admin_nav_layout', 'side') === 'flat' ? 'flat' : 'side';
+    $cols = (int)cfg('admin_nav_cols', 1);
+    if ($cols < 1 || $cols > 3) {
+        $cols = 1;
+    }
+    $btn = function (string $label, string $title, array $fields, bool $on): string {
+        $h = '';
+        foreach ($fields as $k => $v) {
+            $h .= '<input type="hidden" name="' . e($k) . '" value="' . e((string)$v) . '">';
+        }
+        return '<form class="nq-f" method="post" action="' . e(u('a=admin_save_nav')) . '">' . csrf_field() . $h .
+            '<button class="nq-b' . ($on ? ' on' : '') . '" type="submit" title="' . e($title) . '" aria-pressed="' . ($on ? 'true' : 'false') . '">' . e(t($label)) . '</button></form>';
+    };
+    $back = ['back' => $tab];
+    $html = '<div class="nav-quick"><div class="nq-t">' . e(t('导航布局')) . '</div>';
+    $html .= '<div class="nq-row">' .
+        $btn('侧边', t('侧边导航（分组竖排在左侧，跟随滚动）'), ['admin_nav_layout' => 'side', 'admin_nav_cols' => $cols] + $back, $layout === 'side') .
+        $btn('平铺', t('平铺标签（分组横排铺在内容上方，同 v1.26 之前）'), ['admin_nav_layout' => 'flat', 'admin_nav_cols' => $cols] + $back, $layout === 'flat') .
+        '</div>';
+    if ($layout === 'side') {
+        $html .= '<div class="nq-row" title="' . e(t('侧边导航列数')) . '">';
+        foreach ([1, 2, 3] as $n) {
+            $html .= $btn((string)$n, t('侧边导航列数') . '：' . $n, ['admin_nav_layout' => 'side', 'admin_nav_cols' => $n] + $back, $cols === $n);
+        }
+        $html .= '</div>';
+    }
+    return $html . '</div>';
 }
 
 /* ---------------- 监控 ---------------- */
@@ -1926,7 +1967,7 @@ function admin_cfg_defaults(): array
         'feat_post' => [1, '发帖'], 'feat_reply' => [1, '回复'],
         'feat_edit' => [1, '内容编辑'], 'feat_del_own' => [1, '删除自己的内容'],
         'feat_like' => [1, '点赞'], 'feat_report' => [1, '举报'],
-        'feat_search' => [1, '搜索'], 'feat_emoji' => [1, '表情'],
+        'feat_search' => [1, '搜索'], 'feat_search_suggest' => [1, '搜索预览'], 'feat_emoji' => [1, '表情'],
         'feat_online' => [1, '在线名单'], 'feat_signature' => [1, '用户签名'],
         'feat_mention' => [1, '@ 提及通知'], 'feat_motion' => [1, '界面动效'],
         'feat_titles' => [1, '会员头衔'],
@@ -2028,6 +2069,7 @@ function admin_search_index(): array
         ['feat', '功能总开关', '发帖 / 回复开关', 'post reply 发帖 回复'],
         ['feat', '功能总开关', '内容编辑', 'edit 编辑'],
         ['feat', '功能总开关', '点赞 / 举报 / 搜索 / 表情', 'like report search emoji'],
+        ['feat', '功能总开关', '搜索预览', 'search suggest 预览 联想 下拉 搜索框'],
         ['feat', '功能总开关', '在线名单 / 用户签名 / @ 提及通知', 'online signature mention 提及'],
         ['feat', '功能总开关', '界面动效', 'motion 动画 过渡 进度条 预取 流畅'],
         ['feat', '功能总开关', 'AI 审查（发帖 / 编辑 / 用户名）', 'ai precheck 审核 预检 编辑审查 用户名审查'],

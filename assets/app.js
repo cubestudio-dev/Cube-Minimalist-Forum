@@ -17,6 +17,12 @@
     if (window.DEMO_PORT) url += '?XTransformPort=' + window.DEMO_PORT;
     return url;
   }
+  /* v1.30.0：HTML 转义（搜索预览等需要把用户内容嵌进 innerHTML 的地方统一走这里） */
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   function csrf() {
     var m = $('meta[name="csrf"]');
     return m ? m.getAttribute('content') : '';
@@ -840,13 +846,80 @@
   $$('.js-dev-toggle').forEach(function (cb) {
     cb.addEventListener('change', function () { if (cb.form) cb.form.submit(); });
   });
+  /* ---------- v1.30.0：前台搜索预览（输入联想，点击直达帖子；开关在后台「功能」页） ---------- */
+  var feSearch = $('.side-search input[name="q"]');
+  var fePop = document.getElementById('srsPop');
+  if (feSearch && fePop) {
+    var feTimer = 0, feItems = [], feActive = -1, feSeq = 0;
+    var fePaint = function () {
+      $$('.srs', fePop).forEach(function (r, n) { r.classList.toggle('on', n === feActive); });
+    };
+    var feRender = function (its) {
+      feItems = its; feActive = -1;
+      if (!its.length) { fePop.hidden = true; fePop.innerHTML = ''; return; }
+      fePop.innerHTML = its.map(function (it, n) {
+        return '<a class="srs" href="' + escHtml(apiUrl('p=thread&id=' + it.id)) + '" data-n="' + n + '">' +
+          '<b>' + escHtml(it.title) + '</b><span>' + escHtml(it.board) + '</span></a>';
+      }).join('');
+      fePop.hidden = false;
+      $$('.srs', fePop).forEach(function (a) {
+        a.addEventListener('mousedown', function (e) { // mousedown 先于 blur，避免弹层先收起
+          e.preventDefault();
+          window.location.href = a.getAttribute('href');
+        });
+      });
+    };
+    var feFetch = function (q) {
+      var seq = ++feSeq; // 只认最新一次请求，输入快时丢弃过期响应
+      fetch(apiUrl('a=search_suggest') + '&q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (seq !== feSeq) return;
+          feRender(j && j.ok ? (j.items || []) : []);
+        })
+        .catch(function () { if (seq === feSeq) feRender([]); });
+    };
+    feSearch.addEventListener('input', function () {
+      var q = feSearch.value.trim();
+      clearTimeout(feTimer);
+      if (q === '') { fePop.hidden = true; fePop.innerHTML = ''; return; }
+      feTimer = setTimeout(function () { feFetch(q); }, 220); // 去抖：避免每个按键都打接口
+    });
+    feSearch.addEventListener('keydown', function (e) {
+      var rows = $$('.srs', fePop);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!rows.length || fePop.hidden) return;
+        e.preventDefault();
+        feActive = e.key === 'ArrowDown' ? (feActive + 1) % rows.length : (feActive - 1 + rows.length) % rows.length;
+        fePaint();
+      } else if (e.key === 'Enter') {
+        if (feActive >= 0 && rows[feActive] && !fePop.hidden) {
+          e.preventDefault();
+          window.location.href = rows[feActive].getAttribute('href');
+        }
+        /* feActive<0 时不拦截：回车走原生表单提交 → 搜索结果页 */
+      } else if (e.key === 'Escape') {
+        fePop.hidden = true;
+      }
+    });
+    document.addEventListener('click', function (e) {
+      if (!feSearch.contains(e.target) && !fePop.contains(e.target)) fePop.hidden = true;
+    });
+  }
+
   /* ---------- v1.22.0：后台设置搜索（跨标签页索引 + 即时过滤 + 跳转高亮） ---------- */
   var adminSearch = document.getElementById('adminSearchInput');
   var adminPop = document.getElementById('adminSearchPop');
   if (adminSearch && adminPop) {
     var searchIdx = null;      // 延迟加载：首次聚焦拉取索引
     var searchIdxBusy = false;
+    var searchIdxErr = false;  /* v1.30.0：加载失败标记，下次聚焦/输入自动重试 */
     var activeItem = -1;       // 键盘导航
+
+    function popMsg(cls, text) {
+      adminPop.hidden = false;
+      adminPop.innerHTML = '<div class="' + cls + '">' + escHtml(text) + '</div>';
+    }
 
     function tabTitles() {
       var m = {};
@@ -858,8 +931,12 @@
     }
 
     function loadIdx(done) {
-      if (searchIdx || searchIdxBusy) { done(searchIdx); return; }
+      if (searchIdx) { done(searchIdx); return; }
+      /* v1.30.0：索引未就绪时弹层给加载中/失败提示，不再静默空白（慢网络下首次聚焦不再“预览显示不出来”） */
+      if (searchIdxBusy) { popMsg('asr-empty', '正在加载搜索索引…'); return; }
       searchIdxBusy = true;
+      searchIdxErr = false;
+      popMsg('asr-empty', '正在加载搜索索引…');
       fetch(apiUrl('a=admin_search'), { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
@@ -867,7 +944,11 @@
           searchIdxBusy = false;
           done(searchIdx);
         })
-        .catch(function () { searchIdxBusy = false; done([]); });
+        .catch(function () {
+          searchIdxBusy = false;
+          searchIdxErr = true;
+          done(null);
+        });
     }
 
     function highlightCard(cardPrefix, label) {
@@ -904,6 +985,15 @@
     }
 
     function renderPop(q) {
+      /* v1.30.0：索引未就绪 / 加载失败时给出可读状态，而不是空白或误报“没有匹配” */
+      if (!searchIdx) {
+        if (q.trim() !== '') {
+          popMsg('asr-empty', searchIdxErr ? '搜索索引加载失败，请刷新页面重试' : '正在加载搜索索引…');
+        } else {
+          adminPop.hidden = true;
+        }
+        return;
+      }
       var tabs = tabTitles();
       var items = searchIdx || [];
       var kw = q.trim().toLowerCase();
@@ -949,6 +1039,13 @@
         if (adminPop._hits && adminPop._hits.length) {
           e.preventDefault();
           gotoItem(adminPop._hits[activeItem >= 0 ? activeItem : 0]);
+        } else if (!searchIdx && adminSearch.value.trim() !== '') {
+          /* v1.30.0：索引还在路上时回车不再无响应——等索引就位后自动跳第一个命中 */
+          e.preventDefault();
+          loadIdx(function () {
+            renderPop(adminSearch.value);
+            if (adminPop._hits && adminPop._hits.length) gotoItem(adminPop._hits[0]);
+          });
         }
       } else if (e.key === 'Escape') {
         adminPop.hidden = true;
