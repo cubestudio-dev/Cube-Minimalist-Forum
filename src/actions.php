@@ -972,10 +972,13 @@ function act_thread_new(): void
         mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title);
     }
     mf_do_action('post_created', thread_get($tid) ?? ['id' => $tid, 'board' => $board, 'title' => $title, 'author' => (int)$u['id']]); /* v1.22.0 拓展钩子 */
-    /* 严全面·消息审核：v1.16.0 改为响应后异步预检（register_shutdown_function），
-       发帖立即返回不再被 AI 调用阻塞（此前同步调用会让整个服务等待数秒）；
-       判定违规后仍会自动隐藏 + 通知申诉，机制不变 */
-    register_shutdown_function('ai_precheck_after_post', 'thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
+    /* 严全面·消息审核：v1.16.0 改为响应后异步预检，不再阻塞响应；
+       v1.31.0：外呼前先终结 HTTP 响应（释放会话锁 + 冲刷输出 + FPM 立即收尾），
+       发帖后跳转与本人后续页面不再被 AI 调用拖慢（详见 mf_response_finalize 注释） */
+    register_shutdown_function(function () use ($tid, $u, $title, $content) {
+        mf_response_finalize();
+        ai_precheck_after_post('thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
+    });
     /* v1.28.0：提示与实际审查行为一致——未启用 AI / 无可用模型 / 职员免审时不再谎称「AI 正在审核」 */
     flash('ok', ai_precheck_applies((int)$u['id']) ? '发布成功，AI 正在后台审核内容' : '发布成功');
     redirect(u('p=thread&id=' . $tid));
@@ -1019,8 +1022,11 @@ function act_reply_new(): void
         mentions_notify($content, (int)$u['id'], $tid, (int)$rid);
     }
     mf_do_action('reply_created', $tid, (int)$rid, (int)$u['id']); /* v1.22.0 拓展钩子 */
-    /* 严全面·消息审核：v1.16.0 改为响应后异步预检，不再阻塞响应（同上） */
-    register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id']);
+    /* 严全面·消息审核：v1.16.0 改为响应后异步预检，不再阻塞响应（同上；v1.31.0 外呼前先终结响应） */
+    register_shutdown_function(function () use ($tid, $rid, $u, $content) {
+        mf_response_finalize();
+        ai_precheck_after_post('reply', $tid, $rid, $content, (int)$u['id']);
+    });
     /* v1.28.0：提示与实际审查行为一致（同发帖） */
     flash('ok', ai_precheck_applies((int)$u['id']) ? '回复成功，AI 正在后台审核内容' : '回复成功');
     redirect(u('p=thread&id=' . $tid) . '#r' . $rid);
@@ -1109,7 +1115,10 @@ function act_thread_edit(): void
     /* v1.24.0 编辑后 AI 审查：与发布预检同一套机制（违规自动隐藏可申诉）；
        管理员编辑他人内容不触发（管理员操作本身即人工审核，避免二次藏帖困扰） */
     if (!((!empty($u['admin'])) && (int)$t['author'] !== (int)$u['id'])) {
-        register_shutdown_function('ai_precheck_after_post', 'thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title, 'edit');
+        register_shutdown_function(function () use ($tid, $u, $title, $content) {
+            mf_response_finalize(); /* v1.31.0：外呼前先终结响应（同发帖） */
+            ai_precheck_after_post('thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title, 'edit');
+        });
     }
     /* v1.28.0：提示与实际审查行为一致（同发帖；职员免审时不再谎称「AI 将复查」） */
     act_ok('帖子已更新' . (ai_precheck_applies((int)$u['id']) ? '，AI 将在后台复查内容' : ''), u('p=thread&id=' . $tid));
@@ -1138,7 +1147,10 @@ function act_reply_edit(): void
     }
     /* v1.24.0 编辑后 AI 审查（同帖子编辑：管理员编辑他人回复不触发） */
     if (!((!empty($u['admin'])) && (int)$r['author'] !== (int)$u['id'])) {
-        register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id'], '', 'edit');
+        register_shutdown_function(function () use ($tid, $rid, $u, $content) {
+            mf_response_finalize(); /* v1.31.0：外呼前先终结响应（同发帖） */
+            ai_precheck_after_post('reply', $tid, $rid, $content, (int)$u['id'], '', 'edit');
+        });
     }
     /* v1.28.0：提示与实际审查行为一致（同发帖） */
     act_ok('回复已更新' . (ai_precheck_applies((int)$u['id']) ? '，AI 将在后台复查内容' : ''), u('p=thread&id=' . $tid) . '#r' . $rid);

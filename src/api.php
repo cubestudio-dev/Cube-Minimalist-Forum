@@ -753,7 +753,10 @@ function api_ep_threads_create(?array $u): void
     user_bump((int)$u['id'], 'threads', 1);
     log_action('thread_new', '通过开放 API 发布《' . cut_str($title, 40) . '》（板块：' . board_name($board) . '）');
     mentions_notify($title . "\n" . $content, (int)$u['id'], $tid, 0, $title);
-    register_shutdown_function('ai_precheck_after_post', 'thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
+    register_shutdown_function(function () use ($tid, $u, $title, $content) {
+        mf_response_finalize(); /* v1.31.0：外呼前先终结 HTTP 响应（同发帖预检） */
+        ai_precheck_after_post('thread', $tid, 0, $title . "\n" . $content, (int)$u['id'], $title);
+    });
     /* v1.28.0：moderation 字段与提示随实际审查行为变化（未启用 / 无模型 / 职员免审 → none） */
     $aiOn = ai_precheck_applies((int)$u['id']);
     api_out(['data' => [
@@ -797,7 +800,10 @@ function api_ep_replies_create(?array $u): void
     }
     log_action('reply_new', '通过开放 API 在《' . cut_str((string)($t['title'] ?? ''), 40) . '》中发表回复');
     mentions_notify($content, (int)$u['id'], $tid, (int)$rid);
-    register_shutdown_function('ai_precheck_after_post', 'reply', $tid, $rid, $content, (int)$u['id']);
+    register_shutdown_function(function () use ($tid, $rid, $u, $content) {
+        mf_response_finalize(); /* v1.31.0：外呼前先终结 HTTP 响应（同发帖预检） */
+        ai_precheck_after_post('reply', $tid, $rid, $content, (int)$u['id']);
+    });
     /* v1.28.0：moderation 字段与提示随实际审查行为变化（同发帖） */
     $aiOn = ai_precheck_applies((int)$u['id']);
     api_out(['data' => [

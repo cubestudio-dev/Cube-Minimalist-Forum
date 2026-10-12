@@ -108,9 +108,12 @@ if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '
   支持的浏览器（Chrome / Edge 126+）新旧页面交叉淡化由合成器接管，白屏被完全掩盖；
   不支持的浏览器自动走 app.js 的退场 / 进度条兼容方案
   v1.28.0：VT 期间暂停入场动画（.mf-vt-hold），过渡结束再完整播放——
-  此前新页快照定格在"动画已播完"状态，切页时逐项渐入被整体淡化吞掉 */ ?>
+  此前新页快照定格在"动画已播完"状态，切页时逐项渐入被整体淡化吞掉
+  v1.31.0：解除 hold 时强制入场动画从头重播（移除再放回 mf-motion）——
+  部分浏览器/时序下动画时钟在 hold 前已启动，仅解除暂停会"恢复"到接近播完的状态，
+  用户看到的就是"动画没了"；重播保证任何时序下交错渐入都完整可见 */ ?>
 <style>@view-transition{navigation:auto}</style>
-<script>(function(){try{window.addEventListener('pagereveal',function(e){if(!(e.viewTransition&&window.MF_MOTION))return;var r=document.documentElement;r.classList.add('mf-vt-hold');var done=function(){r.classList.remove('mf-vt-hold');};if(e.viewTransition.finished&&e.viewTransition.finished.then){e.viewTransition.finished.then(done,done);}else{done();}});}catch(e){}})();</script>
+<script>(function(){try{window.addEventListener('pagereveal',function(e){if(!(e.viewTransition&&window.MF_MOTION))return;var r=document.documentElement;r.classList.add('mf-vt-hold');var done=function(){r.classList.remove('mf-vt-hold');try{var b=document.body;if(b&&b.classList.contains('mf-motion')){b.classList.remove('mf-motion');void b.offsetWidth;b.classList.add('mf-motion');}}catch(err){}};if(e.viewTransition.finished&&e.viewTransition.finished.then){e.viewTransition.finished.then(done,done);}else{done();}});}catch(e){}})();</script>
 <?php endif; ?>
 <script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;window.MF_EMOJI=<?= feat_on('emoji') ? 'true' : 'false' ?>;window.MF_MOTION=<?= feat_on('motion') ? 'true' : 'false' ?>;</script>
 <script>(function(){try{var d=localStorage.getItem('mf-theme')||window.THEME_DEFAULT||'system';if(d==='system'){d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',d);}catch(e){}})();</script>

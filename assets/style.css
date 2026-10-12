@@ -992,6 +992,8 @@ a .mention, .mention a { text-decoration: none; }
 }
 .mf-nprog.done i { animation: mfNprogDone .32s ease forwards; }
 @keyframes mfNprogDone { from { opacity: 1; } to { width: 100%; opacity: 0; } }
+/* v1.31.0 取消兜底：导航被取消 / 下载链接时进度条原地淡出（去掉 6s 假完成后的收尾通道） */
+.mf-nprog.fade { opacity: 0; transition: opacity .4s ease; }
 
 /* ---- 退场（导航进行中）：主内容轻淡出下沉，顶栏 / 侧栏 / 页脚保持不动 ----
    浏览器在收到新文档首帧前持续渲染旧页——淡出而非清空，等待期不再是白屏 */

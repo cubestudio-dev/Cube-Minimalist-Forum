@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.30.0');
+    define('MF_VERSION', '1.31.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -153,6 +153,35 @@ function cfg(string $k = '', $def = null)
         return $c;
     }
     return $c[$k] ?? $def;
+}
+
+/**
+ * v1.31.0 终结 HTTP 响应（幂等）：关机阶段做耗时外呼（AI 预检 / AI 队列 / 自动巡逻）前必须先走。
+ * 此前的问题（用户实测「AI 审查时网站加载很慢」）：
+ *  - 输出缓冲未冲刷：响应尾部（重定向 / JSON）滞留在 gzip 缓冲里，要等 AI 调用结束才送达；
+ *  - 会话文件锁未释放：同一用户紧跟的下一个页面请求被会话锁阻塞到 AI 调用结束（表现为发帖
+ *    /编辑后跳转卡住数秒甚至更久）；
+ *  - FPM 下响应不结束：fastcgi 未收到"请求结束"，客户端连接与 worker 一直被占用。
+ * 统一修复：释放会话锁 → 冲刷全部输出缓冲 → FPM 立即终结响应（fastcgi_finish_request），
+ * 之后的 AI 外呼在"响应已完整送达"的空闲期进行，不再拖慢发帖人本人与站点其他访客。
+ */
+function mf_response_finalize(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        @session_write_close();
+    }
+    while (ob_get_level() > 0) {
+        @ob_end_flush();
+    }
+    @flush();
+    if (function_exists('fastcgi_finish_request')) {
+        @fastcgi_finish_request();
+    }
 }
 
 /** 更新配置（加锁 + 原子写） */

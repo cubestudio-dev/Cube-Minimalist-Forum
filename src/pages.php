@@ -937,8 +937,23 @@ function page_asset(): void
         exit;
     }
     header('Content-Type: ' . $mime);
-    header('Content-Length: ' . (string)filesize($p));
-    readfile($p);
+    /* v1.31.0 文本资产主动 gzip：此前显式 Content-Length 会让全局 gzip 缓冲对该响应直通，
+       app.js / style.css 每次冷访问都裸传（55KB / 72KB）；文本类主动压缩后约 -75%，
+       二进制（ico / png）与未声明 gzip 能力的客户端自动跳过，协商缓存逻辑不变。
+       （响应已自带 Content-Encoding 时，web 服务器层 deflate 不会再重复压缩） */
+    $body = (string)@file_get_contents($p);
+    if ($body !== ''
+        && (strpos($mime, 'text/') === 0 || $mime === 'image/svg+xml')
+        && stripos((string)($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''), 'gzip') !== false) {
+        $gz = @gzencode($body, 6);
+        if ($gz !== false && strlen($gz) < strlen($body)) {
+            $body = (string)$gz;
+            header('Content-Encoding: gzip');
+            header('Vary: Accept-Encoding');
+        }
+    }
+    header('Content-Length: ' . (string)strlen($body));
+    echo $body;
     exit;
 }
 

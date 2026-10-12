@@ -123,13 +123,11 @@ switch ($p === '' ? 'home' : $p) {
  * AI 自主管理（严全面）：常驻巡逻器不在线时，由访问惰性触发巡逻（有事件才调用 AI，零浪费）
  * v1.17.0：先冲刷输出 + 释放会话文件锁，再跑 AI ——
  * 此前 AI 审核在关机阶段执行时会一直持有当前用户的会话锁，同一用户接下来的
- * 页面请求会被会话锁阻塞到 AI 调用结束，表现为“部分页面打开很慢/卡”。 */
+ * 页面请求会被会话锁阻塞到 AI 调用结束，表现为“部分页面打开很慢/卡”。
+ * v1.31.0：统一改走 mf_response_finalize()（幂等）——在 v1.17.0 基础上增加
+ * FPM fastcgi_finish_request：响应立即真正终结，AI 外呼完全不在请求生命周期内。 */
 register_shutdown_function(function () {
-    @session_write_close();
-    while (ob_get_level() > 0) {
-        @ob_end_flush();
-    }
-    @flush();
+    mf_response_finalize();
     ai_process_queue(false);
     ai_autopilot_tick();
 });

@@ -1100,12 +1100,17 @@
 
     var prog = $('.mf-nprog');
     var guardTimer = null;
+    var fadeTimer = null;
+    var sweeping = false;
     var leaving = false;
 
     function start() {
+      try { sessionStorage.setItem('mfNavGo', '1'); } catch (err) { /* 无痕限制下忽略 */ }
       if (prog) {
+        if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
         prog.hidden = false;
         prog.classList.remove('done');
+        prog.classList.remove('fade');
         if (!prog.classList.contains('run')) {
           void prog.offsetWidth; /* 强制重排以重启动画 */
           prog.classList.add('run');
@@ -1115,20 +1120,52 @@
         leaving = true;
         document.documentElement.classList.add('mf-leaving');
       }
-      /* 安全阀：6s 内未见页面卸载（导航被取消 / 锚点跳转 / 下载链接）→ 优雅收尾复位 */
+      /* v1.31.0 安全阀改造：慢加载不再“假装完成”——此前 6s 未见卸载就把进度条收走，
+         慢网络下真实加载还在继续，用户看到的是“进度条没了却还在下载”；
+         现在进度条爬到高位后原地保持（仍在加载就该看得见在加载），
+         仅当 20s 仍无页面卸载（导航被取消 / 下载链接等）才原地淡出收尾；
+         真正的完成反馈由新页到达（pageshow → 完成扫条）触发 */
       clearTimeout(guardTimer);
-      guardTimer = setTimeout(done, 6000);
+      guardTimer = setTimeout(fade, 20000);
     }
 
-    function done() {
+    /* 取消兜底：进度条原地淡出（不伪装 100% 完成，不误导“已加载完”） */
+    function fade() {
+      guardTimer = null;
+      if (prog && !prog.hidden) {
+        prog.classList.add('fade');
+        fadeTimer = setTimeout(function () {
+          fadeTimer = null;
+          prog.hidden = true;
+          prog.classList.remove('run', 'fade');
+        }, 480);
+      }
+      if (leaving) {
+        document.documentElement.classList.remove('mf-leaving');
+        leaving = false;
+      }
+    }
+
+    function done(sweep) {
       clearTimeout(guardTimer);
       guardTimer = null;
+      if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
       if (prog) {
-        prog.classList.remove('run');
-        prog.classList.add('done');
-        setTimeout(function () {
-          if (!guardTimer) { prog.hidden = true; prog.classList.remove('done'); }
-        }, 340);
+        if (sweep) {
+          /* v1.31.0：到达后快速完成扫条——此前完成反馈实际不可见：新页进度条
+             服务端渲染为 hidden，旧页进度条随文档销毁，用户从来看不到“加载完成” */
+          sweeping = true;
+          prog.hidden = false;
+          prog.classList.remove('run');
+          prog.classList.add('done');
+          setTimeout(function () {
+            sweeping = false;
+            if (!guardTimer) { prog.hidden = true; prog.classList.remove('done'); }
+          }, 380);
+        } else if (!sweeping) {
+          prog.hidden = true;
+          prog.classList.remove('run', 'done');
+        }
       }
       if (leaving) {
         document.documentElement.classList.remove('mf-leaving');
@@ -1137,9 +1174,18 @@
     }
     window.MF_NAV_START = start;
 
-    /* 页面到达 / bfcache 恢复：全部复位 + 刷新实时数据 */
+    /* v1.31.0：到达即完成扫条（app.js 为 defer，执行时 HTML 已解析完，不等慢图片拖住 load）；
+       仅当上一页确实发起过导航（mfNavGo 标记）才扫，首开 / 直接输入网址不扫 */
+    try {
+      if (sessionStorage.getItem('mfNavGo') === '1') {
+        sessionStorage.removeItem('mfNavGo');
+        done(true);
+      }
+    } catch (err) { /* 忽略 */ }
+
+    /* 页面到达 / bfcache 恢复：静默复位（扫条进行中不打断）+ bfcache 时刷新实时数据 */
     window.addEventListener('pageshow', function (e) {
-      done();
+      done(false);
       $$('.is-loading').forEach(function (b) { b.classList.remove('is-loading'); });
       $$('form[data-busy]').forEach(function (f) { f.removeAttribute('data-busy'); });
       if (e.persisted && typeof liveTick === 'function') {
@@ -1171,7 +1217,11 @@
       if (a.hasAttribute('download')) return;
       if (a.origin && a.origin !== location.origin) return;
       prefetch(a.href);
-      start();
+      /* v1.31.0：延一拍再启动反馈——让后续 click 处理器有机会 preventDefault
+         （被 JS 接管的链接不会真实导航），避免进度条为“不会发生的导航”空转；
+         延迟为一个宏任务（≈0ms），反馈依然瞬时 */
+      var evt = e;
+      setTimeout(function () { if (!evt.defaultPrevented) start(); }, 0);
     }, true);
 
     /* 移动端：触摸即预取（比 click 早 200ms+，只预热不启动反馈防误触） */
