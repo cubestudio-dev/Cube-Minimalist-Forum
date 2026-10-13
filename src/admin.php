@@ -117,8 +117,33 @@ function admin_tab_basic(): void
         '<span class="hint">侧栏「Ping」每 N 秒测量一次浏览器到服务器的往返延迟（绿 &lt;100ms / 琥珀 &lt;300ms / 红 ≥300ms）；设为 0 关闭整个 Ping 显示。间隔越短数据越实时，但心跳请求也越频繁（5-300 秒）</span></label>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存基本设置') . '</button></div></form>' .
         admin_restore_btn('site_name,site_desc,site_url,bind_domains,per_page,post_interval,online_window,live_interval,ping_interval') . '</div>' .
+        admin_card_limits() .
         admin_card_seo() .
         admin_card_lang();
+}
+
+/* ---------------- v1.32.0 内容与限制卡片 ---------------- */
+function admin_card_limits(): string
+{
+    return '<div class="card form-card"><form method="post" action="' . e(u('a=admin_save_basic')) . '" data-ajax="1">' . csrf_field() .
+        '<h2 class="card-title">' . t('内容与限制') . '</h2>' .
+        '<p class="hint">帖子 / 回复 / 昵称 / 签名的字数上限与上传行为全部可自定义：前台表单与保存动作同步生效，超出上限时给出明确错误而不是静默截断</p>' .
+        '<div class="grid3">' .
+        '<label class="field"><span class="field-l">' . t('标题最大字数') . '</span><input class="input" name="thread_title_max" type="number" min="4" max="200" value="' . (int)cfg('thread_title_max', 30) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('正文最大字数') . '</span><input class="input" name="thread_len_max" type="number" min="100" max="200000" value="' . (int)cfg('thread_len_max', 1500) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('回复最大字数') . '</span><input class="input" name="reply_len_max" type="number" min="100" max="200000" value="' . (int)cfg('reply_len_max', 1000) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('昵称最大字数') . '</span><input class="input" name="name_max" type="number" min="2" max="30" value="' . (int)cfg('name_max', 20) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('签名最大字数') . '</span><input class="input" name="sign_len_max" type="number" min="0" max="500" value="' . (int)cfg('sign_len_max', 60) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('单帖上传文件数上限') . '</span><input class="input" name="upload_per_post" type="number" min="1" max="20" value="' . (int)cfg('upload_per_post', 4) . '"></label>' .
+        '</div>' .
+        '<div class="grid3">' .
+        '<label class="field"><span class="field-l">' . t('图片大小上限（MB）') . '</span><input class="input" name="upload_img_max_mb" type="number" min="1" max="50" value="' . (int)cfg('upload_img_max_mb', 5) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('附件大小上限（MB）') . '</span><input class="input" name="upload_file_max_mb" type="number" min="1" max="100" value="' . (int)cfg('upload_file_max_mb', 10) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('允许的附件扩展名') . '</span><input class="input" name="upload_allow_ext" value="' . e((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx')) . '">' .
+        '<span class="hint">空格分隔；图片（png / jpg / gif / webp）始终允许，svg / 可执行 / 脚本类永远拒绝；上传总开关在「功能」页「允许上传图片 / 附件」</span></label>' .
+        '</div>' .
+        '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存内容与限制') . '</button></div></form>' .
+        admin_restore_btn('thread_title_max,thread_len_max,reply_len_max,name_max,sign_len_max,upload_per_post,upload_img_max_mb,upload_file_max_mb,upload_allow_ext') . '</div>';
 }
 
 /* ---------------- v1.21.0 SEO（搜索引擎展示）卡片 ---------------- */
@@ -234,6 +259,7 @@ function admin_feat_cards(): array
             'mention' => ['@ 提及通知', '内容中 @用户名 时，系统自动给对方发送站内通知；被提及名字会高亮展示（v1.15.0）'],
             'search'  => ['站内搜索', ''],
             'search_suggest' => ['搜索预览', '搜索框输入时实时下拉显示匹配的帖子（标题优先，近 300 帖内），点击直达帖子；关闭后搜索仍可用但不显示预览（v1.30.0）'],
+            'upload'  => ['允许上传图片 / 附件', '发帖 / 回复 / 编辑表单出现上传按钮：图片与附件存于 data/uploads，大小、类型与单帖数量在「基本设置 · 内容与限制」中配置（v1.32.0）'],
             'emoji'   => ['表情选择器', '仅隐藏输入框上方的表情按钮，Markdown 表情短代码仍可正常渲染'],
             'online'  => ['在线名单', '关闭后侧栏在线人数不再可点击查看名单页'],
         ],
@@ -1021,6 +1047,45 @@ function res_ring(?float $pct, int $r = 44): string
         '</svg>';
 }
 
+/* ---------------- v1.32.0 流量与使用统计卡片 ---------------- */
+function admin_card_traffic(): string
+{
+    $s = stats_summary();
+    $days = stats_days(14);
+    $n = function (int $v): string {
+        return $v >= 1000000 ? round($v / 1000000, 1) . 'M' : ($v >= 10000 ? round($v / 1000, 1) . 'K' : (string)$v);
+    };
+    /* 指标行：今日 / 昨日 / 近 7 天 / 累计 */
+    $rows = [
+        ['页面浏览（PV）', fn ($a) => $n((int)$a['pv'])],
+        ['出站流量', fn ($a) => fmt_bytes((int)$a['bytes'])],
+        ['发帖 / 回复', fn ($a) => $n((int)$a['thread']) . ' / ' . $n((int)$a['reply'])],
+        ['内容编辑', fn ($a) => $n((int)$a['edit'])],
+        ['搜索次数', fn ($a) => $n((int)$a['search'])],
+        ['注册 / 登录', fn ($a) => $n((int)$a['reg']) . ' / ' . $n((int)$a['login'])],
+        ['AI 调用 / tokens', fn ($a) => $n((int)$a['ai_calls']) . ' / ' . $n((int)$a['ai_tok'])],
+    ];
+    $head = '<tr><th></th><th>今日</th><th>昨日</th><th>近 7 天</th><th>累计</th></tr>';
+    $body = '';
+    foreach ($rows as [$label, $fn]) {
+        $body .= '<tr><td>' . $label . '</td><td><b>' . $fn($s['today']) . '</b></td><td>' . $fn($s['yesterday']) . '</td><td>' . $fn($s['week']) . '</td><td>' . $fn($s['total']) . '</td></tr>';
+    }
+    $avgMs = (int)$s['today']['ai_calls'] > 0 ? (int)round(stats_days(1)[0]['ai_ms'] / max(1, (int)$s['today']['ai_calls'])) : 0;
+    $aiFoot = (int)$s['today']['ai_calls'] > 0 ? '今日平均单次耗时 ' . $avgMs . 'ms' : '';
+    /* 近 14 天 PV 柱状趋势 */
+    $pvParts = [];
+    foreach ($days as $r) {
+        $pvParts[substr($r['d'], 5)] = $r['pv'];
+    }
+    $pvChart = chart_bars_h($pvParts, ['label' => '近 14 天页面浏览（PV）', 'tip' => function ($l, $v) { return $l . '：PV ' . (int)$v; }]);
+    return '<div class="card form-card"><h2 class="card-title">' . t('流量与使用统计') . '</h2>' .
+        '<p class="hint">PV 与出站流量来自全站命中日志（每分钟自动聚合，含游客与 API 之外的页面浏览；出站流量为实际发送字节，含压缩收益）。防火墙限流拦截、AI 队列巡逻等高频内部请求不计入 PV</p>' .
+        '<table class="log-table stats-table"><thead>' . $head . '</thead><tbody>' . $body . '</tbody></table>' .
+        ($aiFoot !== '' ? '<p class="hint">' . $aiFoot . '</p>' : '') .
+        ($pvChart !== '' ? '<h3 class="chart-title" style="margin-top:16px">近 14 天页面浏览趋势</h3>' . $pvChart : '') .
+        '</div>';
+}
+
 function admin_tab_monitor(): void
 {
     [$app, $data] = sysmon_sizes();
@@ -1068,6 +1133,10 @@ function admin_tab_monitor(): void
     $monInt = $monInt === 1 ? 2 : max(0, min(300, $monInt));
     $monLbl = $monInt > 0 ? '每 ' . $monInt . ' 秒自动刷新' : '自动刷新已关闭';
     $loadStr = e($l1 . ' / ' . $l5 . ' / ' . $l15);
+
+    /* v1.32.0：打开监控页时确定性归并一次命中日志（统计与 IP 排行新鲜）；流量与使用统计卡置顶 */
+    fw_hits_merge();
+    echo admin_card_traffic();
 
     echo '<div class="card form-card"><h2 class="card-title">实时资源 <span class="live-tag" aria-hidden="true"></span><span class="muted res-sub">' . e($monLbl) . '</span></h2>' .
         '<div class="res-grid">';
@@ -1950,6 +2019,16 @@ function admin_cfg_defaults(): array
         'online_window'  => [300, '在线统计窗口（秒）'],
         'live_interval'  => [20, '实时刷新间隔（秒）'],
         'ping_interval'  => [15, 'Ping 测量间隔（秒）'],
+        /* 内容与限制（v1.32.0） */
+        'thread_title_max' => [30, '帖子标题最大字数'],
+        'thread_len_max'   => [1500, '帖子正文最大字数'],
+        'reply_len_max'    => [1000, '回复最大字数'],
+        'name_max'         => [20, '用户昵称最大字数'],
+        'sign_len_max'     => [60, '签名最大字数'],
+        'upload_img_max_mb'  => [5, '图片大小上限（MB）'],
+        'upload_file_max_mb' => [10, '附件大小上限（MB）'],
+        'upload_per_post'    => [4, '单帖上传文件数上限'],
+        'upload_allow_ext'   => ['zip pdf txt md csv doc docx xls xlsx ppt pptx', '允许的附件扩展名'],
         /* SEO */
         'seo_title_tpl'    => ['{page} · {site}', 'SEO 标题模板'],
         'seo_description'  => ['', 'SEO 站点描述'],
@@ -1968,6 +2047,7 @@ function admin_cfg_defaults(): array
         'feat_edit' => [1, '内容编辑'], 'feat_del_own' => [1, '删除自己的内容'],
         'feat_like' => [1, '点赞'], 'feat_report' => [1, '举报'],
         'feat_search' => [1, '搜索'], 'feat_search_suggest' => [1, '搜索预览'], 'feat_emoji' => [1, '表情'],
+        'feat_upload' => [1, '允许上传图片 / 附件'],
         'feat_online' => [1, '在线名单'], 'feat_signature' => [1, '用户签名'],
         'feat_mention' => [1, '@ 提及通知'], 'feat_motion' => [1, '界面动效'],
         'feat_titles' => [1, '会员头衔'],
@@ -2052,6 +2132,16 @@ function admin_search_index(): array
         ['basic', '基本设置', '在线统计窗口（秒）', 'online window 在线人数'],
         ['basic', '基本设置', '实时刷新间隔（秒）', 'live interval 自动刷新 轮询'],
         ['basic', '基本设置', 'Ping 测量间隔（秒）', 'ping 延迟 心跳'],
+        ['basic', '内容与限制', '标题最大字数', '标题长度 字数限制 title max'],
+        ['basic', '内容与限制', '正文最大字数', '正文长度 内容限制 字数 content'],
+        ['basic', '内容与限制', '回复最大字数', '回复长度 字数 reply'],
+        ['basic', '内容与限制', '昵称最大字数', '用户名长度 昵称 name'],
+        ['basic', '内容与限制', '签名最大字数', '签名长度 signature'],
+        ['basic', '内容与限制', '允许上传图片 / 附件（总开关在功能页）', 'upload 上传 图片 附件 传文件'],
+        ['basic', '内容与限制', '图片大小上限（MB）', '图片大小 上传限制 image size'],
+        ['basic', '内容与限制', '附件大小上限（MB）', '附件大小 上传限制 file size'],
+        ['basic', '内容与限制', '允许的附件扩展名', '附件类型 扩展名 白名单 ext'],
+        ['basic', '内容与限制', '单帖上传文件数上限', '附件数量 单帖上限'],
         ['basic', '还原默认', '各设置卡片下方的「↺ 还原默认」按钮，把该组设置恢复为程序默认值', 'restore default 还原默认 恢复默认 复位 还原此组默认'],
         ['basic', 'SEO · 搜索引擎展示', '标题模板', 'seo title {page} {site}'],
         ['basic', 'SEO · 搜索引擎展示', '站点描述（搜索结果摘要）', 'seo description 摘要 meta'],

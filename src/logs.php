@@ -23,6 +23,7 @@ const LOG_ACTIONS = [
     'dev_verify_skip'      => '二次验证降级',
     'dev_verify_toggle'    => '二次验证开关',
     'register'             => '注册账号',
+    'account_delete'       => '注销账号',
     'code_send'            => '发送验证码',
     'pass_reset'           => '重置密码',
     'pass_change'          => '修改密码',
@@ -31,12 +32,37 @@ const LOG_ACTIONS = [
     'thread_new'           => '发布帖子',
     'reply_new'            => '发表回复',
     'thread_delete'        => '删除帖子',
+    'thread_edit'          => '编辑帖子',
+    'reply_edit'           => '编辑回复',
     'reply_delete'         => '删除回复',
     'like'                 => '点赞',
     'unlike'               => '取消点赞',
     'report'               => '举报内容',
     'appeal'               => '提交申诉',
+    'doc_agree'            => '同意协议',
+    'lang_save'            => '切换语言',
     'admin_save_basic'     => '后台·基本设置',
+    'admin_save_seo'       => '后台·SEO 设置',
+    'admin_save_docs'      => '后台·协议文档保存',
+    'admin_save_feat'      => '后台·功能开关',
+    'admin_save_lang'      => '后台·多语言设置',
+    'admin_save_security'  => '后台·安全防护设置',
+    'admin_save_storage'   => '后台·存储设置',
+    'admin_save_api'       => '后台·开放 API 设置',
+    'admin_restore_defaults' => '后台·还原默认设置',
+    'admin_icon'           => '后台·站点图标',
+    'admin_board_perm'     => '后台·板块权限',
+    'admin_daemon_start'   => '后台·守护进程启动',
+    'admin_daemon_stop'    => '后台·守护进程停止',
+    'admin_data_compress'  => '后台·数据压缩',
+    'admin_model_new'      => '后台·新增 AI 模型',
+    'admin_model_save'     => '后台·保存 AI 模型',
+    'admin_model_del'      => '后台·删除 AI 模型',
+    'admin_model_reset'    => '后台·重置 AI 模型',
+    'admin_api_revoke'     => '后台·吊销 API 令牌',
+    'admin_storage_backup'    => '后台·存储备份',
+    'admin_storage_migrate'   => '后台·存储迁移',
+    'admin_storage_optimize'  => '后台·存储优化',
     'admin_save_mail'      => '后台·邮件设置',
     'admin_test_mail'      => '后台·测试发信',
     'admin_save_ai'        => '后台·AI 设置',
@@ -91,10 +117,21 @@ const LOG_ACTIONS = [
     'ai_patrol_ban'        => 'AI·自主封禁',
     'ai_patrol_unban'      => 'AI·自主解封',
     'ai_patrol_alert'      => 'AI·邮件警报',
+    'ai_bad_name'          => 'AI·昵称违规',
+    'ai_model_switch'      => 'AI·模型自动切换',
+    'ai_model_recover'     => 'AI·模型自动恢复',
     'admin_patrol'         => 'AI·手动巡逻',
     'storage_alert'        => '系统·存储告警',
     'sys_gc'               => '系统·自动清理',
     'sys_error'            => '系统·操作异常',
+    'term_cmd'             => '后台·终端命令',
+    'term_reset'           => '后台·终端重置',
+    'api_call'             => '开放 API 调用',
+    'api_token_new'        => '签发 API 令牌',
+    'api_token_reset'      => '重置 API 令牌',
+    'api_token_revoke'     => '吊销 API 令牌',
+    'update_rollback'      => '回撤更新',
+    'media_upload'         => '上传图片/附件',
 ];
 
 function log_label(string $action): string
@@ -587,6 +624,13 @@ function view_page_name(array $vs): string
             return ''; // 图标 / 延迟探测 / 静态资源 / AJAX 端点，不记录
         case 'api_docs':
             return '开放 API · 开发者文档页';
+        case 'doc':
+            $dt = trim((string)($vs['t'] ?? ''));
+            return $dt !== '' ? '协议与文档 · ' . cut_str($dt, 24) : '协议与文档页';
+        case 'plugin':
+            return '插件拓展页';
+        case 'sitemap':
+            return ''; // SEO 站点地图：资源级端点，不记录
         case 'admin':
             $titles = function_exists('admin_tab_titles') ? admin_tab_titles() : [];
             $tn = $titles[$tab] ?? '';

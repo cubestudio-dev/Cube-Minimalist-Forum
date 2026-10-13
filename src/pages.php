@@ -246,7 +246,8 @@ function page_thread(): void
         echo '<form method="post" action="' . e(u('a=reply_new')) . '">' .
             '<input type="hidden" name="tid" value="' . $tid . '">' .
             csrf_field() . hidden_back() .
-            '<textarea class="input" name="content" rows="4" maxlength="1000" required placeholder="友善回复（支持 Markdown，最多 1000 字；可用 @用户名 提及他人，对方会收到通知）">' . e($rd) . '</textarea>' .
+            '<textarea class="input" name="content" id="reply-input" rows="4" maxlength="' . max(100, min(200000, (int)cfg('reply_len_max', 1000))) . '" required placeholder="友善回复（支持 Markdown，最多 ' . max(100, min(200000, (int)cfg('reply_len_max', 1000))) . ' 字；可用 @用户名 提及他人，对方会收到通知）">' . e($rd) . '</textarea>' .
+            upload_toolbar('#reply-input') .
             '<div class="form-foot"><span class="muted">支持 Markdown</span>' .
             '<button class="btn btn-primary" type="submit">回复</button></div></form>';
     }
@@ -255,9 +256,37 @@ function page_thread(): void
 }
 
 /* ---------------- 发帖页 ---------------- */
+
+/* v1.32.0 附件上传工具条（发帖 / 回复 / 编辑表单共用；「允许上传图片 / 附件」关闭时不渲染）
+   交互由 app.js 接管：选文件 → 逐个上传 → 在目标输入框光标处插入 Markdown */
+function upload_toolbar(string $targetSel): string
+{
+    if (!feat_on('upload')) {
+        return '';
+    }
+    $imgMb = max(1, (int)cfg('upload_img_max_mb', 5));
+    $fileMb = max(1, (int)cfg('upload_file_max_mb', 10));
+    $ext = trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'));
+    $accept = 'image/*';
+    foreach (preg_split('/[\s,，]+/u', $ext) ?: [] as $x) {
+        $x = strtolower(trim(ltrim((string)$x, '.')));
+        if ($x !== '' && preg_match('/^[a-z0-9]{1,8}$/', $x)) {
+            $accept .= ',.' . $x;
+        }
+    }
+    return '<div class="upload-bar">' .
+        '<button type="button" class="btn btn-ghost btn-sm" data-upload-btn>📎 ' . t('图片 / 附件') . '</button>' .
+        '<input type="file" multiple data-upload-input data-upload-target="' . e($targetSel) . '" accept="' . e($accept) . '" hidden>' .
+        '<span class="hint">' . t('图片') . ' ≤' . $imgMb . 'MB · ' . t('附件') . ' ≤' . $fileMb . 'MB' . ($ext !== '' ? '（' . e($ext) . '）' : '') . '</span>' .
+        '</div>';
+}
+
 function page_new(): void
 {
     $u = require_login('p=new');
+    /* v1.32.0 内容限制后台可自定义（上限即表单 maxlength，保存时服务端同样校验） */
+    $tmax = max(4, min(200, (int)cfg('thread_title_max', 30)));
+    $lmax = max(100, min(200000, (int)cfg('thread_len_max', 1500)));
     if (!feat_on('post')) {
         flash('err', '发帖功能已关闭');
         redirect(u('p=home'));
@@ -273,7 +302,7 @@ function page_new(): void
     $dc = (is_array($draft) && ($draft['key'] ?? '') === 'thread') ? (string)($draft['content'] ?? '') : '';
     unset($_SESSION['post_draft']);
     layout_header('发布帖子', 0);
-    echo page_head('发布帖子', '标题最多 30 字，正文最多 1500 字，支持 Markdown 与 @用户名 提及（图片可用 https 外链，无附件）');
+    echo page_head('发布帖子', '标题最多 ' . $tmax . ' 字，正文最多 ' . $lmax . ' 字，支持 Markdown 与 @用户名 提及' . (feat_on('upload') ? '，可上传图片与附件' : ''));
     echo '<div class="card form-card"><form method="post" action="' . e(u('a=thread_new')) . '">' .
         csrf_field() . hidden_back() .
         '<label class="field"><span class="field-l">板块</span><select name="board" class="input" required>';
@@ -299,10 +328,11 @@ function page_new(): void
     echo '</select>' .
         ($canAny ? '' : '<span class="hint" style="color:var(--danger)">当前没有任何允许你发帖的板块：可发板块由管理员通过「板块 → 发帖权限」控制</span>') .
         '</label>' .
-        '<label class="field"><span class="field-l">标题 <span class="cnt"><span id="t-count">0</span>/30</span></span>' .
-        '<input class="input" name="title" id="title-input" maxlength="30" required data-counter="#t-count" value="' . e($dt) . '" placeholder="一句话说清主题"></label>' .
-        '<label class="field"><span class="field-l">正文 <span class="cnt"><span id="c-count">0</span>/1500</span></span>' .
-        '<textarea class="input" name="content" id="content-input" rows="10" maxlength="1500" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮==；@用户名 会通知对方">' . e($dc) . '</textarea></label>' .
+        '<label class="field"><span class="field-l">标题 <span class="cnt"><span id="t-count">0</span>/' . $tmax . '</span></span>' .
+        '<input class="input" name="title" id="title-input" maxlength="' . $tmax . '" required data-counter="#t-count" value="' . e($dt) . '" placeholder="一句话说清主题"></label>' .
+        '<label class="field"><span class="field-l">正文 <span class="cnt"><span id="c-count">0</span>/' . $lmax . '</span></span>' .
+        '<textarea class="input" name="content" id="content-input" rows="10" maxlength="' . $lmax . '" required data-counter="#c-count" placeholder="支持 Markdown：# 标题、**加粗**、`代码`、- 列表、> 引用、| 表格 |、==高亮==；@用户名 会通知对方">' . e($dc) . '</textarea></label>' .
+        upload_toolbar('#content-input') .
         '<div class="form-foot"><span class="muted">两次发帖间隔不低于 ' . (int)cfg('post_interval', 30) . ' 秒</span>' .
         '<button class="btn btn-primary" type="submit">发布</button></div></form></div>';
     layout_footer();
@@ -781,8 +811,9 @@ function page_edit(): void
         echo '<div class="card form-card"><form method="post" action="' . e(u('a=thread_edit')) . '">' .
             csrf_field() .
             '<input type="hidden" name="tid" value="' . $tid . '">' .
-            '<label class="field"><span class="field-l">标题</span><input class="input" name="title" maxlength="30" required value="' . e((string)$t['title']) . '"></label>' .
-            '<label class="field"><span class="field-l">正文（最多 1500 字）</span><textarea class="input" name="content" rows="10" maxlength="1500" required>' . e((string)$t['content']) . '</textarea></label>' .
+            '<label class="field"><span class="field-l">标题</span><input class="input" name="title" id="edit-title-input" maxlength="' . max(4, min(200, (int)cfg('thread_title_max', 30))) . '" required value="' . e((string)$t['title']) . '"></label>' .
+            '<label class="field"><span class="field-l">正文（最多 ' . max(100, min(200000, (int)cfg('thread_len_max', 1500))) . ' 字）</span><textarea class="input" name="content" id="edit-content-input" rows="10" maxlength="' . max(100, min(200000, (int)cfg('thread_len_max', 1500))) . '" required>' . e((string)$t['content']) . '</textarea></label>' .
+            upload_toolbar('#edit-content-input') .
             '<div class="form-foot"><a class="btn btn-ghost" href="' . e(u('p=thread&id=' . $tid)) . '">取消</a>' .
             '<button class="btn btn-primary" type="submit">保存修改</button></div></form></div>';
     } else {
@@ -799,7 +830,8 @@ function page_edit(): void
             csrf_field() .
             '<input type="hidden" name="tid" value="' . $tid . '">' .
             '<input type="hidden" name="rid" value="' . $rid . '">' .
-            '<label class="field"><span class="field-l">回复内容</span><textarea class="input" name="content" rows="6" maxlength="1000" required>' . e((string)$r['content']) . '</textarea></label>' .
+            '<label class="field"><span class="field-l">回复内容</span><textarea class="input" name="content" id="edit-reply-input" rows="6" maxlength="' . max(100, min(200000, (int)cfg('reply_len_max', 1000))) . '" required>' . e((string)$r['content']) . '</textarea></label>' .
+            upload_toolbar('#edit-reply-input') .
             '<div class="form-foot"><a class="btn btn-ghost" href="' . e(u('p=thread&id=' . $tid)) . '#r' . $rid . '">取消</a>' .
             '<button class="btn btn-primary" type="submit">保存修改</button></div></form></div>';
     }
@@ -815,6 +847,9 @@ function page_search(): void
     }
     $q = trim((string)($_GET['q'] ?? ''));
     $q = cut_str((string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $q), 50);
+    if ($q !== '') {
+        stats_bump('search'); // v1.32.0 站点统计：站内搜索次数
+    }
     layout_header($q !== '' ? '搜索：' . $q : '站内搜索', 0);
     echo page_head('站内搜索', '搜索最近 500 帖的标题与正文');
     echo '<div class="card form-card"><form method="get" action="index.php">' .
@@ -954,6 +989,49 @@ function page_asset(): void
     }
     header('Content-Length: ' . (string)strlen($body));
     echo $body;
+    exit;
+}
+
+/* ---------------- v1.32.0 附件 / 图片出站 ---------------- */
+
+/** 上传文件出站：uploads/年月/16位随机hex.扩展名（文件名不可猜测）；
+ *  扩展名白名单 + MIME 映射 + 目录防逃逸；资源级端点先于私密模式与协议门禁出站
+ *  （帖子内嵌图片必须能加载；文件名随机不可枚举，公开可读不构成目录遍历风险） */
+function page_media(): void
+{
+    static $mimes = [
+        'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp',
+        'pdf' => 'application/pdf', 'txt' => 'text/plain; charset=UTF-8', 'md' => 'text/plain; charset=UTF-8',
+        'csv' => 'text/csv', 'zip' => 'application/zip', 'doc' => 'application/msword',
+        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls' => 'application/vnd.ms-excel',
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'ppt' => 'application/vnd.ms-powerpoint',
+        'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ];
+    $f = (string)($_GET['f'] ?? '');
+    $notFound = function (): void {
+        header('Content-Type: text/plain; charset=utf-8');
+        http_response_code(404);
+        echo 'media not found';
+        exit;
+    };
+    if (!preg_match('#^uploads/\d{6}/[0-9a-f]{16}\.([a-z0-9]{1,8})$#', $f, $m)) {
+        $notFound();
+    }
+    $ext = strtolower($m[1]);
+    if (!isset($mimes[$ext])) {
+        $notFound(); // 不在 MIME 映射内（含 svg / html 等可注入类型）一律不出站
+    }
+    $p = DATA_DIR . '/' . $f;
+    if (!is_file($p)) {
+        $notFound();
+    }
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: public, max-age=31536000, immutable');
+    header('Content-Type: ' . $mimes[$ext]);
+    header('Content-Length: ' . (string)(int)@filesize($p));
+    echo (string)@file_get_contents($p);
     exit;
 }
 

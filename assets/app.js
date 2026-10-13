@@ -1261,4 +1261,56 @@
 
     return { start: start, done: done, prefetch: prefetch };
   })();
+
+  /* ---------------- v1.32.0 图片 / 附件上传（发帖 / 回复 / 编辑表单的上传工具条） ---------------- */
+  (function () {
+    var bars = document.querySelectorAll('.upload-bar');
+    if (!bars.length) return;
+    function csrfOf(form) {
+      var i = form && form.querySelector('input[name=csrf]');
+      return i ? i.value : '';
+    }
+    function insertMd(ta, md) {
+      var s = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
+      var e2 = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : s;
+      var before = ta.value.slice(0, s), after = ta.value.slice(e2);
+      var sep = (before === '' || /\n$|\s$/.test(before)) ? '' : '\n';
+      ta.value = before + sep + md + '\n' + after;
+      var pos = (before + sep + md + '\n').length;
+      try { ta.setSelectionRange(pos, pos); } catch (ex) { /* 旧浏览器忽略 */ }
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.focus();
+    }
+    Array.prototype.forEach.call(bars, function (bar) {
+      var btn = bar.querySelector('[data-upload-btn]');
+      var input = bar.querySelector('[data-upload-input]');
+      if (!btn || !input) return;
+      var form = bar.closest('form');
+      btn.addEventListener('click', function () { input.click(); });
+      input.addEventListener('change', function () {
+        var files = Array.prototype.slice.call(input.files || []);
+        input.value = '';
+        var sel = input.getAttribute('data-upload-target');
+        var ta = (form && sel ? form.querySelector(sel) : null) || document.querySelector(sel);
+        if (!files.length || !ta) return;
+        files.forEach(function (file) {
+          var fd = new FormData();
+          fd.append('csrf', csrfOf(form));
+          fd.append('file', file);
+          var xhr = new XMLHttpRequest();
+          xhr.open('POST', apiUrl('a=upload'), true);
+          xhr.setRequestHeader('X-Requested-With', 'fetch');
+          xhr.onload = function () {
+            try {
+              var j = JSON.parse(xhr.responseText);
+              if (j && j.ok && j.md) { insertMd(ta, j.md); }
+              else { popMsg('asr-empty', (j && j.msg) || '上传失败'); }
+            } catch (e) { popMsg('asr-empty', '上传失败'); }
+          };
+          xhr.onerror = function () { popMsg('asr-empty', '上传失败（网络错误）'); };
+          xhr.send(fd);
+        });
+      });
+    });
+  })();
   })();

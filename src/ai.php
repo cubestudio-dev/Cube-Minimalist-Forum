@@ -175,6 +175,17 @@ function ai_endpoint(string $url): string
     return $u . '/v1/chat/completions';
 }
 
+/** v1.32.0：单次 AI HTTP 往返的统计落点（调用数 / token / 耗时，监控页「流量与使用统计」展示） */
+function ai_stats_http(int $ms, ?string $res): void
+{
+    stats_bump('ai_calls', 1);
+    stats_bump('ai_ms', max(0, $ms));
+    $j = $res !== null ? json_decode($res, true) : null;
+    if (is_array($j) && isset($j['usage']['total_tokens'])) {
+        stats_bump('ai_tok', (int)$j['usage']['total_tokens']);
+    }
+}
+
 function http_post_json(string $url, array $payload, array $headers, int $timeout, string &$err = ''): ?string
 {
     /* 协议白名单：仅允许 http(s)，杜绝 file:// 等协议被 curl 支持带来的意外读取（与防火墙 fw_http_* 同标准） */
@@ -257,7 +268,9 @@ function ai_call_model(array $m, string $content, string &$verdict, string &$not
     ];
     $err = '';
     for ($i = 1; $i <= $retries; $i++) {
+        $t0 = microtime(true);
         $res = http_post_json(ai_endpoint($m['url']), $payload, ['Authorization: Bearer ' . $m['key']], $timeout, $err);
+        ai_stats_http((int)round((microtime(true) - $t0) * 1000), $res);
         if ($res !== null) {
             $j = json_decode($res, true);
             $text = is_array($j) ? ($j['choices'][0]['message']['content'] ?? '') : '';
@@ -446,7 +459,9 @@ function ai_call_multi(array $jobs): array
             ],
         ];
         $err = '';
+        $t0 = microtime(true);
         $res = http_post_json(ai_endpoint($j['model']['url']), $payload, ['Authorization: Bearer ' . $j['model']['key']], $timeout, $err);
+        ai_stats_http((int)round((microtime(true) - $t0) * 1000), $res);
         if ($res === null) {
             $out[$i]['note'] = $err;
             continue;
@@ -878,7 +893,9 @@ function ai_patrol_call(array $mat, array &$report, string &$used): bool
         $label = ai_model_label($m);
         $payload['model'] = $m['model'];
         $err = '';
+        $t0 = microtime(true);
         $res = http_post_json(ai_endpoint($m['url']), $payload, ['Authorization: Bearer ' . $m['key']], max(5, min(120, (int)cfg('ai_timeout', 20))), $err);
+        ai_stats_http((int)round((microtime(true) - $t0) * 1000), $res);
         if ($res !== null) {
             $j = json_decode($res, true);
             $text = is_array($j) ? ($j['choices'][0]['message']['content'] ?? '') : '';

@@ -402,6 +402,175 @@ function fw_state_save(array $st, bool $locked = false): void
     $GLOBALS['FW_STATE_CACHE'] = $st;
 }
 
+/* ================= v1.32.0 分钟命中日志（读写放大根治） =================
+ * 此前每个请求都要对 fw_state.php 做 2 次全局锁内「读-改-写」（fw_bump('c') + 限流计数）——
+ * 全站所有访客在同一把锁上串行，慢磁盘 / 高并发下整站排队，表现为「加载异常缓慢甚至
+ * 根本加载不出来」。改为：
+ *  - 每请求仅在响应收尾向当分钟命中日志追加一行（O_APPEND 微秒级，无全局读改写）；
+ *  - 限流计数 = 只读扫描当分钟日志（无锁无写盘）；
+ *  - 每 1~2 分钟由低频合并任务把日志聚合同步进 fw_state（请求 / IP 排行 / UA）与站点统计
+ *    （PV / 出站流量），并删除已合并文件。
+ * 拦截 / 封禁等安全事件仍然即时写 fw_state（低频，不影响吞吐）。 */
+
+function fw_min_dir(): string
+{
+    return DATA_DIR . '/fwmin';
+}
+
+/** 响应收尾追加一条命中记录（register_shutdown_function 注册；失败静默）
+ *  行格式：ip \t uid \t p \t pf \t bytes \t ua */
+function fw_hit_append(): void
+{
+    try {
+        if (PHP_SAPI === 'cli') {
+            return;
+        }
+        $ip = fw_ip();
+        if ($ip === '') {
+            return;
+        }
+        $dir = fw_min_dir();
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+            return;
+        }
+        $m = intdiv(time(), 60);
+        $u = (int)($GLOBALS['MF_HIT_UID'] ?? 0);
+        $p = (string)($GLOBALS['MF_HIT_P'] ?? '');
+        $pf = (int)($GLOBALS['MF_HIT_PF'] ?? 0);
+        $b = (int)($GLOBALS['MF_OUT_BYTES'] ?? 0);
+        $ua = cut_str(trim((string)($_SERVER['HTTP_USER_AGENT'] ?? '')), 60);
+        @file_put_contents($dir . '/m' . $m . '.log', $ip . "\t" . $u . "\t" . $p . "\t" . $pf . "\t" . $b . "\t" . $ua . "\n", FILE_APPEND | LOCK_EX);
+    } catch (Throwable $t) {
+        /* 统计失败静默 */
+    }
+}
+
+/** 当分钟内某 IP 的已计入请求数（只读扫描，无锁；进程内缓存） */
+function fw_rl_count(string $ip): int
+{
+    static $cache = null;
+    static $cacheM = 0;
+    static $cacheIp = '';
+    $m = intdiv(time(), 60);
+    if ($cache !== null && $cacheM === $m && $cacheIp === $ip) {
+        return $cache;
+    }
+    $cnt = 0;
+    $lines = @file(fw_min_dir() . '/m' . $m . '.log', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (is_array($lines)) {
+        $pre = $ip . "\t";
+        $len = strlen($pre);
+        foreach ($lines as $ln) {
+            if (strncmp($ln, $pre, $len) === 0) {
+                $cnt++;
+            }
+        }
+    }
+    $cache = $cnt;
+    $cacheM = $m;
+    $cacheIp = $ip;
+    return $cnt;
+}
+
+/** 低频合并：把「上一分钟及更早」的命中日志聚合同步进 fw_state 与站点统计，删除已合并文件
+ *  触发：index.php 随机 2% / 后台监控页打开时（确定性） */
+function fw_hits_merge(): void
+{
+    try {
+        $dir = fw_min_dir();
+        if (!is_dir($dir)) {
+            return;
+        }
+        $cur = intdiv(time(), 60);
+        $files = [];
+        foreach ((glob($dir . '/m*.log') ?: []) as $f) {
+            $bn = basename($f);
+            if (strlen($bn) < 6 || $bn[0] !== 'm') {
+                continue;
+            }
+            $mm = (int)substr($bn, 1, -4);
+            if ($mm > 0 && $mm < $cur - 1) {
+                $files[] = [$mm, $f];
+            }
+        }
+        if (!$files) {
+            return;
+        }
+        sort($files);
+        /* 聚合：IP → [次数, 最后时刻, 首个UA]；日期 → [请求数, PV, 出站字节] */
+        $aggIp = [];
+        $aggDay = [];
+        foreach ($files as [$mm, $f]) {
+            $lines = @file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if (!is_array($lines)) {
+                continue;
+            }
+            $d = date('Y-m-d', $mm * 60);
+            $ts = $mm * 60 + 59;
+            if (!isset($aggDay[$d])) {
+                $aggDay[$d] = ['req' => 0, 'pv' => 0, 'bytes' => 0];
+            }
+            foreach ($lines as $ln) {
+                $c = explode("\t", $ln);
+                if (count($c) < 5) {
+                    continue;
+                }
+                $ip = (string)$c[0];
+                $p = (string)$c[2];
+                $pf = (int)$c[3];
+                $bytes = (int)$c[4];
+                $ua = (string)($c[5] ?? '');
+                if ($ip === '') {
+                    continue;
+                }
+                $aggDay[$d]['req']++;
+                $aggDay[$d]['bytes'] += $bytes;
+                if ($pf === 0 && $p !== '' && !preg_match('/^(a:|api:|media|asset|ping|icon|sitemap)/', $p)) {
+                    $aggDay[$d]['pv']++;
+                }
+                if (!isset($aggIp[$ip])) {
+                    $aggIp[$ip] = ['c' => 0, 'l' => 0, 'ua' => ''];
+                }
+                $aggIp[$ip]['c']++;
+                $aggIp[$ip]['l'] = max($aggIp[$ip]['l'], $ts);
+                if ($aggIp[$ip]['ua'] === '' && $ua !== '') {
+                    $aggIp[$ip]['ua'] = $ua;
+                }
+            }
+            @unlink($f);
+        }
+        if (!$aggIp && !$aggDay) {
+            return;
+        }
+        /* 同步进 fw_state（锁内读改写，低频） */
+        fw_state_update(function ($st) use ($aggIp, $aggDay) {
+            foreach ($aggDay as $d => $a) {
+                if (!isset($st['days'][$d]) || !is_array($st['days'][$d])) {
+                    $st['days'][$d] = ['req' => 0, 'blocked' => 0, 'bans' => 0, 'ev' => 0];
+                }
+                $st['days'][$d]['req'] += $a['req'];
+            }
+            foreach ($aggIp as $ip => $a) {
+                if (!isset($st['ips'][$ip]) || !is_array($st['ips'][$ip])) {
+                    $st['ips'][$ip] = ['c' => 0, 'f' => 0, 'l' => 0, 'ua' => '', 's' => 0, 'w' => 0, 'wl' => 0];
+                }
+                $st['ips'][$ip]['c'] += $a['c'];
+                $st['ips'][$ip]['l'] = max((int)($st['ips'][$ip]['l'] ?? 0), $a['l']);
+                if ((string)($st['ips'][$ip]['ua'] ?? '') === '' && $a['ua'] !== '') {
+                    $st['ips'][$ip]['ua'] = $a['ua'];
+                }
+            }
+            return $st;
+        });
+        /* 同步进站点统计（PV / 流量） */
+        foreach ($aggDay as $d => $a) {
+            stats_absorb($d, $a['pv'], $a['bytes']);
+        }
+    } catch (Throwable $t) {
+        /* 统计失败静默 */
+    }
+}
+
 /**
  * v1.22.0：防火墙状态统一临界区——锁内强制重读最新状态 → 回调修改 → 原子落盘。
  * 此前各写入点为「请求级旧快照修改 → 锁内整写」，攻击突发时并发请求互相覆盖：
@@ -911,16 +1080,9 @@ function fw_intel_import(string $text, string $by): int
 function fw_rl_add(string $ip): array
 {
     $pm = max(5, (int)cfg('fw_rl_pm', 60));
-    $st = fw_state();
-    $m = intdiv(time(), 60);
-    $r = isset($st['rl'][$ip]) && is_array($st['rl'][$ip]) ? $st['rl'][$ip] : ['m' => 0, 'c' => 0];
-    if ((int)$r['m'] !== $m) {
-        $r = ['m' => $m, 'c' => 0];
-    }
-    $r['c']++;
-    $st['rl'][$ip] = $r;
-    fw_state_save($st);
-    return [(int)$r['c'], $pm];
+    /* v1.32.0：限流计数改读「当分钟命中日志」（只读，无锁无写盘）——
+       请求命中在响应收尾时追加一行，本请求自身按 +1 计入，阈值语义与旧版一致 */
+    return [fw_rl_count($ip) + 1, $pm];
 }
 
 /**
@@ -1782,7 +1944,8 @@ function fw_guard(): void
     if ($ip === '') {
         return; // 拿不到合法 IP 不乱拦（极端环境兜底）
     }
-    fw_bump($ip, 'c');
+    // v1.32.0：每请求计数不再写 fw_state——改由响应收尾追加一行命中日志（fw_hit_append），
+    // 低频合并任务聚合回 fw_state；限流改为只读计数（fw_rl_add 内部）
     // 白名单：跳过一切拦截
     if (fw_whitelisted($ip)) {
         $st = fw_state();

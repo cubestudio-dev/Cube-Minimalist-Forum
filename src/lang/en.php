@@ -433,4 +433,21 @@ return [
     '平铺' => 'Flat',
     '搜索预览' => 'Search preview',
     '搜索框输入时实时下拉显示匹配的帖子（标题优先，近 300 帖内），点击直达帖子；关闭后搜索仍可用但不显示预览（v1.30.0）' => 'Shows matching threads in a live dropdown as you type in the search box (title matches first, within the latest 300 threads); click to open a thread directly. Search still works without the preview when disabled (v1.30.0)',
+
+    /* v1.32.0 Content & limits / upload / traffic stats */
+    '图片 / 附件'          => 'Image / File',
+    '图片'                 => 'Image',
+    '附件'                 => 'File',
+    '内容与限制'           => 'Content & Limits',
+    '标题最大字数'         => 'Max title length',
+    '正文最大字数'         => 'Max post length',
+    '回复最大字数'         => 'Max reply length',
+    '昵称最大字数'         => 'Max nickname length',
+    '签名最大字数'         => 'Max signature length',
+    '单帖上传文件数上限'   => 'Max uploads per post',
+    '图片大小上限（MB）'   => 'Max image size (MB)',
+    '附件大小上限（MB）'   => 'Max file size (MB)',
+    '允许的附件扩展名'     => 'Allowed file extensions',
+    '保存内容与限制'       => 'Save content & limits',
+    '流量与使用统计'       => 'Traffic & Usage Stats',
 ];

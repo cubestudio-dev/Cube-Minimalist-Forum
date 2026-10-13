@@ -15,7 +15,9 @@ function layout_css_html(bool $alwaysInline = false): string
     $inline = false;
     if ($alwaysInline) {
         $inline = true;
-    } elseif (session_status() === PHP_SESSION_ACTIVE && empty($_SESSION['css_inline_done'])) {
+    } elseif (empty($_COOKIE['mfcssi'])) {
+        /* v1.32.0：内联标记从会话改到 Cookie——会话早释放后渲染期不再写会话；
+           首个页面内联全部 CSS（冷启动快），之后 30 天内引用强缓存外链（零请求命中） */
         $inline = true;
     }
     if (!$inline) {
@@ -26,9 +28,8 @@ function layout_css_html(bool $alwaysInline = false): string
         /* 读不到样式表（异常部署）时不置会话标记，下个页面重试内联而非永久退化为外链 */
         return '<link rel="stylesheet" href="' . $href . '" fetchpriority="high">';
     }
-    if (session_status() === PHP_SESSION_ACTIVE) {
-        $_SESSION['css_inline_done'] = 1;
-    }
+    /* v1.32.0：内联完成标记写 Cookie（30 天内不再内联，改走强缓存外链） */
+    @setcookie('mfcssi', '1', ['expires' => time() + 30 * 86400, 'path' => '/', 'samesite' => 'Lax']);
     /* </style 防逃逸与 custom_css 同规则；外链仍保留，作为缓存与回退通道 */
     return '<style id="mf-inline-css">' . str_ireplace('</style', '', $css) . '</style>' .
         '<link rel="preload" as="style" href="' . $href . '">';

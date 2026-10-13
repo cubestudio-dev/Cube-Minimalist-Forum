@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.31.0');
+    define('MF_VERSION', '1.32.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -42,6 +42,7 @@ require_once __DIR__ . '/mailer.php';
 require_once __DIR__ . '/ai.php';
 require_once __DIR__ . '/charts.php';
 require_once __DIR__ . '/logs.php';
+require_once __DIR__ . '/stats.php';
 require_once __DIR__ . '/firewall.php';
 require_once __DIR__ . '/update.php';
 require_once __DIR__ . '/sysmon.php';
@@ -181,6 +182,26 @@ function mf_response_finalize(): void
     @flush();
     if (function_exists('fastcgi_finish_request')) {
         @fastcgi_finish_request();
+    }
+}
+
+/**
+ * v1.32.0 会话早释放（幂等）：GET 页面渲染前调用——关闭会话并释放文件锁，
+ * 渲染期间同一用户的并发请求（预取 / Ping / 搜索预览 / 快速连点）不再被阻塞。
+ * 与 mf_response_finalize() 的区别：本函数只关会话不动输出缓冲（渲染还要继续输出）。
+ * 关闭后 $_SESSION 数组在内存中仍可读（登录态 / CSRF / 协议确认照常生效），
+ * 但写入不再持久——渲染期的会话写点必须先迁移（Flash → 全局暂存，CSS 标记与
+ * 浏览量去重 → Cookie），index.php 的调用点已保证这些迁移先于本函数完成。
+ */
+function mf_session_release(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        @session_write_close();
     }
 }
 

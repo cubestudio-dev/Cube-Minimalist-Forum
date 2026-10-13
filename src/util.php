@@ -102,6 +102,12 @@ function flash(string $type, string $msg): void
 
 function take_flash(): ?array
 {
+    /* v1.32.0：会话早释放后渲染期取消息改走全局暂存（index.php 在关闭会话前暂存） */
+    if (array_key_exists('MF_FLASH', $GLOBALS)) {
+        $f = $GLOBALS['MF_FLASH'];
+        unset($GLOBALS['MF_FLASH']);
+        return is_array($f) && $f ? $f : null;
+    }
     if (!empty($_SESSION['flash'])) {
         $f = $_SESSION['flash'];
         unset($_SESSION['flash']);
@@ -197,7 +203,9 @@ function str_lower(string $s): string
 /* ---------------- 校验 ---------------- */
 function valid_name(string $n): bool
 {
-    return (bool)preg_match('/^[\x{4e00}-\x{9fa5}A-Za-z0-9_]{2,20}$/u', $n);
+    /* v1.32.0：长度上限后台可自定义（2-30，默认 20）；正则字符集不变 */
+    $max = max(2, min(30, (int)cfg('name_max', 20)));
+    return (bool)preg_match('/^[\x{4e00}-\x{9fa5}A-Za-z0-9_]{2,' . $max . '}$/u', $n);
 }
 
 function valid_email(string $m): bool

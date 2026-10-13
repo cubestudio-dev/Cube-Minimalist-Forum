@@ -76,20 +76,32 @@ function md_inline(string $s): string
         return stripos($u, '&quot;') !== false || stripos($u, '&#039;') !== false;
     };
 
-    // 2) 图片：仅 https 外链，懒加载 + 不带来源引用
-    $s = preg_replace_callback('/!\[([^\]]*)\]\((https:\/\/[^)\s]+)\)/i', function ($m) use ($keep, $url_dirty) {
+    // 2) 图片：https 外链 + 站内上传附件（v1.32.0 p=media；站内相对 URL 出站时经 u() 重写，
+    //    演示网关自动带 XTransformPort，生产环境原样 —— 存储内容保持环境中立）
+    $s = preg_replace_callback('/!\[([^\]]*)\]\((https:\/\/[^)\s]+|index\.php\?p=media&(?:amp;)?f=[^)\s]+)\)/i', function ($m) use ($keep, $url_dirty) {
         if ($url_dirty($m[2])) {
             return $m[0];
         }
-        return $keep('<img src="' . $m[2] . '" alt="' . $m[1] . '" loading="lazy" referrerpolicy="no-referrer">');
+        /* 站内附件 URL（存储环境中立）：还原实体 → u() 重写（演示网关带 XTransformPort）→ 重新转义 */
+        $src = $m[2];
+        if (stripos($m[2], 'index.php?p=media') === 0) {
+            $q = preg_replace('/^index\.php\?/i', '', str_replace('&amp;', '&', $m[2]));
+            $src = e(u($q));
+        }
+        return $keep('<img src="' . $src . '" alt="' . $m[1] . '" loading="lazy" referrerpolicy="no-referrer">');
     }, $s) ?? $s;
 
-    // 3) 链接：http(s) 外链或站内相对路径
-    $s = preg_replace_callback('/\[([^\]]+)\]\((https?:\/\/[^)\s]+|\/[^)\s]*)\)/', function ($m) use ($keep, $url_dirty) {
+    // 3) 链接：http(s) 外链或站内相对路径（含 v1.32.0 站内上传附件 p=media）
+    $s = preg_replace_callback('/\[([^\]]+)\]\((https?:\/\/[^)\s]+|\/[^)\s]*|index\.php\?p=media&(?:amp;)?f=[^)\s]*)\)/', function ($m) use ($keep, $url_dirty) {
         if ($url_dirty($m[2])) {
             return $m[0];
         }
-        return $keep('<a href="' . $m[2] . '" target="_blank" rel="nofollow noopener">' . $m[1] . '</a>');
+        $href = $m[2];
+        if (stripos($m[2], 'index.php?p=media') === 0) {
+            $q = preg_replace('/^index\.php\?/i', '', str_replace('&amp;', '&', $m[2]));
+            $href = e(u($q));
+        }
+        return $keep('<a href="' . $href . '" target="_blank" rel="nofollow noopener">' . $m[1] . '</a>');
     }, $s) ?? $s;
 
     // 4) 高亮 / 加粗 / 删除线 / 下标 / 上标 / 斜体

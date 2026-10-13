@@ -76,6 +76,7 @@ function route_action(string $a): void
         case 'forgot':           act_forgot(); return;
         case 'change_pass':      act_change_pass(); return;
         case 'profile_save':     act_profile_save(); return;
+        case 'upload':           act_media_upload(); return;
         case 'thread_edit':      act_thread_edit(); return;
         case 'reply_edit':       act_reply_edit(); return;
         case 'thread_new':       act_thread_new(); return;
@@ -631,15 +632,17 @@ function act_send_code(): void
 function act_register(): void
 {
     feat_guard('register', '本站已关闭新用户注册');
-    $name = post_str('name', 20);
+    /* v1.32.0：昵称长度后台可自定义（2-30，默认 20） */
+    $nameMax = max(2, min(30, (int)cfg('name_max', 20)));
+    $name = post_str('name', $nameMax + 10);
     $email = strtolower(post_str('email', 60));
     $pass = (string)($_POST['pass'] ?? '');
     $pass2 = (string)($_POST['pass2'] ?? '');
     $code = post_str('code', 6);
     set_old(['name' => $name, 'email' => $email]);
 
-    if (!valid_name($name)) {
-        flash('err', '用户名需 2-20 位，仅限中文、字母、数字、下划线');
+    if ($name === '' || mb_strlen($name) < 2 || mb_strlen($name) > $nameMax || !valid_name($name)) {
+        flash('err', '用户名需 2-' . $nameMax . ' 位，仅限中文、字母、数字、下划线');
         redirect(u('p=register'));
     }
     if (user_by_name($name)) {
@@ -684,6 +687,7 @@ function act_register(): void
         auth_login($user, false);
     }
     log_action('register', '用户 ' . $name . '（#' . $uid . '）注册成功', $uid, $name);
+    stats_bump('reg'); // v1.32.0 站点统计
     mf_do_action('user_register', (int)$uid, (string)$name); /* v1.22.0 拓展钩子 */
     clear_old();
     flash('ok', '注册成功，欢迎加入！');
@@ -737,6 +741,7 @@ function act_login(): void
     auth_login($u, $remember);
     dev_login_register((int)$u['id'], $u, $ip, $kickedHere); // 登记设备（新设备自动发提醒；超出并发上限自动下线最早设备）
     log_action('login', '用户 ' . (string)$u['name'] . '（#' . (int)$u['id'] . '）登录成功' . ($remember ? '，保持登录 30 天' : '') . '（' . dev_ua_name($ua) . ' · IP ' . $ip . '）', (int)$u['id'], (string)$u['name']);
+    stats_bump('login'); // v1.32.0 站点统计
     mf_do_action('user_login', (int)$u['id'], (string)$u['name']); /* v1.22.0 拓展钩子 */
     clear_old();
     flash('ok', '欢迎回来，' . (string)$u['name']);
@@ -904,12 +909,18 @@ function act_change_pass(): void
 function act_profile_save(): void
 {
     $u = require_login();
-    $name = post_str('name', 20);
+    $nameMax = max(2, min(30, (int)cfg('name_max', 20)));
+    $name = post_str('name', $nameMax + 10);
     $bio = post_str('bio', 200);
     // 用户签名（v1.14.0）：单行纯文本，展示在帖子与回复下方；功能关闭时保留旧值不修改
-    $sig = feat_on('signature') ? trim(str_replace(["\r", "\n", "\0"], ' ', post_str('sig', 60))) : (string)($u['sig'] ?? '');
-    if (!valid_name($name)) {
-        flash('err', '用户名需 2-20 位，仅限中文、字母、数字、下划线');
+    $sig = feat_on('signature') ? trim(str_replace(["\r", "\n", "\0"], ' ', post_str('sig', 600))) : (string)($u['sig'] ?? '');
+    $smax = max(0, min(500, (int)cfg('sign_len_max', 60)));
+    if ($sig !== '' && mb_strlen($sig) > $smax) {
+        flash('err', '签名最长 ' . $smax . ' 字（当前 ' . mb_strlen($sig) . ' 字）');
+        redirect(u('p=settings'));
+    }
+    if ($name === '' || mb_strlen($name) < 2 || mb_strlen($name) > $nameMax || !valid_name($name)) {
+        flash('err', '用户名需 2-' . $nameMax . ' 位，仅限中文、字母、数字、下划线');
         redirect(u('p=settings'));
     }
     $exist = user_by_name($name);
@@ -933,6 +944,76 @@ function act_profile_save(): void
 
 /* ================= 帖子与回复 ================= */
 
+/** v1.32.0：单帖附件数量守卫——统计正文里引用的站内上传文件数，超过后台上限则拒绝保存 */
+function media_count_guard(string $content, string $what): void
+{
+    $cap = max(1, min(20, (int)cfg('upload_per_post', 4)));
+    $n = (int)preg_match_all('/\]\([^)]*p=media[&)]/', $content);
+    if ($n > $cap) {
+        flash('err', $what . '内最多引用 ' . $cap . ' 个上传文件（当前 ' . $n . ' 个），请删除多余引用后再保存');
+        redirect(u('p=' . ($what === '帖子' ? 'new' : 'home')));
+    }
+}
+
+/** v1.32.0 图片 / 附件上传（发帖 / 回复 / 编辑表单的上传工具条走这里）：
+ *  仅登录用户；「允许上传图片 / 附件」开关门控；图片做真实内容嗅探（防伪装扩展名）；
+ *  存储为 data/uploads/年月/16位随机hex.扩展名（文件名不可猜测）；返回 Markdown 片段 */
+function act_media_upload(): void
+{
+    $u = require_login();
+    feat_guard('upload', '上传功能已关闭');
+    if (empty($_FILES['file']) || !is_array($_FILES['file']) || !is_string($_FILES['file']['name'] ?? null)) {
+        act_err('请选择要上传的文件');
+    }
+    $f = $_FILES['file'];
+    if ((int)($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        act_err('上传失败（错误码 ' . (int)($f['error'] ?? -1) . '，可能超过服务器上传限制）');
+    }
+    $size = (int)($f['size'] ?? 0);
+    $name = (string)$f['name'];
+    $ext = strtolower((string)pathinfo($name, PATHINFO_EXTENSION));
+    $deny = ['php', 'php3', 'php5', 'php7', 'phtml', 'phar', 'cgi', 'pl', 'py', 'sh', 'bash', 'htaccess', 'svg', 'exe', 'bat', 'cmd', 'com', 'js', 'jse', 'vbs', 'html', 'htm', 'ini', 'dll', 'so'];
+    $imgExt = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+    if ($ext === '' || in_array($ext, $deny, true)) {
+        act_err('不支持的文件类型：.' . $ext);
+    }
+    $isImg = in_array($ext, $imgExt, true);
+    $allow = preg_split('/[\s,，]+/u', trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'))) ?: [];
+    $allow = array_values(array_filter(array_map(fn ($x) => strtolower(trim(ltrim((string)$x, '.'))), $allow)));
+    if (!$isImg && !in_array($ext, $allow, true)) {
+        act_err('不支持的附件类型：.' . $ext . '（后台「基本设置」可调整允许的扩展名）');
+    }
+    $max = ($isImg ? max(1, (int)cfg('upload_img_max_mb', 5)) : max(1, (int)cfg('upload_file_max_mb', 10))) * 1048576;
+    if ($size <= 0 || $size > $max) {
+        act_err('文件大小 ' . fmt_bytes($size) . ' 超过上限 ' . round($max / 1048576) . 'MB');
+    }
+    if ($isImg) {
+        /* 图片内容嗅探：非真实图片（伪装扩展名 / 内嵌恶意载荷）一律拒绝 */
+        $info = @getimagesize((string)$f['tmp_name']);
+        if ($info === false || empty($info[2])) {
+            act_err('图片内容校验失败：文件不是有效图片');
+        }
+    }
+    $sub = date('Ym');
+    $dir = DATA_DIR . '/uploads/' . $sub;
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+        act_err('存储目录创建失败（data/ 不可写？）');
+    }
+    $hex = bin2hex(random_bytes(8));
+    $target = $dir . '/' . $hex . '.' . $ext;
+    if (!@move_uploaded_file((string)$f['tmp_name'], $target)) {
+        act_err('文件保存失败（目录不可写？）');
+    }
+    @chmod($target, 0644);
+    /* 环境中立 URL（v1.32.0）：存储内容不带演示网关参数；渲染时 markdown 规则经 u() 重写 */
+    $url = 'index.php?p=media&f=uploads/' . $sub . '/' . $hex . '.' . $ext;
+    $md = $isImg
+        ? '![' . cut_str((string)pathinfo($name, PATHINFO_FILENAME), 40) . '](' . $url . ')'
+        : '[' . cut_str($name, 60) . '](' . $url . ')';
+    log_action('media_upload', '上传' . ($isImg ? '图片' : '附件') . '：' . cut_str($name, 40) . '（' . fmt_bytes($size) . '）');
+    json_response(['ok' => true, 'msg' => '上传成功', 'url' => $url, 'md' => $md, 'img' => $isImg]);
+}
+
 function act_thread_new(): void
 {
     $u = require_login('p=new');
@@ -951,21 +1032,34 @@ function act_thread_new(): void
         flash('err', board_perm_reason($board, $u));
         redirect(u('p=new'));
     }
-    $title = post_str('title', 30);
-    $content = post_str('content', 1500);
+    /* v1.32.0 内容限制后台可自定义：超长给出明确错误而非静默截断 */
+    $tmax = max(4, min(200, (int)cfg('thread_title_max', 30)));
+    $lmax = max(100, min(200000, (int)cfg('thread_len_max', 1500)));
+    $title = post_str('title', $tmax + 200);
+    $content = post_str('content', 300000);
     if ($title === '') {
         flash('err', '标题不能为空');
+        redirect(u('p=new'));
+    }
+    if (mb_strlen($title) > $tmax) {
+        flash('err', '标题最长 ' . $tmax . ' 字（当前 ' . mb_strlen($title) . ' 字）');
         redirect(u('p=new'));
     }
     if ($content === '') {
         flash('err', '正文不能为空');
         redirect(u('p=new'));
     }
+    if (mb_strlen($content) > $lmax) {
+        flash('err', '正文最长 ' . $lmax . ' 字（当前 ' . mb_strlen($content) . ' 字）');
+        redirect(u('p=new'));
+    }
+    media_count_guard($content, '帖子');
     if (!flood_check($u, ['key' => 'thread', 'title' => $title, 'content' => $content])) {
         redirect(u('p=new'));
     }
     $tid = thread_create($board, $title, $content, (int)$u['id']);
     user_bump((int)$u['id'], 'threads', 1);
+    stats_bump('thread'); // v1.32.0 站点统计
     log_action('thread_new', '发布《' . cut_str($title, 40) . '》（板块：' . board_name($board) . '）');
     /* @ 提及通知：内容中 @到的人，系统自动给对方发送站内消息（v1.15.0） */
     if (feat_on('mention')) {
@@ -993,11 +1087,18 @@ function act_reply_new(): void
         flash('err', '您已被禁言，剩余 ' . ceil(mute_left($u) / 60) . ' 分钟');
         redirect(u('p=thread&id=' . $tid));
     }
-    $content = post_str('content', 1000);
+    /* v1.32.0：回复长度后台可自定义；超长明确报错 */
+    $rmax = max(100, min(200000, (int)cfg('reply_len_max', 1000)));
+    $content = post_str('content', 300000);
     if ($content === '') {
         flash('err', '回复内容不能为空');
         redirect(u('p=thread&id=' . $tid));
     }
+    if (mb_strlen($content) > $rmax) {
+        flash('err', '回复最长 ' . $rmax . ' 字（当前 ' . mb_strlen($content) . ' 字）');
+        redirect(u('p=thread&id=' . $tid));
+    }
+    media_count_guard($content, '回复');
     // 先验锁帖 / 存在性，再占用发言间隔（避免被拒后白扣间隔）
     $t = thread_get($tid);
     if (!$t || !empty($t['locked'])) {
@@ -1016,6 +1117,7 @@ function act_reply_new(): void
         flash('err', '该帖子已锁定或不存在，无法回复');
         redirect(u('p=home'));
     }
+    stats_bump('reply'); // v1.32.0 站点统计
     log_action('reply_new', '在《' . cut_str((string)($t['title'] ?? ''), 40) . '》中发表回复');
     /* @ 提及通知（v1.15.0） */
     if (feat_on('mention')) {
@@ -1101,12 +1203,23 @@ function act_thread_edit(): void
     if (!$t || !thread_editable($t, $u)) {
         act_err('无法编辑该帖子（可能已超过可编辑时间、已有回复、被锁定或功能已关闭）');
     }
-    $title = post_str('title', 30);
-    $content = post_str('content', 1500);
+    /* v1.32.0：长度后台可自定义，超长明确报错 */
+    $tmax = max(4, min(200, (int)cfg('thread_title_max', 30)));
+    $lmax = max(100, min(200000, (int)cfg('thread_len_max', 1500)));
+    $title = post_str('title', $tmax + 200);
+    $content = post_str('content', 300000);
     if ($title === '' || $content === '') {
         act_err('标题与正文不能为空');
     }
+    if (mb_strlen($title) > $tmax) {
+        act_err('标题最长 ' . $tmax . ' 字');
+    }
+    if (mb_strlen($content) > $lmax) {
+        act_err('正文最长 ' . $lmax . ' 字（当前 ' . mb_strlen($content) . ' 字）');
+    }
+    media_count_guard($content, '帖子');
     thread_save($tid, ['title' => $title, 'content' => $content, 'edited' => time(), 'edited_by' => (int)$u['id']]);
+    stats_bump('edit'); // v1.32.0 站点统计
     log_action('thread_edit', (($u['admin'] ?? false) && (int)$t['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str($title, 40) . '》', (int)$u['id'], (string)$u['name']);
     /* @ 提及：编辑时只通知新增提及（旧内容已提及过的人不重复通知） */
     if (feat_on('mention')) {
@@ -1135,11 +1248,17 @@ function act_reply_edit(): void
     if (!$t || !$r || !reply_editable($r, $u, $t)) {
         act_err('无法编辑该回复（可能已超过可编辑时间、被锁定或功能已关闭）');
     }
-    $content = post_str('content', 1000);
+    $rmax = max(100, min(200000, (int)cfg('reply_len_max', 1000)));
+    $content = post_str('content', 300000);
     if ($content === '') {
         act_err('回复内容不能为空');
     }
+    if (mb_strlen($content) > $rmax) {
+        act_err('回复最长 ' . $rmax . ' 字（当前 ' . mb_strlen($content) . ' 字）');
+    }
+    media_count_guard($content, '回复');
     reply_save($tid, $rid, ['content' => $content, 'edited' => time(), 'edited_by' => (int)$u['id']]);
+    stats_bump('edit'); // v1.32.0 站点统计
     log_action('reply_edit', (($u['admin'] ?? false) && (int)$r['author'] !== (int)$u['id'] ? '管理员编辑' : '作者编辑') . '《' . cut_str((string)($t['title'] ?? ''), 40) . '》中的回复', (int)$u['id'], (string)$u['name']);
     /* @ 提及：编辑时只通知新增提及 */
     if (feat_on('mention')) {
@@ -1270,6 +1389,16 @@ function act_admin_save_basic(): void
         'online_window' => max(60, min(86400, (int)($_POST['online_window'] ?? 300))),
         'live_interval' => max(0, min(300, (int)($_POST['live_interval'] ?? 20))),
         'ping_interval' => max(0, min(300, (int)($_POST['ping_interval'] ?? 15))), // v1.18.0：侧栏 Ping 测量间隔，0=关闭
+        /* v1.32.0 内容与限制 */
+        'thread_title_max' => max(4, min(200, (int)($_POST['thread_title_max'] ?? 30))),
+        'thread_len_max' => max(100, min(200000, (int)($_POST['thread_len_max'] ?? 1500))),
+        'reply_len_max' => max(100, min(200000, (int)($_POST['reply_len_max'] ?? 1000))),
+        'name_max' => max(2, min(30, (int)($_POST['name_max'] ?? 20))),
+        'sign_len_max' => max(0, min(500, (int)($_POST['sign_len_max'] ?? 60))),
+        'upload_img_max_mb' => max(1, min(50, (int)($_POST['upload_img_max_mb'] ?? 5))),
+        'upload_file_max_mb' => max(1, min(100, (int)($_POST['upload_file_max_mb'] ?? 10))),
+        'upload_per_post' => max(1, min(20, (int)($_POST['upload_per_post'] ?? 4))),
+        'upload_allow_ext' => cut_str(preg_replace('/[^a-z0-9 ]/', '', strtolower(trim((string)($_POST['upload_allow_ext'] ?? '')))), 200),
     ]);
     log_action('admin_save_basic', '基本设置已保存' . ($bd !== '' ? '（绑定域名：' . $bd . '）' : ''));
     act_ok('基本设置已保存', u('p=admin&tab=basic'));
@@ -1278,7 +1407,7 @@ function act_admin_save_basic(): void
 /** 后台「功能」页：总开关保存（v1.14.0） */
 function act_admin_save_feat(): void
 {
-    $keys = ['register', 'guest_browse', 'post', 'reply', 'edit', 'del_own', 'like', 'report', 'search', 'search_suggest', 'emoji', 'online', 'signature', 'mention', 'motion', 'titles'];
+    $keys = ['register', 'guest_browse', 'post', 'reply', 'edit', 'del_own', 'like', 'report', 'search', 'search_suggest', 'emoji', 'online', 'signature', 'mention', 'motion', 'titles', 'upload'];
     $kv = [];
     $off = [];
     foreach ($keys as $k) {

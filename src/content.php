@@ -527,20 +527,20 @@ function thread_view_bump(int $tid): int
         return $t ? (int)($t['views'] ?? 0) : 0;
     };
     $ua = strtolower((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
-    if ($ua === '' || session_status() !== PHP_SESSION_ACTIVE
-        || preg_match('/bot|crawl|spider|slurp|curl|wget|python|java|okhttp|httpclient|headless|monitor|pingdom|uptime/i', $ua)) {
+    /* v1.32.0：去重状态从会话改到 Cookie（会话早释放后渲染期不再写会话；
+       浏览器不回传 Cookie 的爬虫 / 命令行客户端天然不计数，与旧版语义一致） */
+    if ($ua === '' || preg_match('/bot|crawl|spider|slurp|curl|wget|python|java|okhttp|httpclient|headless|monitor|pingdom|uptime/i', $ua)) {
         return $cur();
     }
-    if (!isset($_SESSION['views']) || !is_array($_SESSION['views'])) {
-        $_SESSION['views'] = [];
-    }
-    if (isset($_SESSION['views'][$tid])) {
+    $seen = isset($_COOKIE['mfviews']) && $_COOKIE['mfviews'] !== '' ? explode(',', (string)$_COOKIE['mfviews']) : [];
+    if (in_array((string)$tid, $seen, true)) {
         return $cur();
     }
-    if (count($_SESSION['views']) > 500) { // 防会话数据无限膨胀
-        $_SESSION['views'] = array_slice($_SESSION['views'], -250, null, true);
+    $seen[] = (string)$tid;
+    if (count($seen) > 200) { // 防 Cookie 无限膨胀（4KB 上限内，200 个帖子 id 足够）
+        $seen = array_slice($seen, -200);
     }
-    $_SESSION['views'][$tid] = 1;
+    @setcookie('mfviews', implode(',', $seen), ['expires' => time() + 30 * 86400, 'path' => '/', 'samesite' => 'Lax']);
     $lk = Store::lock('threads');
     $t = thread_get($tid);
     if ($t) {
@@ -1480,6 +1480,13 @@ function online_tick(): int
     if ($sid === '') {
         return online_count();
     }
+    /* v1.32.0 写节流：30 秒内已记录过（Cookie 时间戳）则跳过本轮读改写——
+       在线窗口默认 300 秒，30 秒粒度不影响在线人数准确性，却把高频浏览时的
+       全局锁内读改写从「每页一次」降到「每用户每 30 秒一次」 */
+    $lastPing = (int)($_COOKIE['mfol'] ?? 0);
+    if ($lastPing > 0 && $now - $lastPing < 30 && $lastPing <= $now) {
+        return online_count();
+    }
     $u = current_user();
     $uid = $u ? (int)$u['id'] : 0;
     $lk = Store::lock('online');
@@ -1503,6 +1510,8 @@ function online_tick(): int
     $o[$sid] = ['t' => $now, 'u' => $uid, 'in' => $prevIn > 0 ? $prevIn : $now];
     Store::write('online.php', $o);
     Store::unlock($lk);
+    /* v1.32.0：记录本次落盘时间到 Cookie，供下一请求 30 秒节流判断（会话早释放后也能工作） */
+    @setcookie('mfol', (string)$now, ['expires' => $now + 86400, 'path' => '/', 'samesite' => 'Lax']);
     return online_count();
 }
 
