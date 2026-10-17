@@ -66,7 +66,7 @@ function stats_bump(string $k, int $n = 1): void
         $row[$k] = ($row[$k] ?? 0) + $n;
         $s['days'][$d] = $row;
         $s['total'][$k] = ($s['total'][$k] ?? 0) + $n;
-        Store::write('stats.php', $s);
+        Store::write('stats.php', $s, false);
         if ($lk) {
             Store::unlock($lk);
         }
@@ -91,7 +91,7 @@ function stats_absorb(string $day, int $pv, int $bytes): void
         $s['days'][$day] = $row;
         $s['total']['pv'] = ($s['total']['pv'] ?? 0) + $pv;
         $s['total']['bytes'] = ($s['total']['bytes'] ?? 0) + $bytes;
-        Store::write('stats.php', $s);
+        Store::write('stats.php', $s, false);
         if ($lk) {
             Store::unlock($lk);
         }
@@ -118,7 +118,7 @@ function stats_prune(int $keep = 60): void
         }
         if ($changed) {
             $lk = Store::lock('stats', 3);
-            Store::write('stats.php', $s);
+            Store::write('stats.php', $s, false);
             if ($lk) {
                 Store::unlock($lk);
             }

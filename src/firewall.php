@@ -418,7 +418,9 @@ function fw_min_dir(): string
 }
 
 /** 响应收尾追加一条命中记录（register_shutdown_function 注册；失败静默）
- *  行格式：ip \t uid \t p \t pf \t bytes \t ua */
+ *  行格式：ip \t uid \t p \t pf \t bytes \t ua
+ *  v1.33.0：追加改非阻塞锁——拿不到锁直接跳过这一行（统计属可容忍数据，
+ *  慢磁盘 / NFS 上阻塞锁会让每个请求收尾都在等锁，极端时整站排队） */
 function fw_hit_append(): void
 {
     try {
@@ -439,7 +441,14 @@ function fw_hit_append(): void
         $pf = (int)($GLOBALS['MF_HIT_PF'] ?? 0);
         $b = (int)($GLOBALS['MF_OUT_BYTES'] ?? 0);
         $ua = cut_str(trim((string)($_SERVER['HTTP_USER_AGENT'] ?? '')), 60);
-        @file_put_contents($dir . '/m' . $m . '.log', $ip . "\t" . $u . "\t" . $p . "\t" . $pf . "\t" . $b . "\t" . $ua . "\n", FILE_APPEND | LOCK_EX);
+        $fp = @fopen($dir . '/m' . $m . '.log', 'ab');
+        if ($fp && @flock($fp, LOCK_EX | LOCK_NB)) {
+            @fwrite($fp, $ip . "\t" . $u . "\t" . $p . "\t" . $pf . "\t" . $b . "\t" . $ua . "\n");
+            @flock($fp, LOCK_UN);
+        }
+        if ($fp) {
+            @fclose($fp);
+        }
     } catch (Throwable $t) {
         /* 统计失败静默 */
     }
@@ -831,10 +840,25 @@ function fw_intel_load(): array
     return $GLOBALS['FW_INTEL_CACHE'];
 }
 
-/** 命中危险 IP 库？单 IP 精确哈希 + 网段二分（仅 IPv4） */
+/** 命中危险 IP 库？单 IP 精确哈希 + 网段二分（仅 IPv4）
+ *  v1.33.0 极致优化：优先走二进制快照（fw_intel.bin）——此前每请求都要读入整个
+ *  fw_intel.php 并 gzdecode + json_decode（库最大可含 20 万 IP，单请求内存 20MB+、
+ *  CPU 数十毫秒，弱 CPU 主机上拖慢每一次访问）；二进制路径只读一个紧凑文件 +
+ *  二分查找，内存 KB 级、微秒级出结果。快照缺失 / 过期时惰性重建，重建失败回退老路径。 */
 function fw_intel_hit(string $ip): bool
 {
+    $bin = fw_intel_bin_hit($ip);
+    if ($bin !== null) {
+        return $bin;
+    }
     $intel = fw_intel_load();
+    if ((int)$intel['total'] > 0) {
+        fw_intel_bin_lazy(); // 惰性重建快照（老站升级 / 手动导入后首次访问触发一次）
+        $bin = fw_intel_bin_hit($ip);
+        if ($bin !== null) {
+            return $bin;
+        }
+    }
     if ((int)$intel['total'] <= 0) {
         return false;
     }
@@ -861,6 +885,141 @@ function fw_intel_hit(string $ip): bool
     for ($i = $found; $i >= 0 && $i > $found - 4; $i--) { // 邻近兜底（同 lo 多段）
         if ($n >= (int)$nets[$i][0] && $n <= (int)$nets[$i][1]) {
             return true;
+        }
+    }
+    return false;
+}
+
+/* ---------- v1.33.0 危险 IP 库二进制快照（请求热路径专用） ----------
+ * 格式：'MFI1' + 网段数 u32 + IP 数 u32 + 网段按 lo 排序的 [lo u32, hi u32]×N + 升序 IP u32×M。
+ * fw_intel.php（JSON）仍是唯一数据源（后台展示 / 编辑用）；.bin 是只读加速快照，
+ * 同步 / 手动导入后重建，缺失时惰性重建；快照不可用时自动回退 JSON 老路径，不影响正确性。 */
+
+function fw_intel_bin_path(): string
+{
+    return DATA_DIR . '/fw_intel.bin';
+}
+
+/** 由解析后的 IP / 网段集合构建二进制快照（临时文件 + 原子替换）；失败返回 false */
+function fw_intel_bin_build(array $ips, array $nets): bool
+{
+    try {
+        $netList = [];
+        foreach ($nets as $r) {
+            if (is_array($r) && count($r) === 2) {
+                $netList[] = [(int)$r[0], (int)$r[1]];
+            }
+        }
+        usort($netList, function ($a, $b) {
+            return $a[0] <=> $b[0] ?: $a[1] <=> $b[1];
+        });
+        $ipSet = [];
+        foreach (array_keys($ips) as $k) {
+            $v = fw_ip2n((string)$k);
+            if ($v !== null) {
+                $ipSet[$v] = 1;
+            }
+        }
+        $ipArr = array_keys($ipSet);
+        sort($ipArr);
+        $bin = 'MFI1' . pack('N2', count($netList), count($ipArr));
+        foreach ($netList as $r) {
+            $bin .= pack('N2', $r[0], $r[1]);
+        }
+        foreach ($ipArr as $v) {
+            $bin .= pack('N', $v);
+        }
+        $tmp = fw_intel_bin_path() . '.' . (getmypid() ?: 'x') . '.tmp';
+        if (@file_put_contents($tmp, $bin) === false || !@rename($tmp, fw_intel_bin_path())) {
+            @unlink($tmp);
+            return false;
+        }
+        return true;
+    } catch (Throwable $t) {
+        return false;
+    }
+}
+
+/** 惰性重建快照（非阻塞锁防并发重复重建；失败静默，老路径兜底） */
+function fw_intel_bin_lazy(): void
+{
+    $lk = Store::tryLock('intel_bin');
+    if (!$lk) {
+        return;
+    }
+    try {
+        $intel = fw_intel_load();
+        if ((int)$intel['total'] > 0) {
+            fw_intel_bin_build((array)$intel['ips'], (array)$intel['nets']);
+        }
+    } catch (Throwable $t) {
+        /* 快照失败不阻断业务 */
+    }
+    Store::unlock($lk);
+}
+
+/** 二进制快照命中判定：命中 / 未命中返回 bool，快照不可用返回 null（调用方回退老路径） */
+function fw_intel_bin_hit(string $ip): ?bool
+{
+    static $cache = null; // [mtime, raw] —— 同请求只读一次文件
+    $p = fw_intel_bin_path();
+    if (!is_file($p)) {
+        return null;
+    }
+    $m = @filemtime($p);
+    if (!is_array($cache) || $cache[0] !== $m) {
+        $raw = @file_get_contents($p);
+        if (!is_string($raw) || strlen($raw) < 16 || strncmp($raw, 'MFI1', 4) !== 0) {
+            return null;
+        }
+        $cache = [$m, $raw];
+    }
+    $raw = $cache[1];
+    $n = fw_ip2n($ip);
+    if ($n === null) {
+        return false; // 快照只含 IPv4（与老路径口径一致）
+    }
+    $cnt = unpack('N2', substr($raw, 4, 8));
+    $netCount = (int)$cnt[1];
+    $ipCount = (int)$cnt[2];
+    /* 体积防御：快照损坏时回退老路径 */
+    if (12 + $netCount * 8 + $ipCount * 4 > strlen($raw)) {
+        return null;
+    }
+    // 网段二分：找 lo <= n 的最后一个段，再向前看几个同 lo 重叠段
+    $lo = 0;
+    $hi = $netCount - 1;
+    $found = -1;
+    while ($lo <= $hi) {
+        $mid = intdiv($lo + $hi, 2);
+        $v = unpack('N', substr($raw, 12 + $mid * 8, 4))[1];
+        if ($v <= $n) {
+            $found = $mid;
+            $lo = $mid + 1;
+        } else {
+            $hi = $mid - 1;
+        }
+    }
+    for ($i = $found; $i >= 0 && $i > $found - 4; $i--) {
+        $a = unpack('N2', substr($raw, 12 + $i * 8, 8));
+        if ($n >= (int)$a[1] && $n <= (int)$a[2]) {
+            return true;
+        }
+    }
+    // 单 IP 二分
+    $ipOff = 12 + $netCount * 8;
+    $lo = 0;
+    $hi = $ipCount - 1;
+    while ($lo <= $hi) {
+        $mid = intdiv($lo + $hi, 2);
+        $v = unpack('N', substr($raw, $ipOff + $mid * 4, 4))[1];
+        if ((int)$v === $n) {
+            return true;
+        }
+        if ($v < $n) {
+            $lo = $mid + 1;
+        } else {
+            $hi = $mid - 1;
         }
     }
     return false;
@@ -1039,6 +1198,7 @@ function fw_intel_sync(bool $manual = true): array
     ];
     Store::write('fw_intel.php', $intel);
     $GLOBALS['FW_INTEL_CACHE'] = $intel; // 同请求内立即可见
+    fw_intel_bin_build($ips, $nets); // v1.33.0：同步后重建二进制快照（请求热路径免 JSON 解码）
     log_action('fw_intel_sync', ($manual ? '手动' : '自动') . '同步危险 IP 库：' . $total . ' 条（IP ' . count($ips) . ' · 网段 ' . count($nets) . ($manualIps || $manualNets ? '，含手动导入 ' . (count($manualIps) + count($manualNets)) . ' 条' : '') . '），耗时 ' . $intel['took'] . 's', 0, '系统');
     return $intel;
 }
@@ -1071,6 +1231,7 @@ function fw_intel_import(string $text, string $by): int
     $intel['sources']['manual'] = ['ok' => true, 'name' => '手动导入（' . $by . '）', 'err' => '', 'count' => count($si) + count($sn)];
     Store::write('fw_intel.php', $intel);
     $GLOBALS['FW_INTEL_CACHE'] = $intel; // 同请求内立即可见
+    fw_intel_bin_build((array)$intel['ips'], (array)$intel['nets']); // v1.33.0：导入后重建二进制快照
     return count($si) + count($sn);
 }
 

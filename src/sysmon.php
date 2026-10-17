@@ -251,7 +251,7 @@ function sysmon_content_stats(): array
 /** 告警状态读写（data/sysmon_state.php） */
 function sysmon_state(): array
 {
-    $s = Store::read('sysmon_state.php', []);
+    $s = Store::readMemo('sysmon_state.php', []);
     return is_array($s) ? $s : [];
 }
 

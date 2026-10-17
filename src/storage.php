@@ -223,21 +223,17 @@ class FileStore
         return is_file(self::path($rel));
     }
 
-    /** 读原始载荷字符串（守卫前缀剥离 + gzip 自动解压，不做 JSON 解码）；文件不存在 / 损坏返回 null */
+    /** 读原始载荷字符串（守卫前缀剥离 + gzip 自动解压，不做 JSON 解码）；文件不存在 / 损坏返回 null
+     *  v1.33.0 极致优化：去掉共享锁——写入侧全部走「临时文件 + 原子 rename」，
+     *  读者只会看到旧或新的完整文件，永远不会读到半截，共享锁是纯开销；
+     *  慢磁盘 / NFS 主机上 flock 是毫秒级甚至网络往返，每请求十余次读累计显著。 */
     private static function readPayload(string $rel): ?string
     {
         $p = self::path($rel);
         if (!is_file($p)) {
             return null;
         }
-        $fp = @fopen($p, 'rb');
-        if (!$fp) {
-            return null;
-        }
-        @flock($fp, LOCK_SH);
-        $raw = stream_get_contents($fp);
-        @flock($fp, LOCK_UN);
-        fclose($fp);
+        $raw = @file_get_contents($p);
         if (!is_string($raw) || $raw === '') {
             return null;
         }
@@ -285,8 +281,10 @@ class FileStore
         return $short !== '' ? $short : $m;
     }
 
-    /** 单次完整写入（临时文件 + fflush/fsync + 原子 rename）；失败时通过 $err 返回人话原因 */
-    private static function writeTmp(string $tmp, string $payload, string $p, string &$err): bool
+    /** 单次完整写入（临时文件 + fflush + 原子 rename）；失败时通过 $err 返回人话原因
+     *  v1.33.0：$fsync=false 时跳过 fsync（高频写场景用，掉电最多丢最近几秒——
+     *  在线名单 / 统计计数这类可容忍数据，换取慢磁盘上每次写省 5~50ms） */
+    private static function writeTmp(string $tmp, string $payload, string $p, string &$err, bool $fsync = true): bool
     {
         $err = '';
         $fp = @fopen($tmp, 'wb');
@@ -298,10 +296,11 @@ class FileStore
         @flock($fp, LOCK_EX);
         $w = fwrite($fp, $payload);
         /* v1.21.0 持久化加固：fflush + fsync（PHP >= 8.1），确保数据在返回成功前已落盘，
-           掉电 / 宿主异常崩溃不会留下「写成功标记但内容半截」的文件 */
+           掉电 / 宿主异常崩溃不会留下「写成功标记但内容半截」的文件
+           v1.33.0：高频可容忍写（在线名单 / 统计）传 $fsync=false 跳过，慢磁盘显著提速 */
         if ($w !== false) {
             @fflush($fp);
-            if (function_exists('fsync')) {
+            if ($fsync && function_exists('fsync')) {
                 @fsync($fp);
             }
         }
@@ -324,7 +323,7 @@ class FileStore
         return true;
     }
 
-    public static function write(string $rel, $data): bool
+    public static function write(string $rel, $data, bool $fsync = true): bool
     {
         self::ensureDir(dirname($rel));
         $p = self::path($rel);
@@ -339,11 +338,11 @@ class FileStore
         $bin = @gzencode($json, 6);
         $payload = DATA_GUARD . (is_string($bin) && $bin !== '' ? $bin : $json);
         $err = '';
-        $ok = self::writeTmp($tmp, $payload, $p, $err);
+        $ok = self::writeTmp($tmp, $payload, $p, $err, $fsync);
         if (!$ok) {
             // 首次失败：先尝试目录自愈（建目录 / 修权限 / 重建空目录），再重试一次
             $firstErr = $err;
-            if (self::repairDir(dirname($rel)) && self::writeTmp($tmp, $payload, $p, $err)) {
+            if (self::repairDir(dirname($rel)) && self::writeTmp($tmp, $payload, $p, $err, $fsync)) {
                 return true;
             }
             @unlink($tmp);
@@ -645,9 +644,9 @@ class Store
         return $v;
     }
 
-    public static function write(string $rel, $data): bool
+    public static function write(string $rel, $data, bool $fsync = true): bool
     {
-        $ok = self::$drv === 'db' ? DbStore::write($rel, $data) : FileStore::write($rel, $data);
+        $ok = self::$drv === 'db' ? DbStore::write($rel, $data) : FileStore::write($rel, $data, $fsync);
         self::syncDrvErrs();
         if ($ok) {
             self::$memo[$rel] = $data; // 写后同步缓存，同请求内后续读免 IO

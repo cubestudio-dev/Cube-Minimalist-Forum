@@ -89,6 +89,7 @@ const LOG_ACTIONS = [
     'admin_save_monitor'   => '后台·监控设置',
     'admin_test_monitor'   => '后台·测试告警',
     'admin_repair_dirs'    => '后台·修复目录权限',
+    'admin_opcache_ini'    => '后台·OPcache 性能体检',
     'admin_backup'         => '后台·数据备份',
     'admin_backup_dl'      => '后台·下载备份',
     'admin_backup_del'     => '后台·删除备份',

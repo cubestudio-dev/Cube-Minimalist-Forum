@@ -4,6 +4,16 @@
  * 部署后首次访问会自动跳转到 install.php 安装向导
  */
 define('APP', 1);
+
+/* v1.33.0 资源端点轻装：先于 bootstrap 判定（bootstrap 据此跳过插件装载）——
+   静态资源 / 图标 / 附件 / Ping 不渲染页面、不触发任何插件钩子，
+   慢磁盘主机上省掉每请求的插件目录扫描与 require 纯浪费 I/O */
+$__resP = isset($_GET['p']) && is_string($_GET['p']) ? preg_replace('/[^a-z_]/', '', $_GET['p']) : '';
+if (in_array($__resP, ['asset', 'ping', 'icon', 'media'], true)) {
+    define('MF_RESOURCE', 1);
+}
+unset($__resP);
+
 require __DIR__ . '/src/bootstrap.php';
 
 /* v1.32.0 流量统计：在最外层加一个计数缓冲——FINAL 阶段拿到的长度 = 实际发送字节
@@ -14,19 +24,69 @@ ob_start(function ($s, $ph) {
     }
     return $s;
 });
-/* v1.16.0 输出 gzip 压缩：HTML 文本传输体积约 -60%～-80%，
-   客户端不支持时 ob_gzhandler 自动降级为不压缩，无需额外判断 */
-if (!ob_start('ob_gzhandler')) {
-    ob_start();
-}
+/* v1.33.0 HTTP 终结输出处理：整页收齐后统一 gzip + Content-Length + HTML ETag/304——
+   · gzip：文本传输体积约 -60%～-80%（客户端不支持自动透传原文）；
+   · Content-Length：慢速设备立即显示进度、连接可正常复用（旧 ob_gzhandler 逐块压缩无法预知总长）；
+   · ETag/304：重复访问 / 返回 / 刷新直接 304 零正文传输，高延迟链路整页字节数归零。 */
+ob_start('mf_http_out');
 
-/* v1.32.0 命中日志：响应收尾追加一行（每请求一次微秒级追加，替代旧版每请求 2 次
-   全局锁内读改写——高并发 / 慢磁盘下整站排队是「加载异常缓慢」的主因） */
+/* v1.33.0 关机顺序修正：先终结响应（冲刷输出缓冲 → 计数缓冲记下实际发送字节），
+   再追加命中日志——此前 fw_hit_append 先注册先执行，读到的 MF_OUT_BYTES 恒为 0，
+   流量统计里的「出站流量」一直偏小。AI 队列 / 自动巡逻随后在空闲期执行。 */
+register_shutdown_function(function () {
+    mf_response_finalize();
+    ai_process_queue(false);
+    ai_autopilot_tick();
+});
 register_shutdown_function('fw_hit_append');
 
 /* 未安装 → 安装向导 */
 if (!FileStore::exists('lock/install.lock')) {
     redirect(ua('install.php'));
+}
+
+/* 页面路由名（资源端点前置判定也已用） */
+$p = isset($_GET['p']) && is_string($_GET['p']) ? preg_replace('/[^a-z_]/', '', $_GET['p']) : 'home';
+
+/* v1.19.0：写清浏览了什么页面与具体名称（首页 / 帖子《标题》 / 版块《名称》 / 用户「名」的个人主页 / 后台 · 标签页）
+   v1.23.0：链接预取请求（X-MF-Prefetch 头）不是用户真实浏览，不计入
+   v1.32.0：开放 API 请求（?api=）不是页面浏览，不再误记为「首页」
+   v1.33.0：命中上下文前置——资源端点出站前也需要它（谁在访问哪个资源） */
+if ((int)cfg('log_views', 0) === 1 && !isset($_GET['a']) && !isset($_GET['api']) && empty($_SERVER['HTTP_X_MF_PREFETCH'])) {
+    $vs = $_GET;
+    unset($vs['XTransformPort']);
+    $vn = view_page_name($vs);
+    if ($vn !== '') {
+        log_action('view', '浏览了 ' . $vn);
+    }
+}
+$GLOBALS['MF_HIT_UID'] = (function_exists('current_user') && current_user()) ? (int)current_user()['id'] : 0;
+if (isset($_GET['a'])) {
+    $GLOBALS['MF_HIT_P'] = 'a:' . preg_replace('/[^a-z_]/', '', (string)$_GET['a']);
+    $GLOBALS['MF_HIT_PF'] = 0;
+} elseif (isset($_GET['api'])) {
+    $GLOBALS['MF_HIT_P'] = 'api:' . substr(preg_replace('/[^a-z0-9_.]/', '', strtolower((string)$_GET['api'])), 0, 30);
+    $GLOBALS['MF_HIT_PF'] = 0;
+} else {
+    $GLOBALS['MF_HIT_P'] = ($p === '' ? 'home' : $p);
+    $GLOBALS['MF_HIT_PF'] = empty($_SERVER['HTTP_X_MF_PREFETCH']) ? 0 : 1;
+}
+
+/* v1.33.0 资源端点最前置出站：不等在线统计 / 监控 / 清理任务——
+   一次页面浏览会拉起 HTML + CSS + JS + 图标 + 若干附件，这些都走本入口；
+   让它们零额外开销直达出站，是「部分设备加载不出来」场景里删减请求数量的关键 */
+require_once __DIR__ . '/src/pages.php';
+if ($p === 'asset') {
+    page_asset();
+}
+if ($p === 'ping') {
+    page_ping();
+}
+if ($p === 'icon') {
+    page_icon();
+}
+if ($p === 'media') {
+    page_media();
 }
 
 /* 在线统计（最近 N 分钟有活动的会话数） */
@@ -59,40 +119,10 @@ if (isset($_GET['api']) && is_string($_GET['api']) && $_GET['api'] !== '') {
     exit; /* api_handle 内部必出站，此处防御性兜底 */
 }
 
-/* v1.15.0：写清浏览了什么页面与具体名称（首页 / 帖子《标题》 / 版块《名称》 / 用户「名」的个人主页 / 后台 · 标签页）
-   v1.23.0：链接预取请求（X-MF-Prefetch 头）不是用户真实浏览，不计入
-   v1.32.0：开放 API 请求（?api=）不是页面浏览，不再误记为「首页」 */
-if ((int)cfg('log_views', 0) === 1 && !isset($_GET['a']) && !isset($_GET['api']) && empty($_SERVER['HTTP_X_MF_PREFETCH'])) {
-    $vs = $_GET;
-    unset($vs['XTransformPort']);
-    $vn = view_page_name($vs);
-    if ($vn !== '') {
-        log_action('view', '浏览了 ' . $vn);
-    }
-}
-
-/* 页面路由 */
-$p = isset($_GET['p']) && is_string($_GET['p']) ? preg_replace('/[^a-z_]/', '', $_GET['p']) : 'home';
-require_once __DIR__ . '/src/pages.php';
 require_once __DIR__ . '/src/admin.php';
 
-/* v1.32.0 命中上下文：供响应收尾的 fw_hit_append() 记录「谁在访问什么页面」
-   （预取请求标 pf=1，不计入 PV；动作 / API 请求以 a: / api: 前缀区分） */
-$GLOBALS['MF_HIT_UID'] = (function_exists('current_user') && current_user()) ? (int)current_user()['id'] : 0;
-if (isset($_GET['a'])) {
-    $GLOBALS['MF_HIT_P'] = 'a:' . preg_replace('/[^a-z_]/', '', (string)$_GET['a']);
-    $GLOBALS['MF_HIT_PF'] = 0;
-} elseif (isset($_GET['api'])) {
-    $GLOBALS['MF_HIT_P'] = 'api:' . substr(preg_replace('/[^a-z0-9_.]/', '', strtolower((string)$_GET['api'])), 0, 30);
-    $GLOBALS['MF_HIT_PF'] = 0;
-} else {
-    $GLOBALS['MF_HIT_P'] = ($p === '' ? 'home' : $p);
-    $GLOBALS['MF_HIT_PF'] = empty($_SERVER['HTTP_X_MF_PREFETCH']) ? 0 : 1;
-}
-
-/* v1.18.0：CSS / JS / Ping / 图标属于「资源」，不是「内容页」——
-   必须先于私密模式与协议门禁出站。否则开启协议门禁后，未同意协议的访客
-   连样式表请求都会被门禁页接管（HTML 冒充 CSS），整站裸奔无样式。 */
+/* v1.18.0：CSS / JS / 图标属于「资源」，不是「内容页」——已在上方资源段先行出站；
+   此处仅为兜底（正常请求不可达）。 */
 if ($p === 'asset') {
     page_asset();
 }
@@ -107,7 +137,7 @@ if ($p === 'sitemap') {
     page_sitemap();
 }
 /* v1.32.0 附件 / 图片出站：文件名随机不可猜测，走扩展名白名单 + 目录防逃逸，
-   资源级端点先于门禁出站（帖子内嵌图片必须能加载） */
+   资源级端点先于门禁出站（帖子内嵌图片必须能加载）——已在上方资源段先行出站，此处兜底 */
 if ($p === 'media') {
     page_media();
 }
@@ -174,9 +204,5 @@ switch ($p === '' ? 'home' : $p) {
  * 此前 AI 审核在关机阶段执行时会一直持有当前用户的会话锁，同一用户接下来的
  * 页面请求会被会话锁阻塞到 AI 调用结束，表现为“部分页面打开很慢/卡”。
  * v1.31.0：统一改走 mf_response_finalize()（幂等）——在 v1.17.0 基础上增加
- * FPM fastcgi_finish_request：响应立即真正终结，AI 外呼完全不在请求生命周期内。 */
-register_shutdown_function(function () {
-    mf_response_finalize();
-    ai_process_queue(false);
-    ai_autopilot_tick();
-});
+ * FPM fastcgi_finish_request：响应立即真正终结，AI 外呼完全不在请求生命周期内。
+ * v1.33.0：注册顺序调整见文件顶部（finalize → 命中日志 → 字节计数准确）。 */

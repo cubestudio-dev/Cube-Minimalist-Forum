@@ -139,6 +139,7 @@ function route_action(string $a): void
         case 'admin_save_monitor': admin_tab_guard(); act_admin_save_monitor(); return;
         case 'admin_test_monitor': admin_tab_guard(); act_admin_test_monitor(); return;
         case 'admin_repair_dirs': admin_tab_guard(); act_admin_repair_dirs(); return;
+        case 'admin_opcache_ini': admin_tab_guard(); act_admin_opcache_ini(); return;
         case 'admin_backup':    admin_tab_guard(); act_admin_backup(); return;
         case 'admin_backup_del': admin_tab_guard(); act_admin_backup_del(); return;
         case 'admin_update':        admin_tab_guard(); act_admin_update(); return;
@@ -2365,6 +2366,46 @@ function act_admin_repair_dirs(): void
             ? '另有 ' . count($broken) . ' 个 .broken-* 暂存目录（内有无法自动搬回的旧文件，数据未丢）建议通过 FTP 确认后删除。'
             : '如仍无法发帖，请重试一次发帖看是否已恢复。';
         flash('ok', '检查/修复完成：' . $fixed . ' 个目录均已可写。' . $extra);
+    }
+    admin_redirect('p=admin&tab=monitor');
+}
+
+/** v1.33.0 性能体检：一键创建 / 删除站点根目录 .user.ini（开启 OPcache）
+ *  LiteSpeed / CGI / FastCGI / FPM 类主机读取该文件；Apache mod_php 忽略（提示文案已说明）。
+ *  只管理本工具创建的配置：已有 .user.ini 且含 opcache.enable 时允许删除还原；
+ *  已存在但不含 opcache 配置时不覆盖（避免破坏用户自建配置）。 */
+function act_admin_opcache_ini(): void
+{
+    admin_tab_guard();
+    $op = $_POST['op'] ?? '';
+    $f = dirname(DATA_DIR) . '/.user.ini';
+    if ($op === 'create') {
+        $raw = is_file($f) ? (string)@file_get_contents($f) : '';
+        if (strpos($raw, 'opcache.enable') !== false) {
+            act_ok('.user.ini 已包含 opcache 配置，无需重复创建', u('p=admin&tab=monitor'));
+        }
+        if ($raw !== '') {
+            act_err('站点根目录已存在 .user.ini（不含 opcache 配置），为避免覆盖你的自建配置，请手动编辑该文件加入一行：opcache.enable=1', u('p=admin&tab=monitor'));
+        }
+        $content = "; Minimal Forum v" . app_version() . " 性能体检：开启 OPcache 字节码缓存\n"
+            . "; LiteSpeed / CGI / FastCGI / FPM 生效；Apache mod_php 忽略此文件（需主机商在 php.ini 开启）\n"
+            . "opcache.enable=1\nopcache.revalidate_freq=2\n";
+        if (@file_put_contents($f, $content) === false) {
+            act_err('创建失败：站点根目录不可写。请通过 FTP 手动创建 .user.ini，内容一行：opcache.enable=1', u('p=admin&tab=monitor'));
+        }
+        log_action('admin_opcache_ini', '创建 .user.ini 开启 OPcache（性能体检）');
+        act_ok('已创建 .user.ini（opcache.enable=1）。LiteSpeed / CGI / FastCGI / FPM 主机约 5 分钟内生效（或重启 PHP）；Apache mod_php 会忽略此文件，需联系主机商在 php.ini 开启。稍后回到「监控 → 性能体检」查看状态。', u('p=admin&tab=monitor'));
+    }
+    if ($op === 'del') {
+        $raw = is_file($f) ? (string)@file_get_contents($f) : '';
+        if ($raw !== '' && strpos($raw, 'opcache.enable') !== false) {
+            if (@unlink($f)) {
+                log_action('admin_opcache_ini', '删除 .user.ini（还原 OPcache 配置）');
+                act_ok('已删除 .user.ini（还原）', u('p=admin&tab=monitor'));
+            }
+            act_err('删除失败：站点根目录不可写或文件属主异常，请通过 FTP 删除 .user.ini', u('p=admin&tab=monitor'));
+        }
+        act_ok('未发现本工具创建的 .user.ini，未做改动', u('p=admin&tab=monitor'));
     }
     admin_redirect('p=admin&tab=monitor');
 }

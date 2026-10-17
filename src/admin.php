@@ -1258,6 +1258,46 @@ function admin_tab_monitor(): void
     }
     echo '</div>';
 
+    /* v1.33.0 性能体检：OPcache 是弱 CPU / 共享主机整站缓慢的头号原因——
+       未启用时每个请求都要重新编译全部 PHP 源码（30+ 文件），CPU 全耗在重复劳动上。
+       提供一键创建 / 删除 .user.ini（LiteSpeed / CGI / FastCGI / FPM 类主机生效） */
+    $opLoaded = extension_loaded('Zend OPcache') || function_exists('opcache_get_status');
+    $opRaw = strtolower(trim((string)@ini_get('opcache.enable')));
+    $opOn = $opLoaded && $opRaw !== '' && $opRaw !== '0' && $opRaw !== 'off' && $opRaw !== 'false';
+    $userIni = dirname(DATA_DIR) . '/.user.ini';
+    $userIniRaw = is_file($userIni) ? (string)@file_get_contents($userIni) : '';
+    $userIniOurs = $userIniRaw !== '' && strpos($userIniRaw, 'opcache.enable') !== false;
+    $opHit = '';
+    if ($opOn && function_exists('opcache_get_status')) {
+        $ops = @opcache_get_status(false);
+        if (is_array($ops) && isset($ops['opcache_statistics']['opcache_hit_rate'])) {
+            $opHit = '（命中率 ' . round((float)$ops['opcache_statistics']['opcache_hit_rate'], 1) . '%）';
+        }
+    }
+    echo '<div class="card form-card"><h2 class="card-title">' . t('性能体检') . '</h2><div class="mon-grid">' .
+        '<div class="mon-cell' . ($opOn ? '' : ' cell-bad') . '"><b>' . ($opOn ? '✔ 已开启' : ($opLoaded ? '未启用' : '未安装')) . '</b><span>OPcache 字节码缓存</span></div>' .
+        '<div class="mon-cell"><b>' . ($opOn ? '✔' : '—') . '</b><span>页面 gzip 压缩（程序自带）</span></div>' .
+        '<div class="mon-cell"><b>✔</b><span>页面 ETag / 304 协商缓存（程序自带）</span></div>' .
+        '</div>';
+    if ($opOn) {
+        echo '<p class="hint">OPcache 已启用' . e($opHit) . '：PHP 编译结果跨请求复用，弱 CPU 主机上省去每请求的重复编译。程序侧 gzip / ETag / 304 已内建，无需配置。</p>';
+    } else {
+        echo '<p class="hint"><b style="color:var(--danger)">OPcache 未启用：服务器每个请求都要重新编译全部 PHP 源码（本程序 30+ 个文件），弱 CPU / 共享主机上这往往是「整站加载缓慢、部分设备打不开」的头号原因。</b>' .
+            ($opLoaded ? '当前 PHP 已带 OPcache 扩展但被配置关闭。' : '当前 PHP 未加载 OPcache 扩展。') .
+            '可点击下方按钮在站点根目录创建 .user.ini 尝试开启——LiteSpeed / CGI / FastCGI / FPM 类主机生效（约 5 分钟内或重启 PHP 后）；Apache mod_php 会忽略该文件，此类主机请联系主机商在 php.ini 开启 opcache.enable=1。</p>';
+        if ($userIniOurs) {
+            echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline">' . csrf_field() .
+                '<button class="btn btn-primary" type="submit" name="op" value="del">' . t('删除 .user.ini（还原）') . '</button></form>' .
+                '<p class="hint">.user.ini 已存在且含 opcache.enable=1。若长时间未生效，请等待 5 分钟（user_ini.cache_ttl）或重启 PHP，再刷新本页查看。</p>';
+        } elseif ($userIniRaw !== '') {
+            echo '<p class="hint">站点根目录已存在 .user.ini（不含 opcache 配置）。本工具不会覆盖他人配置——请手动编辑该文件，加入一行：opcache.enable=1</p>';
+        } else {
+            echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline">' . csrf_field() .
+                '<button class="btn btn-primary" type="submit" name="op" value="create">' . t('一键创建 .user.ini（开启 OPcache）') . '</button></form>';
+        }
+    }
+    echo '</div>';
+
     echo '<div class="card form-card"><h2 class="card-title">' . t('内容规模') . '</h2><div class="mon-grid">' .
         '<div class="mon-cell"><b>' . $threads . '</b><span>帖子</span></div>' .
         '<div class="mon-cell"><b>' . $withReplies . '</b><span>有回复的帖</span></div>' .
@@ -2262,6 +2302,7 @@ function admin_search_index(): array
         ['monitor', '监控与告警设置', '告警阈值（MB）/ 自动告警', 'threshold 告警'],
         ['monitor', '监控与告警设置', '监控页实时刷新间隔', 'monitor interval'],
         ['monitor', '环境自检', '目录权限 / 一键修复', 'env check 修复 权限'],
+        ['monitor', '性能体检', 'OPcache / .user.ini / gzip / ETag 304', 'opcache 性能 缓存 慢 加速'],
         ['monitor', '存储占用', '存储空间统计', 'disk usage'],
         ['monitor', '实时资源', 'CPU / 内存 / 负载', 'cpu memory load 资源'],
         ['monitor', '服务器信息', 'PHP / 系统版本', 'server php info'],

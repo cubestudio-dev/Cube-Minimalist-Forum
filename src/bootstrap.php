@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.32.0');
+    define('MF_VERSION', '1.33.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -126,8 +126,12 @@ if (!Store::writable()) {
    必须在会话启动与全部类库就绪后执行；t() 全程可用 */
 i18n_init();
 
-/* v1.22.0 拓展：加载全部启用插件（失败自动跳过；钩子从这里开始可订阅） */
-plugins_load();
+/* v1.22.0 拓展：加载全部启用插件（失败自动跳过；钩子从这里开始可订阅）
+   v1.33.0 极致优化：资源端点（asset/ping/icon/media）不渲染页面、不触发任何插件钩子，
+   跳过插件装载（目录扫描 + 逐个 require，慢磁盘上是纯浪费的每请求 I/O）；index.php 会为这些端点定义 MF_RESOURCE */
+if (!defined('MF_RESOURCE')) {
+    plugins_load();
+}
 
 /** 当前请求是否为 HTTPS（含反代透传场景；auth.php 会话续期也用它保持 Secure 一致性） */
 function app_is_https(): bool
@@ -183,6 +187,86 @@ function mf_response_finalize(): void
     if (function_exists('fastcgi_finish_request')) {
         @fastcgi_finish_request();
     }
+}
+
+/**
+ * v1.33.0 判断响应头是否已声明（headers_list 不区分大小写，逐条前缀匹配）
+ */
+function mf_header_sent(string $name): bool
+{
+    $name = strtolower($name) . ':';
+    foreach ((headers_list() ?: []) as $h) {
+        if (strpos(strtolower((string)$h), $name) === 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * v1.33.0 HTTP 终结输出处理器（替代 ob_gzhandler，把三类开销收敛到响应收尾一次完成）：
+ *  1) gzip：Accept-Encoding 支持时整页压缩（zlib.output_compression 开启 / 已声明编码时自动让位，不重复压缩）；
+ *  2) Content-Length：整页收齐后定长发送——慢速设备立即显示进度、连接可复用；
+ *     此前 ob_gzhandler 逐块压缩无法预知总长，连接只能靠关闭来标界；
+ *  3) HTML ETag / 304：按最终 HTML 内容指纹协商，重复访问 / 返回 / 刷新直接 304 零正文传输——
+ *     高延迟链路上省掉整页字节数，是“部分设备打不开”场景里最直接的减负手段。
+ * 仅当正文为完整 HTML（doctype/<html 开头）且本次请求无致命错误时才参与协商缓存；
+ * JSON / 重定向 / 资源出站（自带 Content-Length / Content-Encoding）自动透传不受影响。
+ * 调用方：index.php 最外层 ob_start('mf_http_out')；内层所有页面输出先收齐再统一终结。
+ */
+function mf_http_out(string $chunk, int $ph): string
+{
+    static $buf = '';
+    if (!($ph & PHP_OUTPUT_HANDLER_FINAL)) {
+        $buf .= $chunk;
+        return '';
+    }
+    $raw = $buf . $chunk;
+    $buf = '';
+    if (headers_sent()) {
+        return $raw; // 头已发出（极端场景），原样透传
+    }
+    /* 致命错误产生的残页不参与缓存协商（error_get_last 在关机阶段仍可读到致命信息） */
+    $el = error_get_last();
+    $fatal = is_array($el) && in_array((int)($el['type'] ?? 0), [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true);
+    $head = ltrim(substr($raw, 0, 200));
+    $isHtml = !$fatal && $raw !== '' && (stripos($head, '<!doctype html') === 0 || stripos($head, '<html') === 0);
+    if ($isHtml && !mf_header_sent('ETag')) {
+        $etag = '"' . md5($raw) . '"';
+        header('ETag: ' . $etag);
+        header('Vary: Accept-Encoding');
+        $inm = trim((string)($_SERVER['HTTP_IF_NONE_MATCH'] ?? ''));
+        if ($inm !== '') {
+            $core = trim($etag, '"'); // 比较统一用裸值（客户端可能带 W/ 前缀或引号）
+            foreach (explode(',', $inm) as $cand) {
+                $cand = trim(trim((string)$cand), "\"'");
+                if (strncmp($cand, 'W/', 2) === 0) {
+                    $cand = trim(substr($cand, 2), "\"'");
+                }
+                if ($cand === '*' || $cand === $core) {
+                    http_response_code(304);
+                    return '';
+                }
+            }
+        }
+    }
+    $body = $raw;
+    $zlibOn = (bool)@ini_get('zlib.output_compression');
+    if (!$zlibOn && !mf_header_sent('Content-Encoding')
+        && stripos((string)($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''), 'gzip') !== false) {
+        $gz = @gzencode($body, 6);
+        if ($gz !== false && strlen($gz) < strlen($body)) {
+            $body = (string)$gz;
+            header('Content-Encoding: gzip');
+            if (!mf_header_sent('Vary')) {
+                header('Vary: Accept-Encoding');
+            }
+        }
+    }
+    if (!$zlibOn && !mf_header_sent('Content-Length')) {
+        header('Content-Length: ' . (string)strlen($body));
+    }
+    return $body;
 }
 
 /**

@@ -1448,7 +1448,8 @@ function online_count(): int
     $cut = time() - $w;
     $uids = [];
     $guests = 0;
-    foreach (Store::read('online.php', []) as $rec) {
+    /* v1.33.0：readMemo——在线名单每请求最多读一次（侧栏 + 在线页 + tick 共用） */
+    foreach (Store::readMemo('online.php', []) as $rec) {
         if (is_array($rec)) {
             if ((int)($rec['t'] ?? 0) < $cut) {
                 continue;
@@ -1508,7 +1509,9 @@ function online_tick(): int
     // in = 本会话首次出现时间（进入网站时刻）：沿用已有记录，旧格式 / 新会话则取当前
     $prevIn = is_array($o[$sid] ?? null) ? (int)($o[$sid]['in'] ?? 0) : 0;
     $o[$sid] = ['t' => $now, 'u' => $uid, 'in' => $prevIn > 0 ? $prevIn : $now];
-    Store::write('online.php', $o);
+    /* v1.33.0：跳过 fsync（在线名单属可容忍数据，掉电最多丢最近几秒的在线状态；
+       慢磁盘上每次锁定写省 5~50ms，是高频写路径的最后一块 fsync） */
+    Store::write('online.php', $o, false);
     Store::unlock($lk);
     /* v1.32.0：记录本次落盘时间到 Cookie，供下一请求 30 秒节流判断（会话早释放后也能工作） */
     @setcookie('mfol', (string)$now, ['expires' => $now + 86400, 'path' => '/', 'samesite' => 'Lax']);
@@ -1526,7 +1529,7 @@ function online_details(): array
     $cut = time() - $w;
     $users = [];   // uid => ['uid','in','t']
     $guests = [];  // [['in','t']]
-    foreach (Store::read('online.php', []) as $rec) {
+    foreach (Store::readMemo('online.php', []) as $rec) {
         if (is_array($rec)) {
             $t = (int)($rec['t'] ?? 0);
             if ($t < $cut) {
@@ -1571,7 +1574,8 @@ function online_details(): array
  */
 function sessions_gc(): void
 {
-    $st = Store::read('sysmon_state.php', []);
+    /* v1.33.0：readMemo（sysmon_tick 同请求也读此文件） */
+    $st = Store::readMemo('sysmon_state.php', []);
     if (!is_array($st) || time() - (int)($st['last_sess_gc'] ?? 0) < 3600) {
         return;
     }
