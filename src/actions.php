@@ -31,6 +31,11 @@ function handle_action(string $a): void
         act_search_suggest();
         return;
     }
+    /* v1.34.0 扫码登录轮询：GET + CSRF 头（确认态会为当前会话建立登录，详见 act_qr_check） */
+    if ($a === 'qr_check') {
+        act_qr_check();
+        return;
+    }
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
         redirect(u('p=home'));
     }
@@ -67,6 +72,8 @@ function route_action(string $a): void
         case 'send_code':        act_send_code(); return;
         case 'register':         act_register(); return;
         case 'login':            act_login(); return;
+        case 'qr_create':        act_qr_create(); return;   /* v1.34.0 扫码登录：创建一次性令牌 */
+        case 'qr_confirm':       act_qr_confirm(); return;  /* v1.34.0 扫码登录：扫码端确认 */
         case 'logout':           act_logout(); return;
         case 'dev_verify':       act_dev_verify(); return;
         case 'dev_cancel':       act_dev_cancel(); return;
@@ -102,6 +109,7 @@ function route_action(string $a): void
         case 'admin_data_compress': admin_tab_guard(); act_admin_data_compress(); return;
         case 'admin_save_basic': admin_tab_guard(); act_admin_save_basic(); return;
         case 'admin_save_feat':  admin_tab_guard(); act_admin_save_feat(); return;
+        case 'admin_save_qr':    admin_tab_guard(); act_admin_save_qr(); return;
         case 'admin_save_security': admin_tab_guard(); act_admin_save_security(); return;
         case 'admin_icon_upload': admin_tab_guard(); act_admin_icon_upload(); return;
         case 'admin_icon_del':    admin_tab_guard(); act_admin_icon_del(); return;
@@ -1408,7 +1416,7 @@ function act_admin_save_basic(): void
 /** 后台「功能」页：总开关保存（v1.14.0） */
 function act_admin_save_feat(): void
 {
-    $keys = ['register', 'guest_browse', 'post', 'reply', 'edit', 'del_own', 'like', 'report', 'search', 'search_suggest', 'emoji', 'online', 'signature', 'mention', 'motion', 'titles', 'upload'];
+    $keys = ['register', 'guest_browse', 'post', 'reply', 'edit', 'del_own', 'like', 'report', 'search', 'search_suggest', 'emoji', 'online', 'signature', 'mention', 'motion', 'titles', 'qr_login', 'upload'];
     $kv = [];
     $off = [];
     foreach ($keys as $k) {
@@ -1429,6 +1437,16 @@ function act_admin_save_feat(): void
     cfg_update($kv);
     log_action('admin_save_feat', '功能开关更新：关闭 ' . ($off ? implode('、', $off) : '无（全部开启）'));
     act_ok('功能开关已保存', u('p=admin&tab=feat'));
+}
+
+/** v1.34.0：扫码登录参数（有效期；总开关在功能开关列表内） */
+function act_admin_save_qr(): void
+{
+    $ttl = (int)($_POST['qr_ttl'] ?? 180);
+    $ttl = max(60, min(600, $ttl));
+    cfg_update(['qr_ttl' => $ttl]);
+    log_action('admin_save_qr', '扫码登录设置更新：二维码有效期 ' . $ttl . ' 秒');
+    act_ok('扫码登录设置已保存', u('p=admin&tab=feat'));
 }
 
 /** 网站图标上传（v1.14.0）：严格类型校验 + 内容嗅探；SVG 另做脚本注入拒绝，输出时叠加 CSP sandbox */

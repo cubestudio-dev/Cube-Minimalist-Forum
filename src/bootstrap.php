@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.33.0');
+    define('MF_VERSION', '1.34.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -49,6 +49,8 @@ require_once __DIR__ . '/sysmon.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/roles.php';
 require_once __DIR__ . '/devices.php';
+require_once __DIR__ . '/qrcodec.php';
+require_once __DIR__ . '/qrlogin.php';
 require_once __DIR__ . '/content.php';
 require_once __DIR__ . '/api.php';
 require_once __DIR__ . '/layout.php';

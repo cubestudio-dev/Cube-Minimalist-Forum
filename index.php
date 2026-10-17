@@ -9,7 +9,8 @@ define('APP', 1);
    静态资源 / 图标 / 附件 / Ping 不渲染页面、不触发任何插件钩子，
    慢磁盘主机上省掉每请求的插件目录扫描与 require 纯浪费 I/O */
 $__resP = isset($_GET['p']) && is_string($_GET['p']) ? preg_replace('/[^a-z_]/', '', $_GET['p']) : '';
-if (in_array($__resP, ['asset', 'ping', 'icon', 'media'], true)) {
+/* v1.34.0：qrimg（扫码登录二维码 SVG）同为资源端点——<img> 必须能加载，令牌本身即凭据 */
+if (in_array($__resP, ['asset', 'ping', 'icon', 'media', 'qrimg'], true)) {
     define('MF_RESOURCE', 1);
 }
 unset($__resP);
@@ -88,6 +89,10 @@ if ($p === 'icon') {
 if ($p === 'media') {
     page_media();
 }
+/* v1.34.0 扫码登录二维码 SVG（资源级端点：no-store + 令牌有效才出图） */
+if ($p === 'qrimg') {
+    page_qrimg();
+}
 
 /* 在线统计（最近 N 分钟有活动的会话数） */
 online_tick();
@@ -141,6 +146,10 @@ if ($p === 'sitemap') {
 if ($p === 'media') {
     page_media();
 }
+/* v1.34.0 扫码登录二维码：已在上方资源段先行出站，此处兜底 */
+if ($p === 'qrimg') {
+    page_qrimg();
+}
 /* v1.22.0 拓展：插件静态资源（扩展名白名单 + 目录防逃逸），资源级端点先于门禁出站 */
 if ($p === 'plugin' && isset($_GET['file']) && is_string($_GET['file']) && $_GET['file'] !== '') {
     plugin_asset(preg_replace('/[^a-z0-9_]/', '', (string)($_GET['pf'] ?? '')), (string)$_GET['file']);
@@ -149,7 +158,7 @@ if ($p === 'plugin' && isset($_GET['file']) && is_string($_GET['file']) && $_GET
 /* 私密论坛模式（v1.14.0）：后台关闭「游客可浏览」时，未登录仅允许 登录 / 注册 / 找回密码 /
    协议页（协议门禁页需要能查看协议，否则同开会锁死访客）；资源端点已在上方先行放行 */
 if (!feat_on('guest_browse') && !current_user()
-    && !in_array($p === '' ? 'home' : $p, ['login', 'register', 'forgot', 'icon', 'doc', 'ping', 'asset'], true)) {
+    && !in_array($p === '' ? 'home' : $p, ['login', 'register', 'forgot', 'icon', 'doc', 'ping', 'asset', 'qr'], true)) {
     flash('err', '本论坛仅限注册用户浏览，请先登录');
     redirect(u('p=login'));
 }
@@ -178,6 +187,7 @@ switch ($p === '' ? 'home' : $p) {
     case 'thread':        page_thread(); break;
     case 'new':           page_new(); break;
     case 'login':         page_login(); break;
+    case 'qr':            page_qr(); break; /* v1.34.0 扫码登录：扫码端确认页 */
     case 'register':      page_register(); break;
     case 'forgot':        page_forgot(); break;
     case 'user':          page_user(); break;

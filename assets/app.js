@@ -1313,4 +1313,72 @@
       });
     });
   })();
+
+  /* ---------- v1.34.0 扫码登录（登录页页签 + 一次性令牌轮询；二维码为服务端 SVG，前端零依赖渲染） ---------- */
+  (function () {
+    var tabPass = $('#qrTabPass'), tabQr = $('#qrTabQr');
+    if (!tabPass || !tabQr) return;
+    var panePass = $('#loginPass'), paneQr = $('#loginQr');
+    var box = $('#qrBox'), hint = $('#qrHint'), refreshBtn = $('#qrRefresh');
+    var timer = null;
+
+    function setStatus(msg, warn) {
+      if (hint) { hint.textContent = msg; hint.className = 'qr-hint' + (warn ? ' qr-warn' : ''); }
+    }
+    function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+    function showRefresh() { stop(); if (refreshBtn) refreshBtn.hidden = false; }
+
+    function poll(t) {
+      stop();
+      timer = setTimeout(function () {
+        fetch(apiUrl('a=qr_check&t=' + encodeURIComponent(t)), {
+          credentials: 'same-origin',
+          headers: { 'X-Requested-With': 'fetch', 'X-CSRF-Token': csrf() }
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (!j || j.ok === false) { setStatus((j && j.msg) || '网络异常，请重试', true); showRefresh(); return; }
+          if (j.s === 'ok') {
+            setStatus('扫码成功，正在进入论坛…');
+            setTimeout(function () { location.href = j.url || apiUrl('p=home'); }, 300);
+            return;
+          }
+          if (j.s === 'expired') { setStatus('二维码已过期，请点击重新生成', true); showRefresh(); return; }
+          poll(t);
+        }).catch(function () { poll(t); });
+      }, 2000);
+    }
+
+    function create() {
+      stop();
+      if (refreshBtn) refreshBtn.hidden = true;
+      if (box) box.innerHTML = '<span class="qr-loading">正在生成二维码…</span>';
+      setStatus('用已登录本站的手机等设备扫码，确认后本机自动登录');
+      postForm(apiUrl('a=qr_create'), {}, function (j) {
+        if (!j || !j.ok) { setStatus((j && j.msg) || '二维码生成失败，请重试', true); showRefresh(); return; }
+        if (box) box.innerHTML = '<img class="qr-img" alt="登录二维码" width="216" height="216" src="' + apiUrl('p=qrimg&t=' + encodeURIComponent(j.t)) + '">';
+        poll(j.t);
+      });
+    }
+
+    function showQr(on) {
+      tabPass.classList.toggle('on', !on);
+      tabQr.classList.toggle('on', on);
+      tabPass.setAttribute('aria-selected', on ? 'false' : 'true');
+      tabQr.setAttribute('aria-selected', on ? 'true' : 'false');
+      if (panePass) panePass.hidden = on;
+      if (paneQr) paneQr.hidden = !on;
+      if (on) { create(); } else { stop(); }
+    }
+
+    tabPass.addEventListener('click', function () { showQr(false); });
+    tabQr.addEventListener('click', function () { showQr(true); });
+    if (refreshBtn) refreshBtn.addEventListener('click', create);
+    /* 页签键盘可达：左右方向键切换（原生 Tab / Enter 已可用） */
+    [tabPass, tabQr].forEach(function (b) {
+      b.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+        var next = ev.key === 'ArrowRight' ? tabQr : tabPass;
+        next.focus(); next.click();
+      });
+    });
+  })();
   })();

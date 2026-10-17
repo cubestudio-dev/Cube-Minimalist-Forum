@@ -1088,3 +1088,17 @@ html.mf-leaving .main .flash { opacity: 1; } /* 提示条保持醒目 */
 .stats-table th, .stats-table td { padding: 7px 10px; border-top: 1px solid var(--border); text-align: left; }
 .stats-table thead th { color: var(--muted); font-weight: 600; border-top: 0; }
 .stats-table tbody td:first-child { color: var(--muted); }
+
+/* ---- v1.34.0 扫码登录 ---- */
+.qr-tabs { display: flex; gap: 6px; margin: 0 0 14px; }
+.qr-tab { flex: 1; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; font-family: inherit; transition: border-color .15s, color .15s; }
+.qr-tab:hover { color: var(--accent); }
+.qr-tab.on { color: var(--accent); border-color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.qr-stage { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 6px 0 2px; }
+.qr-box { width: 216px; height: 216px; max-width: 100%; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 12px; background: #fff; overflow: hidden; }
+.qr-box .qr-img { display: block; width: 100%; height: 100%; }
+.qr-box .qr-loading { font-size: 13px; color: var(--muted); }
+.qr-hint { font-size: 13px; color: var(--muted); text-align: center; margin: 0; }
+.qr-hint.qr-warn { color: #b45309; }
+.qr-dev { display: flex; flex-direction: column; gap: 2px; align-items: center; margin: 4px 0 10px; text-align: center; }
+.qr-acc { display: flex; align-items: center; gap: 8px; justify-content: center; margin: 0 0 14px; }

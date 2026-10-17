@@ -371,7 +371,16 @@ function page_login(): void
     }
 
     echo '<div class="auth-wrap"><div class="card auth-card">';
-    echo page_head(t('登录'), t('用户名或邮箱 + 密码'));
+    /* v1.34.0 扫码登录：登录页双页签（密码 / 扫码），功能关闭时保持原版式零变化 */
+    $qrOn = feat_on('qr_login');
+    echo page_head(t('登录'), $qrOn ? t('密码登录，或用已登录的设备扫码') : t('用户名或邮箱 + 密码'));
+    if ($qrOn) {
+        echo '<div class="qr-tabs" role="tablist">' .
+            '<button type="button" class="qr-tab on" id="qrTabPass" role="tab" aria-selected="true" aria-controls="loginPass">' . e(t('密码登录')) . '</button>' .
+            '<button type="button" class="qr-tab" id="qrTabQr" role="tab" aria-selected="false" aria-controls="loginQr">' . e(t('扫码登录')) . '</button>' .
+            '</div>';
+    }
+    echo '<div id="loginPass">';
     echo '<form method="post" action="' . e(u('a=login')) . '">' .
         csrf_field() .
         '<input type="hidden" name="next" value="' . e($next) . '">' .
@@ -379,9 +388,80 @@ function page_login(): void
         '<label class="field"><span class="field-l">' . e(t('密码')) . '</span><input class="input" type="password" name="pass" required autocomplete="current-password"></label>' .
         '<label class="check"><input type="checkbox" name="remember" value="1"> ' . e(t('保持登录 30 天')) . '</label>' .
         '<button class="btn btn-primary btn-block" type="submit">' . e(t('登录')) . '</button></form>' .
-        '<div class="auth-foot"><a href="' . e(u('p=register')) . '">' . e(t('没有账号？注册')) . '</a><a href="' . e(u('p=forgot')) . '">' . e(t('忘记密码？')) . '</a></div>' .
-        '</div></div>';
+        '<div class="auth-foot"><a href="' . e(u('p=register')) . '">' . e(t('没有账号？注册')) . '</a><a href="' . e(u('p=forgot')) . '">' . e(t('忘记密码？')) . '</a></div>';
+    echo '</div>';
+    if ($qrOn) {
+        echo '<div id="loginQr" hidden>' .
+            '<div class="qr-stage">' .
+            '<div class="qr-box" id="qrBox"><span class="qr-loading">' . e(t('正在生成二维码…')) . '</span></div>' .
+            '<p class="qr-hint" id="qrHint">' . e(t('用已登录本站的手机等设备扫码，确认后本机自动登录')) . '</p>' .
+            '<button type="button" class="btn btn-ghost btn-sm" id="qrRefresh" hidden>' . e(t('重新生成')) . '</button>' .
+            '</div>' .
+            '<div class="auth-foot"><a href="' . e(u('p=register')) . '">' . e(t('没有账号？注册')) . '</a></div>' .
+            '</div>';
+    }
+    echo '</div></div>';
     layout_footer();
+}
+
+/* ---------------- v1.34.0 扫码登录：扫码端确认页 ---------------- */
+function page_qr(): void
+{
+    layout_header(t('扫码登录'), 0);
+    $t = isset($_GET['t']) && is_string($_GET['t']) ? $_GET['t'] : '';
+    $tk = feat_on('qr_login') ? qr_load($t) : null;
+    $expired = !$tk || (int)($tk['e'] ?? 0) < time();
+    echo '<div class="auth-wrap"><div class="card auth-card">';
+    if (!feat_on('qr_login')) {
+        echo page_head(t('扫码登录'), t('本站未开启扫码登录'));
+        echo '<p class="hint">' . e(t('可回到论坛使用密码登录')) . '</p>';
+        echo '<div class="auth-foot"><a href="' . e(u('p=login')) . '">' . e(t('返回登录')) . '</a><a href="' . e(u('p=home')) . '">' . e(t('返回首页')) . '</a></div>';
+    } elseif ($expired) {
+        echo page_head(t('二维码已过期'), t('请回到待登录的设备刷新二维码后重新扫码'));
+        echo '<div class="auth-foot"><a href="' . e(u('p=home')) . '">' . e(t('返回首页')) . '</a></div>';
+    } elseif (!current_user()) {
+        echo page_head(t('请先登录本设备'), t('扫码确认需要使用已登录的设备'));
+        echo '<p class="hint">' . e(t('先用本设备登录，再重新扫描待登录设备上的二维码')) . '</p>';
+        echo '<a class="btn btn-primary btn-block" href="' . e(u('p=login&next=' . urlencode('p=qr&t=' . $t))) . '">' . e(t('登录本设备')) . '</a>';
+        echo '<div class="auth-foot"><a href="' . e(u('p=register')) . '">' . e(t('没有账号？注册')) . '</a></div>';
+    } else {
+        $u = current_user();
+        $confirmed = ($tk['s'] ?? '') !== 'w';
+        echo page_head(t('扫码登录确认'), t('确认允许以下设备登录你的账号？'));
+        echo '<div class="qr-dev"><b>' . e(dev_ua_name((string)($tk['ua'] ?? ''))) . '</b><span class="muted">IP ' . e((string)($tk['ip'] ?? '-')) . '</span></div>';
+        echo '<div class="qr-acc"><span class="avatar" aria-hidden="true">' . e(cut_str((string)$u['name'], 1)) . '</span><b>' . e((string)$u['name']) . '</b></div>';
+        if (!$confirmed) {
+            echo '<form method="post" action="' . e(u('a=qr_confirm')) . '">' . csrf_field() .
+                '<input type="hidden" name="t" value="' . e($t) . '">' .
+                '<button class="btn btn-primary btn-block" type="submit">' . e(t('确认登录')) . '</button></form>';
+        } else {
+            echo '<p class="hint"><b>' . e(t('已确认，请回到待登录设备查看')) . '</b></p>';
+        }
+        echo '<div class="auth-foot"><a href="' . e(u('p=home')) . '">' . e(t('取消并返回')) . '</a></div>';
+    }
+    echo '</div></div>';
+    layout_footer();
+}
+
+/* ---------------- v1.34.0 扫码登录：二维码 SVG 出站（资源级端点） ---------------- */
+function page_qrimg(): void
+{
+    header('Content-Type: image/svg+xml; charset=utf-8');
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: no-store');
+    $t = isset($_GET['t']) && is_string($_GET['t']) ? $_GET['t'] : '';
+    $tk = feat_on('qr_login') ? qr_load($t) : null;
+    $svg = '';
+    if ($tk && (int)($tk['e'] ?? 0) >= time() && ($tk['s'] ?? '') === 'w') {
+        $svg = qr_svg(qr_abs_url($t));
+    }
+    if ($svg === '') {
+        http_response_code(404);
+        echo '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>';
+        exit;
+    }
+    echo $svg;
+    exit;
 }
 
 /* ---------------- 注册 ---------------- */

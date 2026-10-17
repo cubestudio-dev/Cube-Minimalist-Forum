@@ -252,6 +252,7 @@ function admin_feat_cards(): array
             'del_own'      => ['删除自己的内容', '允许用户删除自己的帖子 / 回复；关闭后只能联系职员删除（v1.27.0）'],
             'signature'    => ['用户签名', '用户可在个人设置填写签名，展示在帖子 / 回复下方与个人主页'],
             'titles'       => ['会员头衔', '按发帖数自动晋升的展示性称号（新成员 → 社区元老，无权限含义）；关闭后不再显示头衔徽章（v1.27.0）'],
+            'qr_login'     => ['扫码登录', '登录页出现「扫码登录」页签：已登录的手机等设备扫码确认后，待登录设备自动进入该账号；二维码有效期在下方「扫码登录 · 参数」配置（v1.34.0）'],
         ],
         '互动与社区' => [
             'like'    => ['点赞', ''],
@@ -295,6 +296,16 @@ function admin_tab_feat(): void
         '<button class="btn btn-primary" type="submit">' . e(t('保存功能开关')) . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
         admin_restore_btn(implode(',', $allKeys)) . '</div>';
+
+    /* v1.34.0 扫码登录 · 参数（总开关在上方「基础功能」的「扫码登录」） */
+    echo '<div class="card form-card"><h2 class="card-title">' . e(t('扫码登录 · 参数')) . '</h2>' .
+        '<form method="post" action="' . e(u('a=admin_save_qr')) . '" data-ajax="1">' . csrf_field() .
+        '<label class="field"><span class="field-l">' . e(t('二维码有效期（秒）')) . '</span>' .
+        '<input class="input input-sm" type="number" name="qr_ttl" min="60" max="600" step="10" value="' . (int)cfg('qr_ttl', 180) . '"></label>' .
+        '<p class="hint">' . e(t('有效期 60～600 秒，过期后待登录设备需重新生成二维码；每次登录尝试生成一次性令牌，确认后立即作废。')) . '</p>' .
+        '<div class="form-foot"><span class="muted">' . e(t('总开关在「功能总开关」的「扫码登录」')) . '</span>' .
+        '<button class="btn btn-primary" type="submit">' . e(t('保存扫码设置')) . '</button></div>' .
+        '<span class="test-msg muted"></span></form></div>';
 }
 
 /* ---------------- v1.21.0 存储引擎（文件 ⇄ 数据库，双向无损迁移） ---------------- */
@@ -2091,6 +2102,7 @@ function admin_cfg_defaults(): array
         'feat_online' => [1, '在线名单'], 'feat_signature' => [1, '用户签名'],
         'feat_mention' => [1, '@ 提及通知'], 'feat_motion' => [1, '界面动效'],
         'feat_titles' => [1, '会员头衔'],
+        'feat_qr_login' => [1, '扫码登录'], 'qr_ttl' => [180, '扫码登录有效期（秒）'],
         /* 邮件 */
         'smtp_host' => ['', 'SMTP 主机'], 'smtp_port' => [465, 'SMTP 端口'],
         'smtp_from' => ['', '发信邮箱'], 'smtp_pass' => ['', 'SMTP 授权码'],
@@ -2204,6 +2216,8 @@ function admin_search_index(): array
         ['feat', '功能总开关', '界面动效', 'motion 动画 过渡 进度条 预取 流畅'],
         ['feat', '功能总开关', 'AI 审查（发帖 / 编辑 / 用户名）', 'ai precheck 审核 预检 编辑审查 用户名审查'],
         ['feat', '功能总开关', 'AI 自主管理', 'ai autopilot 巡逻'],
+        ['feat', '功能总开关', '扫码登录（二维码）', 'qr login 扫码 二维码 qrcode 登录码 手机扫码'],
+        ['feat', '扫码登录 · 参数', '二维码有效期（秒）', 'qr ttl 有效期 过期 扫码 二维码'],
         /* 存储 */
         ['storage', '存储引擎', '当前存储引擎', 'storage engine 文件 数据库 切换'],
         ['storage', '数据库连接', '数据库类型', 'sqlite mysql postgres pg 驱动'],
