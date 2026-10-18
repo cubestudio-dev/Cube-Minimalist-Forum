@@ -430,3 +430,46 @@ function mf_robots_norm(string $raw): string
     }
     return implode("\n", $out);
 }
+
+/** v1.35.1 合并后的 .user.ini 内容：「追加」动作实际写入的内容与「下载合并文件」降级方案共用同一来源，
+ *  杜绝两处口径不一致。$raw = 原文件内容（不存在 / 不可读时传 ''）；
+ *  原内容保留 + OPcache 标记块；原内容为空时返回与「一键创建」完全相同的模板。
+ *  注意：标记块 / 注释头字符串与 act_admin_opcache_ini 的「还原（del）」逐行移除逻辑严格对应，勿单独改动。 */
+function mf_userini_merged(string $raw = ''): string
+{
+    if (trim($raw) === '') {
+        return "; Minimal Forum v" . app_version() . " 性能体检：开启 OPcache 字节码缓存\n"
+            . "; LiteSpeed / CGI / FastCGI / FPM 生效；Apache mod_php 忽略此文件（需主机商在 php.ini 开启）\n"
+            . "opcache.enable=1\nopcache.revalidate_freq=2\n";
+    }
+    return $raw . "\n; ---- Minimal Forum OPcache（性能体检追加 v" . app_version() . "）----\n"
+        . "opcache.enable=1\nopcache.revalidate_freq=2\n"
+        . "; ---- Minimal Forum OPcache 追加结束 ----\n";
+}
+
+/** v1.35.1 站点根目录写入权限判定（.user.ini / robots.txt 共用）：
+ *  文件存在时看文件本身是否可写（属主 / 权限），并兜底看所在目录（目录可写即可 unlink 后重建）；
+ *  文件不存在时只看目录。返回 [文件可写, 目录可写]。 */
+function mf_root_write_check(string $file): array
+{
+    $root = dirname($file);
+    $rootW = is_writable($root);
+    $fileW = is_file($file) ? is_writable($file) : $rootW;
+    return [$fileW, $rootW];
+}
+
+/** v1.35.1 以附件形式下发文本内容（站点根目录不可写时的降级方案：
+ *  下载合并 / 推荐内容文件，由管理员通过 FTP / 主机面板上传到站点根目录） */
+function mf_text_download(string $content, string $name): void
+{
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . $name . '"');
+    header('Content-Length: ' . strlen($content));
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: no-store');
+    echo $content;
+    exit;
+}

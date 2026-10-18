@@ -158,8 +158,16 @@ function admin_card_seo(): string
     $robFile = dirname(DATA_DIR) . '/robots.txt';
     $robRaw = is_file($robFile) ? (string)@file_get_contents($robFile) : '';
     $robRec = mf_robots_recommended(false);
+    /* v1.35.1 预检站点根目录写权限：不可写时不展示写盘按钮，改走「下载 → FTP 上传」降级方案 */
+    [$robFileW, $robRootW] = mf_root_write_check($robFile);
+    $robManual = !$robFileW && !$robRootW;
     if (mf_robots_is_recommended($robRaw)) {
         $robSync = '<p class="hint" style="color:var(--ok)">✔ ' . t('站点根目录 robots.txt 已与推荐内容一致，无需同步') . '</p>';
+    } elseif ($robManual) {
+        $robSync = '<p class="hint" style="color:var(--danger)"><b>检测到站点根目录对 PHP 不可写——无法自动创建 / 覆盖 robots.txt（你的现有文件未被改动）。</b>点下方按钮下载推荐内容文件，通过 FTP / 主机面板上传到站点根目录（覆盖原文件；如需保留现有内容，请先自行备份）。</p>' .
+            '<form method="post" action="' . e(u('a=admin_file_download')) . '" class="inline">' . csrf_field() .
+            '<input type="hidden" name="what" value="robots">' .
+            '<button class="btn btn-primary" type="submit">' . t('下载 robots.txt（推荐内容）') . '</button></form>';
     } elseif ($robRaw === '') {
         $robSync = '<form method="post" action="' . e(u('a=admin_robots_sync')) . '" class="inline" data-n="' . e(t('将在站点根目录创建 robots.txt（推荐内容见下方）。确认创建？')) . '">' . csrf_field() .
             '<button class="btn btn-primary" type="submit">' . t('一键同步 robots.txt（创建）') . '</button></form>' .
@@ -1291,6 +1299,9 @@ function admin_tab_monitor(): void
     $userIni = dirname(DATA_DIR) . '/.user.ini';
     $userIniRaw = is_file($userIni) ? (string)@file_get_contents($userIni) : '';
     $userIniOurs = $userIniRaw !== '' && strpos($userIniRaw, 'opcache.enable') !== false;
+    /* v1.35.1 预检站点根目录写权限：不可写时不展示写盘按钮，改走「下载合并文件 → FTP 上传」降级 */
+    [$iniFileW, $iniRootW] = mf_root_write_check($userIni);
+    $iniManual = !$iniFileW && !$iniRootW;
     $opHit = '';
     if ($opOn && function_exists('opcache_get_status')) {
         $ops = @opcache_get_status(false);
@@ -1310,9 +1321,20 @@ function admin_tab_monitor(): void
             ($opLoaded ? '当前 PHP 已带 OPcache 扩展但被配置关闭。' : '当前 PHP 未加载 OPcache 扩展。') .
             '可点击下方按钮在站点根目录创建 .user.ini 尝试开启——LiteSpeed / CGI / FastCGI / FPM 类主机生效（约 5 分钟内或重启 PHP 后）；Apache mod_php 会忽略该文件，此类主机请联系主机商在 php.ini 开启 opcache.enable=1。</p>';
         if ($userIniOurs) {
-            echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline" data-n="' . e(t('确认移除 .user.ini 中的 OPcache 配置？仅移除 OPcache 相关行，其余内容保留不动；移除前自动备份原文件到 data/backup/。')) . '">' . csrf_field() .
-                '<button class="btn btn-primary" type="submit" name="op" value="del">' . t('移除 OPcache 配置（还原）') . '</button></form>' .
-                '<p class="hint">.user.ini 已含 OPcache 配置。若长时间未生效，请等待 5 分钟（user_ini.cache_ttl）或重启 PHP，再刷新本页查看。</p>';
+            echo '<p class="hint">.user.ini 已含 OPcache 配置。若长时间未生效，请等待 5 分钟（user_ini.cache_ttl）或重启 PHP，再刷新本页查看。' .
+                ($iniManual ? '当前站点根目录对 PHP 不可写，如需移除请通过 FTP 直接编辑 / 删除该文件。' : '') . '</p>';
+            if (!$iniManual) {
+                echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline" data-n="' . e(t('确认移除 .user.ini 中的 OPcache 配置？仅移除 OPcache 相关行，其余内容保留不动；移除前自动备份原文件到 data/backup/。')) . '">' . csrf_field() .
+                    '<button class="btn btn-primary" type="submit" name="op" value="del">' . t('移除 OPcache 配置（还原）') . '</button></form>';
+            }
+        } elseif ($iniManual) {
+            /* v1.35.1 降级面板：根目录不可写 → 下载合并文件 + FTP 指引（不再展示必然失败的写盘按钮） */
+            echo '<p class="hint" style="color:var(--danger)"><b>检测到站点根目录对 PHP 不可写——程序无法直接创建 / 修改 .user.ini（你的现有文件未被改动）。</b>已改用降级方案：点下方按钮下载合并好的完整文件' .
+                ($userIniRaw !== '' ? '（站点根目录现有 .user.ini 的内容已原样合并在内）' : '') . '，再通过 FTP / 主机面板上传到站点根目录。</p>' .
+                '<form method="post" action="' . e(u('a=admin_file_download')) . '" class="inline">' . csrf_field() .
+                '<input type="hidden" name="what" value="userini">' .
+                '<button class="btn btn-primary" type="submit">' . t('下载 .user.ini（已含 OPcache 配置）') . '</button></form>' .
+                '<p class="hint">下载后通过 FTP / 主机面板上传到站点根目录' . ($userIniRaw !== '' ? '，覆盖原 .user.ini' : '') . '；若浏览器保存的文件名丢了开头的点，请重命名为 .user.ini（开头是一个英文句点）。LiteSpeed / CGI / FastCGI / FPM 主机约 5 分钟内生效（或重启 PHP），之后回到本页查看状态。</p>';
         } elseif ($userIniRaw !== '') {
             echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline" data-n="' . e(t('站点根目录已存在 .user.ini。确认后：先自动备份原文件到 data/backup/，再在文件末尾追加 OPcache 配置（你的现有内容完整保留）。确认追加？')) . '">' . csrf_field() .
                 '<button class="btn btn-primary" type="submit" name="op" value="append">' . t('追加 OPcache 配置到现有 .user.ini') . '</button></form>' .
@@ -2219,6 +2241,7 @@ function admin_search_index(): array
         ['basic', 'SEO · 搜索引擎展示', 'Open Graph 社交分享标签', 'og 分享 微信'],
         ['basic', 'SEO · 搜索引擎展示', '自定义 <head> 内容（可选）', 'extra head 验证 统计代码'],
         ['basic', 'SEO · 搜索引擎展示', 'robots.txt 一键同步', 'robots 同步 爬虫 备份 覆盖 sync'],
+        ['basic', 'SEO · 搜索引擎展示', '站点根目录不可写降级：下载 robots.txt 后 FTP 上传', 'robots 下载 ftp 不可写 降级 手动 上传'],
         ['basic', '界面语言', '默认论坛语言', 'language 语言 简中 繁中 英 日 俄'],
         ['basic', '界面语言', '按 IP 自动切换语言', 'language auto geo 自动语言'],
         /* 功能 */
@@ -2334,6 +2357,7 @@ function admin_search_index(): array
         ['monitor', '环境自检', '目录权限 / 一键修复', 'env check 修复 权限'],
         ['monitor', '性能体检', 'OPcache / .user.ini / gzip / ETag 304', 'opcache 性能 缓存 慢 加速'],
         ['monitor', '性能体检', '追加 OPcache 配置到现有 .user.ini（同意式，原内容保留并自动备份）', 'opcache 追加 user.ini 同意 备份'],
+        ['monitor', '性能体检', '站点根目录不可写降级：下载 .user.ini 后 FTP 上传', 'user.ini 下载 ftp 不可写 降级 手动 上传 opcache'],
         ['monitor', '存储占用', '存储空间统计', 'disk usage'],
         ['monitor', '实时资源', 'CPU / 内存 / 负载', 'cpu memory load 资源'],
         ['monitor', '服务器信息', 'PHP / 系统版本', 'server php info'],

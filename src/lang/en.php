@@ -259,6 +259,8 @@ return [
         '将在站点根目录创建 robots.txt（推荐内容见下方）。确认创建？' => 'This will create robots.txt in the site root (recommended content below). Create it?',
         '站点根目录已存在 robots.txt，内容与推荐不一致。确认后：先自动备份原文件到 data/backup/，再覆盖为下方推荐内容。继续？' => 'The site root already has a robots.txt that differs from the recommendation. After confirmation: the original file is backed up to data/backup/, then overwritten with the recommended content below. Continue?',
         '站点根目录 robots.txt 已与推荐内容一致，无需同步' => 'Site-root robots.txt already matches the recommended content — no sync needed',
+        '下载 .user.ini（已含 OPcache 配置）' => 'Download .user.ini (with OPcache config)',
+        '下载 robots.txt（推荐内容）' => 'Download robots.txt (recommended content)',
         '理由（记录用）' => 'Reason (for records)',
         '用户' => 'Users',
         '用户签名' => 'User signatures',

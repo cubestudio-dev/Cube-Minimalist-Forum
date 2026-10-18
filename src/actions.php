@@ -149,6 +149,7 @@ function route_action(string $a): void
         case 'admin_repair_dirs': admin_tab_guard(); act_admin_repair_dirs(); return;
         case 'admin_opcache_ini': admin_tab_guard(); act_admin_opcache_ini(); return;
         case 'admin_robots_sync': admin_tab_guard(); act_admin_robots_sync(); return;
+        case 'admin_file_download': admin_tab_guard(); act_admin_file_download(); return; /* v1.35.1 降级下载 */
         case 'admin_backup':    admin_tab_guard(); act_admin_backup(); return;
         case 'admin_backup_del': admin_tab_guard(); act_admin_backup_del(); return;
         case 'admin_update':        admin_tab_guard(); act_admin_update(); return;
@@ -2411,11 +2412,14 @@ function act_admin_opcache_ini(): void
             flash('err', '站点根目录已存在 .user.ini（不含 opcache 配置）。请改用「追加 OPcache 配置到现有 .user.ini」——完整保留你的现有内容，仅在末尾追加；或手动编辑该文件加入一行：opcache.enable=1');
             admin_redirect($back);
         }
-        $content = "; Minimal Forum v" . app_version() . " 性能体检：开启 OPcache 字节码缓存\n"
-            . "; LiteSpeed / CGI / FastCGI / FPM 生效；Apache mod_php 忽略此文件（需主机商在 php.ini 开启）\n"
-            . "opcache.enable=1\nopcache.revalidate_freq=2\n";
-        if (@file_put_contents($f, $content) === false) {
-            flash('err', '创建失败：站点根目录不可写。请通过 FTP 手动创建 .user.ini，内容一行：opcache.enable=1');
+        /* v1.35.1 预检写权限：根目录不可写时不写盘，直接引导走「下载合并文件 → FTP 上传」降级方案 */
+        [$fileW, $rootW] = mf_root_write_check($f);
+        if (!$rootW) {
+            flash('err', '创建失败：站点根目录对 PHP 不可写，未做任何修改。已为你准备好完整文件：请用本页「下载 .user.ini（已含 OPcache 配置）」按钮下载，通过 FTP / 主机面板上传到站点根目录（若保存的文件名丢了开头的点，请重命名为 .user.ini）。');
+            admin_redirect($back);
+        }
+        if (@file_put_contents($f, mf_userini_merged('')) === false) {
+            flash('err', '创建失败：站点根目录写入异常。未做任何修改。请用本页「下载 .user.ini（已含 OPcache 配置）」按钮下载后通过 FTP 上传，内容一行核心配置：opcache.enable=1');
             admin_redirect($back);
         }
         log_action('admin_opcache_ini', '创建 .user.ini 开启 OPcache（性能体检）');
@@ -2431,16 +2435,25 @@ function act_admin_opcache_ini(): void
             flash('err', '.user.ini 不存在或为空，请改用「一键创建 .user.ini（开启 OPcache）」');
             admin_redirect($back);
         }
+        /* v1.35.1 预检写权限：文件可写（直接追加）或目录可写（可 unlink 后重建）才继续；
+           两者都不可写时不备份不写盘，改走「下载合并文件 → FTP 上传」降级方案 */
+        [$fileW, $rootW] = mf_root_write_check($f);
+        if (!$fileW && !$rootW) {
+            flash('err', '追加失败：站点根目录对 PHP 不可写（你的 .user.ini 原样未动，未做任何修改）。已为你合并好完整文件：请用本页「下载 .user.ini（已含 OPcache 配置）」按钮下载（原内容 + OPcache 配置），通过 FTP / 主机面板上传到站点根目录覆盖原文件；或手动编辑该文件加入一行：opcache.enable=1');
+            admin_redirect($back);
+        }
         $bak = mf_text_backup($f, 'user-ini-bak');
         if ($bak === '') {
             flash('err', '追加中止：备份原文件失败（data/backup/ 不可写），为保安全未做任何修改。请检查 data/backup/ 目录权限后重试。');
             admin_redirect($back);
         }
-        $block = "\n; ---- Minimal Forum OPcache（性能体检追加 v" . app_version() . "）----\n"
-            . "opcache.enable=1\nopcache.revalidate_freq=2\n"
-            . "; ---- Minimal Forum OPcache 追加结束 ----\n";
-        if (@file_put_contents($f, $raw . $block) === false) {
-            flash('err', '追加失败：站点根目录不可写。原文件已备份为 data/backup/' . basename($bak) . '，请通过 FTP 手动编辑 .user.ini 加入一行：opcache.enable=1');
+        $content = mf_userini_merged($raw);
+        /* 文件本身不可写但目录可写：unlink 只需目录写权限——删旧重建即可绕开属主 / 权限异常 */
+        $ok = $fileW
+            ? @file_put_contents($f, $content) !== false
+            : (@unlink($f) && @file_put_contents($f, $content) !== false);
+        if (!$ok) {
+            flash('err', '追加失败：站点根目录写入异常，未做任何修改（你的 .user.ini 原样未动，原文件备份仍在 data/backup/' . basename($bak) . '）。请用本页「下载 .user.ini（已含 OPcache 配置）」按钮下载后通过 FTP 上传覆盖。');
             admin_redirect($back);
         }
         log_action('admin_opcache_ini', '追加 OPcache 配置到现有 .user.ini（原内容保留，原文件备份：' . basename($bak) . '）');
@@ -2450,6 +2463,12 @@ function act_admin_opcache_ini(): void
         $raw = is_file($f) ? (string)@file_get_contents($f) : '';
         if (trim($raw) === '' || strpos($raw, 'opcache.enable') === false) {
             act_ok('未发现本工具写入的 OPcache 配置，未做任何改动', $back);
+        }
+        /* v1.35.1 预检：文件与目录均不可写时无法还原，不备份不写盘，给 FTP 手动指引 */
+        [$fileW, $rootW] = mf_root_write_check($f);
+        if (!$fileW && !$rootW) {
+            flash('err', '还原中止：站点根目录对 PHP 不可写，未做任何修改。请通过 FTP 手动编辑 .user.ini 移除 opcache 相关行（或删除整个文件）。');
+            admin_redirect($back);
         }
         $bak = mf_text_backup($f, 'user-ini-bak');
         /* v1.35.0：逐行移除 OPcache 相关行（标记块 / 旧版注释头 / opcache.* 配置行），
@@ -2474,16 +2493,18 @@ function act_admin_opcache_ini(): void
             $out[] = $ln;
         }
         $bakName = $bak !== '' ? basename($bak) : '失败';
+        /* 文件本身不可写但目录可写：unlink 只需目录写权限——删旧重建绕开属主 / 权限异常 */
+        $canRecreate = $fileW || $rootW;
         if (trim(implode("\n", $out)) === '') {
-            if (@unlink($f)) {
+            if ($canRecreate && @unlink($f)) {
                 log_action('admin_opcache_ini', '移除 OPcache 配置：.user.ini 仅含 OPcache 相关内容，已整体删除（原文件备份：' . $bakName . '）');
                 act_ok('已移除 OPcache 配置：.user.ini 只含 OPcache 相关内容，已整体删除（原文件备份为 data/backup/' . $bakName . '）。', $back);
             }
-            flash('err', '删除失败：站点根目录不可写或文件属主异常，未做修改。请通过 FTP 删除 .user.ini');
+            flash('err', '删除失败：站点根目录写入异常，未做修改。请通过 FTP 删除 .user.ini');
             admin_redirect($back);
         }
-        if (@file_put_contents($f, implode("\n", $out)) === false) {
-            flash('err', '还原失败：站点根目录不可写，未做任何修改。请通过 FTP 手动编辑 .user.ini 移除 opcache 相关行');
+        if (!$canRecreate || @file_put_contents($f, implode("\n", $out)) === false) {
+            flash('err', '还原失败：站点根目录写入异常，未做任何修改。请通过 FTP 手动编辑 .user.ini 移除 opcache 相关行');
             admin_redirect($back);
         }
         log_action('admin_opcache_ini', '移除 OPcache 配置：其余自建内容完整保留（原文件备份：' . $bakName . '）');
@@ -2492,7 +2513,8 @@ function act_admin_opcache_ini(): void
     admin_redirect($back);
 }
 
-/** v1.35.0 robots.txt 一键同步（SEO 设置）：同意式写盘——覆盖前先自动备份原文件到 data/backup/ */
+/** v1.35.0 robots.txt 一键同步（SEO 设置）：同意式写盘——覆盖前先自动备份原文件到 data/backup/
+ *  v1.35.1：预检站点根目录写权限，不可写时改走「下载推荐内容 → FTP 上传」降级方案，不再盲试写盘 */
 function act_admin_robots_sync(): void
 {
     admin_tab_guard();
@@ -2503,25 +2525,53 @@ function act_admin_robots_sync(): void
     if (mf_robots_is_recommended($raw)) {
         act_ok('服务器 robots.txt 已是推荐内容，无需同步', $back);
     }
+    /* v1.35.1 预检写权限：文件可写（直接覆盖）或目录可写（可 unlink 后重建）才继续；
+       两者都不可写时不备份不写盘，引导走「下载 robots.txt → FTP 上传」降级方案 */
+    [$fileW, $rootW] = mf_root_write_check($f);
+    if (!$fileW && !$rootW) {
+        flash('err', '同步失败：站点根目录对 PHP 不可写（原 robots.txt 原样未动，未做任何修改）。已为你准备好推荐内容文件：请用本页「下载 robots.txt（推荐内容）」按钮下载，通过 FTP / 主机面板上传到站点根目录覆盖原文件（如需保留原内容，先自行下载备份）。');
+        admin_redirect($back);
+    }
     if ($raw !== '') {
         $bak = mf_text_backup($f, 'robots-bak');
         if ($bak === '') {
             flash('err', '同步中止：备份原文件失败（data/backup/ 不可写），为保安全未做任何修改。请检查 data/backup/ 目录权限后重试。');
             admin_redirect($back);
         }
-        if (@file_put_contents($f, $rec) === false) {
-            flash('err', '同步失败：站点根目录不可写。原文件已备份为 data/backup/' . basename($bak) . '，请通过 FTP 手动更新 robots.txt');
+        /* 文件本身不可写但目录可写：unlink 只需目录写权限——删旧重建绕开属主 / 权限异常 */
+        $ok = $fileW
+            ? @file_put_contents($f, $rec) !== false
+            : (@unlink($f) && @file_put_contents($f, $rec) !== false);
+        if (!$ok) {
+            flash('err', '同步失败：站点根目录写入异常，未做任何修改（原 robots.txt 原样未动，原文件备份仍在 data/backup/' . basename($bak) . '）。请用本页「下载 robots.txt（推荐内容）」按钮下载后通过 FTP 上传覆盖。');
             admin_redirect($back);
         }
         log_action('admin_robots_sync', '覆盖 robots.txt 为推荐内容（原文件备份：' . basename($bak) . '）');
         act_ok('已同步 robots.txt（原文件备份为 data/backup/' . basename($bak) . '）。爬虫规则将在搜索引擎下次抓取时生效。', $back);
     }
     if (@file_put_contents($f, $rec) === false) {
-        flash('err', '创建失败：站点根目录不可写。请通过 FTP 手动上传 robots.txt（推荐内容见后台 SEO 设置展开区）。');
+        flash('err', '创建失败：站点根目录写入异常，未做任何修改。请用本页「下载 robots.txt（推荐内容）」按钮下载后通过 FTP 上传到站点根目录。');
         admin_redirect($back);
     }
     log_action('admin_robots_sync', '创建 robots.txt（推荐内容）');
     act_ok('已在站点根目录创建 robots.txt（推荐内容）。爬虫规则将在搜索引擎下次抓取时生效。', $back);
+}
+
+/** v1.35.1 降级下载：站点根目录不可写时，下载合并 / 推荐内容文件，
+ *  由管理员通过 FTP / 主机面板上传到站点根目录（附件响应，不落地 data/，不留临时文件） */
+function act_admin_file_download(): void
+{
+    admin_tab_guard();
+    $what = (string)($_POST['what'] ?? '');
+    if ($what === 'userini') {
+        $f = dirname(DATA_DIR) . '/.user.ini';
+        $raw = is_file($f) && is_readable($f) ? (string)@file_get_contents($f) : '';
+        /* 已含 OPcache 配置：下发当前原文件内容（上传回去即还原）；
+           否则下发合并内容（原内容保留 + OPcache 标记块），与「追加」写入内容同源 */
+        $content = strpos($raw, 'opcache.enable') !== false ? $raw : mf_userini_merged($raw);
+        mf_text_download($content, '.user.ini');
+    }
+    mf_text_download(mf_robots_recommended(true), 'robots.txt');
 }
 
 /** 手动发送测试 / 真实告警邮件（force 跳过冷却） */
