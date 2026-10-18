@@ -361,3 +361,72 @@ function hidden_back(): string
     $uri = preg_replace('/[^\x21-\x7e]/', '', $uri);
     return '<input type="hidden" name="back" value="' . e($uri !== '' ? $uri : u('p=home')) . '">';
 }
+
+/* ---------------- v1.35.0 性能体检 / SEO：服务器文件安全自改（同意式） ---------------- */
+
+/** 把 $file 备份到 data/backup/<prefix>-<时间>.txt，返回备份绝对路径（失败返回 ''） */
+function mf_text_backup(string $file, string $prefix): string
+{
+    $dir = DATA_DIR . '/backup';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0775, true);
+    }
+    $dest = $dir . '/' . $prefix . '-' . date('Ymd-His') . '.txt';
+    return @copy($file, $dest) ? $dest : '';
+}
+
+/** robots.txt 推荐内容（显示与「一键同步」共用同一份来源，杜绝两处口径不一致）。
+ *  $forSync=true 用于实际写盘：site_url 未配置为有效 http(s) 地址时省略 Sitemap 行，避免写入无效链接。 */
+function mf_robots_recommended(bool $forSync = false): string
+{
+    $site = rtrim(trim((string)cfg('site_url', '')), '/');
+    $ok = $site !== '' && stripos($site, 'http') === 0 && strpos($site, '你的域名') === false;
+    $lines = [
+        '# 极简论坛 robots.txt —— 控制爬虫抓取频率，保护后台与私有页面',
+        'User-agent: *',
+        'Crawl-delay: 10',
+        'Disallow: /install.php',
+        'Disallow: /index.php?p=admin',
+        'Disallow: /index.php?p=login',
+        'Disallow: /index.php?p=register',
+        'Disallow: /index.php?p=settings',
+        'Disallow: /index.php?p=notifications',
+        'Disallow: /index.php?a=',
+        'Allow: /',
+        '',
+        '# 数据目录（Apache 已由 .htaccess 拦截；nginx 请参考 README 配置）',
+        'Disallow: /data/',
+        'Disallow: /src/',
+    ];
+    if ($ok) {
+        $lines[] = 'Sitemap: ' . $site . '/index.php?p=sitemap';
+    } elseif (!$forSync) {
+        /* 仅展示口径：site_url 无效时显示占位示例（展示层自行 e() 转义，这里输出原文） */
+        $lines[] = 'Sitemap: ' . (string)cfg('site_url', 'https://你的域名') . '/index.php?p=sitemap';
+    }
+    return implode("\n", $lines) . "\n";
+}
+
+/** 服务器上的 robots.txt 是否已是推荐内容（兼容带/不带 Sitemap 行两种口径，忽略空行与行尾空白） */
+function mf_robots_is_recommended(string $raw): bool
+{
+    $n = mf_robots_norm($raw);
+    if ($n === '') {
+        return false;
+    }
+    return $n === mf_robots_norm(mf_robots_recommended(true))
+        || $n === mf_robots_norm(mf_robots_recommended(false));
+}
+
+/** robots.txt 比较口径：忽略行尾空白与空行差异，仅比较有效行 */
+function mf_robots_norm(string $raw): string
+{
+    $out = [];
+    foreach (preg_split('/\r\n|\r|\n/', $raw) as $ln) {
+        $ln = rtrim($ln);
+        if ($ln !== '') {
+            $out[] = $ln;
+        }
+    }
+    return implode("\n", $out);
+}

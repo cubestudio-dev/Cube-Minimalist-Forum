@@ -154,6 +154,21 @@ function admin_card_seo(): string
         return '<option value="' . e($v) . '"' . ($robots === $v ? ' selected' : '') . '>' . e($v === '' ? '默认（index, follow）' : $v) . '</option>';
     };
     $smOn = (int)cfg('seo_sitemap', 0) === 1;
+    /* v1.35.0 robots.txt 一键同步（同意式自改服务器文件：覆盖前先自动备份原文件） */
+    $robFile = dirname(DATA_DIR) . '/robots.txt';
+    $robRaw = is_file($robFile) ? (string)@file_get_contents($robFile) : '';
+    $robRec = mf_robots_recommended(false);
+    if (mf_robots_is_recommended($robRaw)) {
+        $robSync = '<p class="hint" style="color:var(--ok)">✔ ' . t('站点根目录 robots.txt 已与推荐内容一致，无需同步') . '</p>';
+    } elseif ($robRaw === '') {
+        $robSync = '<form method="post" action="' . e(u('a=admin_robots_sync')) . '" class="inline" data-n="' . e(t('将在站点根目录创建 robots.txt（推荐内容见下方）。确认创建？')) . '">' . csrf_field() .
+            '<button class="btn btn-primary" type="submit">' . t('一键同步 robots.txt（创建）') . '</button></form>' .
+            '<p class="hint">站点根目录尚未创建 robots.txt。点击按钮即可按下方推荐内容自动创建；也可通过 FTP 自行上传。</p>';
+    } else {
+        $robSync = '<form method="post" action="' . e(u('a=admin_robots_sync')) . '" class="inline" data-n="' . e(t('站点根目录已存在 robots.txt，内容与推荐不一致。确认后：先自动备份原文件到 data/backup/，再覆盖为下方推荐内容。继续？')) . '">' . csrf_field() .
+            '<button class="btn btn-primary" type="submit">' . t('一键同步 robots.txt（备份并覆盖）') . '</button></form>' .
+            '<p class="hint">站点根目录已存在 robots.txt（' . strlen($robRaw) . ' 字节，与推荐内容不一致）。同步前会先把原文件自动备份到 data/backup/，自定义内容不会丢失；不想覆盖则保持现状即可。</p>';
+    }
     return '<div class="card form-card"><h2 class="card-title">' . t('SEO · 搜索引擎展示') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_save_seo')) . '" data-ajax="1">' . csrf_field() .
         '<label class="field"><span class="field-l">' . t('标题模板') . '</span><input class="input" name="seo_title_tpl" maxlength="100" placeholder="{page} · {site}" value="' . e((string)cfg('seo_title_tpl', '{page} · {site}')) . '">' .
@@ -170,13 +185,11 @@ function admin_card_seo(): string
         '<label class="check"><input type="hidden" name="seo_og" value="0"><input type="checkbox" name="seo_og" value="1"' . ((int)cfg('seo_og', 1) === 1 ? ' checked' : '') . '>' . t(' 输出 Open Graph 社交分享标签（分享到微信 / QQ / X 等展示标题、描述与图标）') . '</label>' .
         '<label class="field"><span class="field-l">' . t('自定义 &lt;head&gt; 内容（可选）') . '</span><textarea class="input" name="seo_extra_head" rows="3" maxlength="2000" placeholder="站点验证、搜索控制台、统计代码等">' . e((string)cfg('seo_extra_head', '')) . '</textarea>' .
         '<span class="hint">原样插入每个页面 &lt;/head&gt; 之前；请只填写可信内容</span></label>' .
-        '<div class="form-foot"><span class="muted">别忘了同步服务器的 robots.txt（建议内容见下方）</span><button class="btn btn-primary" type="submit">' . t('保存 SEO 设置') . '</button></div>' .
+        '<div class="form-foot"><span class="muted">别忘了同步服务器的 robots.txt（下方一键同步；推荐内容见展开区）</span><button class="btn btn-primary" type="submit">' . t('保存 SEO 设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
         admin_restore_btn('seo_title_tpl,seo_description,seo_keywords,seo_robots,seo_sitemap,seo_sitemap_limit,seo_og,seo_extra_head') .
-        '<details><summary class="muted">robots.txt 建议内容（点击展开）</summary><pre class="code-hint">User-agent: *
-Disallow: /data/
-Disallow: /src/
-Sitemap: ' . e((string)cfg('site_url', 'https://你的域名')) . '/index.php?p=sitemap</pre></details></div>';
+        '<details><summary class="muted">robots.txt 推荐内容（点击展开；与「一键同步」写入内容一致）</summary><pre class="code-hint">' . e($robRec) . '</pre></details>' .
+        '<div class="form-foot">' . $robSync . '</div></div>';
 }
 
 /* ---------------- v1.21.0 界面语言卡片 ---------------- */
@@ -1297,11 +1310,13 @@ function admin_tab_monitor(): void
             ($opLoaded ? '当前 PHP 已带 OPcache 扩展但被配置关闭。' : '当前 PHP 未加载 OPcache 扩展。') .
             '可点击下方按钮在站点根目录创建 .user.ini 尝试开启——LiteSpeed / CGI / FastCGI / FPM 类主机生效（约 5 分钟内或重启 PHP 后）；Apache mod_php 会忽略该文件，此类主机请联系主机商在 php.ini 开启 opcache.enable=1。</p>';
         if ($userIniOurs) {
-            echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline">' . csrf_field() .
-                '<button class="btn btn-primary" type="submit" name="op" value="del">' . t('删除 .user.ini（还原）') . '</button></form>' .
-                '<p class="hint">.user.ini 已存在且含 opcache.enable=1。若长时间未生效，请等待 5 分钟（user_ini.cache_ttl）或重启 PHP，再刷新本页查看。</p>';
+            echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline" data-n="' . e(t('确认移除 .user.ini 中的 OPcache 配置？仅移除 OPcache 相关行，其余内容保留不动；移除前自动备份原文件到 data/backup/。')) . '">' . csrf_field() .
+                '<button class="btn btn-primary" type="submit" name="op" value="del">' . t('移除 OPcache 配置（还原）') . '</button></form>' .
+                '<p class="hint">.user.ini 已含 OPcache 配置。若长时间未生效，请等待 5 分钟（user_ini.cache_ttl）或重启 PHP，再刷新本页查看。</p>';
         } elseif ($userIniRaw !== '') {
-            echo '<p class="hint">站点根目录已存在 .user.ini（不含 opcache 配置）。本工具不会覆盖他人配置——请手动编辑该文件，加入一行：opcache.enable=1</p>';
+            echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline" data-n="' . e(t('站点根目录已存在 .user.ini。确认后：先自动备份原文件到 data/backup/，再在文件末尾追加 OPcache 配置（你的现有内容完整保留）。确认追加？')) . '">' . csrf_field() .
+                '<button class="btn btn-primary" type="submit" name="op" value="append">' . t('追加 OPcache 配置到现有 .user.ini') . '</button></form>' .
+                '<p class="hint">站点根目录已存在 .user.ini（不含 opcache 配置）。点「追加」＝完整保留你的现有内容，仅在末尾追加 OPcache 配置（原文件先自动备份）；也可手动编辑该文件，加入一行：opcache.enable=1</p>';
         } else {
             echo '<form method="post" action="' . e(u('a=admin_opcache_ini')) . '" class="inline">' . csrf_field() .
                 '<button class="btn btn-primary" type="submit" name="op" value="create">' . t('一键创建 .user.ini（开启 OPcache）') . '</button></form>';
@@ -2203,6 +2218,7 @@ function admin_search_index(): array
         ['basic', 'SEO · 搜索引擎展示', 'Sitemap 收录上限（条）', 'sitemap limit'],
         ['basic', 'SEO · 搜索引擎展示', 'Open Graph 社交分享标签', 'og 分享 微信'],
         ['basic', 'SEO · 搜索引擎展示', '自定义 <head> 内容（可选）', 'extra head 验证 统计代码'],
+        ['basic', 'SEO · 搜索引擎展示', 'robots.txt 一键同步', 'robots 同步 爬虫 备份 覆盖 sync'],
         ['basic', '界面语言', '默认论坛语言', 'language 语言 简中 繁中 英 日 俄'],
         ['basic', '界面语言', '按 IP 自动切换语言', 'language auto geo 自动语言'],
         /* 功能 */
@@ -2317,6 +2333,7 @@ function admin_search_index(): array
         ['monitor', '监控与告警设置', '监控页实时刷新间隔', 'monitor interval'],
         ['monitor', '环境自检', '目录权限 / 一键修复', 'env check 修复 权限'],
         ['monitor', '性能体检', 'OPcache / .user.ini / gzip / ETag 304', 'opcache 性能 缓存 慢 加速'],
+        ['monitor', '性能体检', '追加 OPcache 配置到现有 .user.ini（同意式，原内容保留并自动备份）', 'opcache 追加 user.ini 同意 备份'],
         ['monitor', '存储占用', '存储空间统计', 'disk usage'],
         ['monitor', '实时资源', 'CPU / 内存 / 负载', 'cpu memory load 资源'],
         ['monitor', '服务器信息', 'PHP / 系统版本', 'server php info'],
