@@ -1381,4 +1381,49 @@
       });
     });
   })();
+
+  /* ================= v1.36.0 HTML 静态加速：全站预生成（后台监控页） ================= */
+  (function () {
+    var sbtn = $('#mf-sgen-btn');
+    var slist = $('#mf-sgen-list');
+    if (!sbtn || !slist) return;
+    var out = $('#mf-sgen-out');
+    function label(it) {
+      if (it.p === 'thread') return '帖子 #' + it.id;
+      if (it.p === 'board') return '版块 #' + it.id;
+      return '首页';
+    }
+    sbtn.addEventListener('click', function () {
+      var items;
+      try { items = JSON.parse(slist.textContent || '[]'); } catch (e) { items = null; }
+      if (!items || !items.length || sbtn.dataset.busy) return;
+      sbtn.dataset.busy = '1';
+      sbtn.disabled = true;
+      var ok = 0, fail = 0, i = 0, total = items.length;
+      function next() {
+        if (i >= total) {
+          sbtn.dataset.busy = '';
+          sbtn.disabled = false;
+          if (out) {
+            out.textContent = '完成：成功 ' + ok + ' 页' + (fail ? '，失败 ' + fail + ' 页（可重试）' : '') + '。1 秒后刷新页面查看快照状态…';
+            setTimeout(function () { location.reload(); }, 1200);
+          }
+          return;
+        }
+        var it = items[i++];
+        if (out) out.textContent = '生成中 ' + i + '/' + total + '：' + label(it) + ' …';
+        fetch(apiUrl('__sgen=1&p=' + it.p + (it.id ? '&id=' + it.id : '')), {
+          credentials: 'same-origin',
+          headers: { 'X-Requested-With': 'fetch', 'X-CSRF-Token': csrf() }
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (j && j.ok) ok++; else fail++;
+          next();
+        }).catch(function () {
+          fail++;
+          next();
+        });
+      }
+      next();
+    });
+  })();
   })();

@@ -105,9 +105,12 @@ function page_thread(): void
         return;
     }
 
-    thread_view_bump($tid); // 浏览量 +1（每会话每帖至多计一次）
-    $t['views'] = (int)(thread_get($tid)['views'] ?? ($t['views'] ?? 0)); // 先计后渲染：首次浏览即显示新值
-    mf_do_action('thread_view', $t); /* v1.22.0 拓展钩子 */
+    if (!defined('MF_STATIC_GEN')) {
+        /* v1.36.0：静态化预生成时不计浏览量、不触发视图钩子（快照是游客视角的复制品） */
+        thread_view_bump($tid); // 浏览量 +1（每会话每帖至多计一次）
+        $t['views'] = (int)(thread_get($tid)['views'] ?? ($t['views'] ?? 0)); // 先计后渲染：首次浏览即显示新值
+        mf_do_action('thread_view', $t); /* v1.22.0 拓展钩子 */
+    }
 
     echo '<article class="card thread-art">';
     echo '<div class="art-head"><h1 class="art-title">' . e((string)$t['title']) . '</h1><div class="art-meta">' .

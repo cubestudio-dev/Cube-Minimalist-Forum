@@ -129,6 +129,10 @@ function route_action(string $a): void
         case 'admin_board_move': admin_tab_guard(); act_admin_board_move(); return;
         case 'admin_board_perm': admin_tab_guard(); act_admin_board_perm(); return;
         case 'admin_restore_defaults': admin_tab_guard(); act_admin_restore_defaults(); return;
+        /* v1.36.0 HTML 静态加速 */
+        case 'admin_static_mode':     admin_tab_guard(); act_admin_static_mode(); return;
+        case 'admin_static_htaccess': admin_tab_guard(); act_admin_static_htaccess(); return;
+        case 'admin_static_clear':    admin_tab_guard(); act_admin_static_clear(); return;
         case 'admin_user_mute':  admin_tab_guard(); act_admin_user_mute(); return;
         case 'admin_user_ban':   admin_tab_guard(); act_admin_user_ban(); return;
         case 'admin_user_unban': admin_tab_guard(); act_admin_user_unban(); return;
@@ -285,6 +289,12 @@ function act_admin_save_docs(): void
     cfg_update($kv);
     $msg = '协议设置已保存'
         . ($kv['doc_gate'] ? '；访问门禁已开启，未同意的访客下次访问需先确认' : '');
+    /* v1.36.0 静态加速安全联动：访问门禁开启后，Apache 直出快照会绕过门禁判定——
+       立即清空全部快照（无文件可直出，全部回退 PHP 实时渲染并执行门禁） */
+    if (!empty($kv['doc_gate'])) {
+        mfs_clear_all();
+        $msg .= '；静态快照已清空（门禁与快照直出不兼容）';
+    }
     log_action('admin_save_docs', '协议设置已保存：'
         . '用户协议 ' . ($kv['doc_terms'] !== '' ? '已启用' : '未填写')
         . '，隐私政策 ' . ($kv['doc_privacy'] !== '' ? '已启用' : '未填写')
@@ -1437,8 +1447,12 @@ function act_admin_save_feat(): void
         }
     }
     cfg_update($kv);
+    /* v1.36.0 静态加速安全联动：关闭「游客可浏览」后论坛转为私密，游客快照必须立即清空 */
+    if ((int)$kv['feat_guest_browse'] !== 1) {
+        mfs_clear_all();
+    }
     log_action('admin_save_feat', '功能开关更新：关闭 ' . ($off ? implode('、', $off) : '无（全部开启）'));
-    act_ok('功能开关已保存', u('p=admin&tab=feat'));
+    act_ok('功能开关已保存' . ((int)$kv['feat_guest_browse'] !== 1 ? '（游客快照已清空）' : ''), u('p=admin&tab=feat'));
 }
 
 /** v1.34.0：扫码登录参数（有效期；总开关在功能开关列表内） */
@@ -1925,6 +1939,18 @@ function act_admin_restore_defaults(): void
         act_err('这些设置项不支持一键还原');
     }
     cfg_update($kv);
+    /* v1.36.0 静态加速联动：还原可能改变安全前提或模式（游客浏览 / 门禁 / 模式本身） */
+    if (isset($kv['feat_guest_browse']) && (int)$kv['feat_guest_browse'] !== 1) {
+        mfs_clear_all();
+    }
+    if (isset($kv['doc_gate']) && (int)$kv['doc_gate'] === 1) {
+        mfs_clear_all();
+    }
+    if (isset($kv['static_mode']) && (string)$kv['static_mode'] !== 'html') {
+        $mfsE = '';
+        mfs_htaccess_remove($mfsE);
+        mfs_clear_all();
+    }
     log_action('admin_restore_defaults', '还原 ' . count($kv) . ' 项设置为默认值：' . cut_str(implode(', ', array_keys($kv)), 160));
     act_ok('已还原 ' . count($kv) . ' 项设置为默认值' . ($skipped ? '（跳过不支持的 ' . count($skipped) . ' 项）' : ''), back_target());
 }
@@ -2571,7 +2597,95 @@ function act_admin_file_download(): void
         $content = strpos($raw, 'opcache.enable') !== false ? $raw : mf_userini_merged($raw);
         mf_text_download($content, '.user.ini');
     }
+    /* v1.36.0 静态加速：下载已合并加速块的 .htaccess（站点根不可写时的降级方案，
+       内容与「安装加速块」写入内容同源；下载后请重命名为 .htaccess 上传到站点根目录） */
+    if ($what === 'htaccess') {
+        $f = dirname(DATA_DIR) . '/.htaccess';
+        $raw = is_file($f) && is_readable($f) ? (string)@file_get_contents($f) : '';
+        $base = $raw;
+        if (strpos($raw, MFS_MARK_BEGIN) !== false) {
+            $base = trim((string)preg_replace('/' . preg_quote(MFS_MARK_BEGIN, '/') . '.*?' . preg_quote(MFS_MARK_END, '/') . '\s*/s', '', $raw));
+        }
+        $content = trim($base) === '' ? mfs_htaccess_block() . "\n" : rtrim($base) . "\n\n" . mfs_htaccess_block() . "\n";
+        mf_text_download($content, 'htaccess.txt');
+    }
     mf_text_download(mf_robots_recommended(true), 'robots.txt');
+}
+
+/* ================= 管理员：HTML 静态加速（v1.36.0） ================= */
+
+/** 模式切换：op=html 静态优先（游客快照直出）/ 其余 = PHP 动态优先（默认） */
+function act_admin_static_mode(): void
+{
+    $back = u('p=admin&tab=monitor');
+    if ((string)($_POST['op'] ?? '') === 'html') {
+        if (!feat_on('guest_browse')) {
+            flash('err', '无法开启：当前已关闭「游客可浏览」（私密论坛），游客静态快照与此模式互斥。请先到「功能」页开启游客浏览。');
+            admin_redirect($back);
+        }
+        if ((int)cfg('doc_gate', 0) === 1) {
+            flash('err', '无法开启：已开启协议访问门禁——Apache 直出快照无法执行门禁判定。请先在「协议」页关闭访问门禁。');
+            admin_redirect($back);
+        }
+        if (!mfs_dir_ready()) {
+            flash('err', '无法开启：快照目录创建失败（data/static/ 不可写）。请到「监控 → 环境自检」修复目录权限后重试。');
+            admin_redirect($back);
+        }
+        cfg_update(['static_mode' => 'html']);
+        $msg = 'HTML 静态优先已开启：游客开始浏览静态快照（首次访问自动生成），PHP 快速通道即刻生效';
+        $err = '';
+        if (mfs_htaccess_install($err)) {
+            $msg .= '；.htaccess 加速块已写入（原文件自动备份到 data/backup/），Apache / LiteSpeed 下命中快照时 PHP 完全不启动';
+        } else {
+            $msg .= '；.htaccess 加速块未写入（' . $err . '）——不影响使用，PHP 快速通道已生效，也可用下方「下载 .htaccess」手动上传';
+        }
+        log_action('admin_static_mode', '切换到 HTML 静态优先（游客快照直出）');
+        act_ok($msg, $back);
+    }
+    cfg_update(['static_mode' => 'php']);
+    $err = '';
+    $msg = '已切回 PHP 动态优先（全部页面实时渲染），静态快照已清空';
+    if (mfs_htaccess_remove($err)) {
+        $msg .= '，.htaccess 加速块已移除';
+    } else {
+        $msg .= '；.htaccess 加速块移除失败：' . $err;
+    }
+    mfs_clear_all();
+    log_action('admin_static_mode', '切回 PHP 动态优先');
+    act_ok($msg, $back);
+}
+
+/** .htaccess 加速块手动安装 / 更新 / 移除（同意式，幂等，先备份） */
+function act_admin_static_htaccess(): void
+{
+    $back = u('p=admin&tab=monitor');
+    $err = '';
+    if ((string)($_POST['op'] ?? '') === 'remove') {
+        if (mfs_htaccess_remove($err)) {
+            log_action('admin_static_htaccess', '移除 .htaccess 加速块');
+            act_ok('.htaccess 加速块已移除（原文件备份在 data/backup/）。游客访问回退为 PHP 动态渲染。', $back);
+        }
+        flash('err', '移除失败：' . $err . ' 也可通过 FTP 编辑站点根目录 .htaccess，删除标记块之间的内容。');
+        admin_redirect($back);
+    }
+    if (!mfs_dir_ready()) {
+        flash('err', '快照目录尚未就绪（data/static/ 不可写）：加速块写入后也需要它存放快照，请先修复目录权限。');
+        admin_redirect($back);
+    }
+    if (mfs_htaccess_install($err)) {
+        log_action('admin_static_htaccess', '写入 / 更新 .htaccess 加速块');
+        act_ok('.htaccess 加速块已写入（原文件备份在 data/backup/）。游客命中快照时 Apache / LiteSpeed 直接发送文件，PHP 不启动；其他服务器自动走 PHP 快速通道。', $back);
+    }
+    flash('err', '写入失败：' . $err . ' 可改用「下载 .htaccess（已合并加速块）」按钮，下载后重命名为 .htaccess 通过 FTP 上传到站点根目录。');
+    admin_redirect($back);
+}
+
+/** 清空全部静态快照 */
+function act_admin_static_clear(): void
+{
+    $n = mfs_clear_all();
+    log_action('admin_static_clear', '清空静态快照：' . $n . ' 个文件');
+    act_ok('已清空 ' . $n . ' 个静态快照。游客访问将回退 PHP 实时渲染，快照随访问自动重新生成。', u('p=admin&tab=monitor'));
 }
 
 /** 手动发送测试 / 真实告警邮件（force 跳过冷却） */

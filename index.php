@@ -46,6 +46,14 @@ if (!FileStore::exists('lock/install.lock')) {
     redirect(ua('install.php'));
 }
 
+/* v1.36.0 静态预生成端点：仅管理员（__sgen=1 + CSRF 头）。
+   必须先于视图日志与页面分发处理：渲染在「强制游客视角」下进行，
+   不计浏览量、不记浏览日志，响应为 JSON 且不进入页面输出链路 */
+if (isset($_GET['__sgen'])) {
+    mfs_gen_handle();
+    exit;
+}
+
 /* 页面路由名（资源端点前置判定也已用） */
 $p = isset($_GET['p']) && is_string($_GET['p']) ? preg_replace('/[^a-z_]/', '', $_GET['p']) : 'home';
 
@@ -71,6 +79,13 @@ if (isset($_GET['a'])) {
 } else {
     $GLOBALS['MF_HIT_P'] = ($p === '' ? 'home' : $p);
     $GLOBALS['MF_HIT_PF'] = empty($_SERVER['HTTP_X_MF_PREFETCH']) ? 0 : 1;
+}
+
+/* v1.36.0 登录标记 Cookie（mf_ul）兜底：升级前已登录的老会话首次访问时补发。
+   .htaccess 加速块靠它区分「游客直出快照 / 登录用户走 PHP」；登录时已主动设置 */
+if (current_user() && ($_COOKIE['mf_ul'] ?? '') !== '1'
+    && !isset($_GET['a']) && !isset($_GET['api']) && !isset($_GET['__sgen'])) {
+    @setcookie('mf_ul', '1', ['expires' => time() + 2592000, 'path' => '/', 'samesite' => 'Lax', 'secure' => app_is_https()]);
 }
 
 /* v1.33.0 资源端点最前置出站：不等在线统计 / 监控 / 清理任务——
@@ -169,6 +184,19 @@ if (doc_gate_required($p === '' ? 'home' : $p)) {
     exit;
 }
 
+/* v1.36.0 HTML 静态加速 · PHP 快速通道：游客命中新鲜快照时直接输出文件——
+   跳过全部内容文件 I/O 与页面渲染（慢盘主机上的主要耗时），
+   防火墙 / 在线统计 / 命中日志 / gzip / ETag 304 既有链路照常工作。
+   过期快照不拦截：走 PHP 全渲染并由下方按需捕获重写 */
+mfs_serve();
+
+/* v1.36.0 按需捕获：游客访问可缓存页时，把渲染结果存为快照（首次透明，之后直出） */
+$mfCap = mfs_should_capture();
+$mfTgt = $mfCap ? mfs_cacheable($_GET) : null;
+if ($mfCap && $mfTgt) {
+    mfs_capture_start();
+}
+
 /* v1.32.0 会话早释放（页面渲染性能）：前台 GET 页面渲染前关闭会话——渲染期间不再独占
    会话文件锁，同一用户的并发请求（预取 / Ping / 搜索预览 / 快速连续点击）不再被
    当前页渲染串行阻塞。安全性：渲染所需状态（登录态 / CSRF 令牌 / 语言 / 协议确认）
@@ -206,6 +234,11 @@ switch ($p === '' ? 'home' : $p) {
     case 'admin':         page_admin(); break;
     case 'plugin':        page_plugin(); break; /* v1.22.0 拓展：插件前台路由 p=plugin&pf=<id> */
     default:              page_404();
+}
+
+/* v1.36.0 按需捕获收尾：把本次渲染结果写入快照（重定向 / 404 自动跳过） */
+if ($mfCap && $mfTgt) {
+    mfs_capture_finish($mfTgt['p'], $mfTgt['id']);
 }
 
 /* AI 审核队列：随访问按需触发（每次至多处理一条，非阻塞锁防并发）

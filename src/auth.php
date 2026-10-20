@@ -145,6 +145,12 @@ function mute_left(array $u): int
 function current_user(): ?array
 {
     static $u = false;
+    /* v1.36.0 静态化预生成：显式指定身份时跳过会话与静态缓存（仅在预生成窗口内被设置）。
+       必须置于静态缓存判定之前，否则无法把已缓存的登录身份临时切换为游客 */
+    if (array_key_exists('MF_USER_OVERRIDE', $GLOBALS)) {
+        $ov = $GLOBALS['MF_USER_OVERRIDE'];
+        return is_array($ov) ? $ov : null;
+    }
     if ($u !== false) {
         return $u;
     }
@@ -217,6 +223,8 @@ function auth_login(array $user, bool $remember): void
 {
     session_regenerate_id(true);
     $_SESSION['uid'] = (int)$user['id'];
+    /* v1.36.0 登录标记 Cookie（非敏感，仅供 .htaccess 判定「已登录不走静态快照」） */
+    setcookie('mf_ul', '1', ['expires' => time() + 2592000, 'path' => '/', 'samesite' => 'Lax', 'secure' => app_is_https()]);
     if ($remember) {
         session_cookie_persist(30);
         $tok = bin2hex(random_bytes(32));
@@ -234,6 +242,8 @@ function auth_logout(): void
     setcookie('mf_remember', '', ['expires' => time() - 3600, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => app_is_https()]);
     // 退出时同步撤掉已持久化的会话 Cookie（用户明确要求退出 = 全部设备状态清干净）
     setcookie(session_name(), '', ['expires' => time() - 3600, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => app_is_https()]);
+    /* v1.36.0 撤掉登录标记：退出后该浏览器重新享受游客静态快照加速 */
+    setcookie('mf_ul', '', ['expires' => time() - 3600, 'path' => '/', 'samesite' => 'Lax', 'secure' => app_is_https()]);
 }
 
 /** 需登录；$next 传回跳目标查询串（如 'p=new'） */

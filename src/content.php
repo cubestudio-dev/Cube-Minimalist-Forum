@@ -274,6 +274,7 @@ function thread_create(int $board, string $title, string $content, int $author):
     if ($fail !== '') {
         throw new RuntimeException($fail . ' —— ' . (Store::$lastWriteError ?? 'data/ 目录可能不可写，请检查目录权限或磁盘剩余空间'));
     }
+    mfs_invalidate(0, $board); /* v1.36.0 静态加速：新帖使首页与所属版块快照失效 */
     return $id;
 }
 
@@ -287,7 +288,9 @@ function thread_save(int $id, array $fields): void
 {
     $lk = Store::lock('threads');
     $t = thread_get($id);
+    $oldBoard = 0;
     if ($t) {
+        $oldBoard = (int)($t['board'] ?? 0);
         foreach ($fields as $k => $v) {
             $t[$k] = $v;
         }
@@ -295,6 +298,13 @@ function thread_save(int $id, array $fields): void
         sync_thread_index($id, $fields);
     }
     Store::unlock($lk);
+    if ($t) {
+        /* v1.36.0 静态加速：编辑 / 置顶 / 锁定 / 移版后失效对应快照（移版时新旧版块一起失效） */
+        mfs_invalidate($id, $oldBoard);
+        if (isset($fields['board']) && (int)$fields['board'] !== $oldBoard) {
+            mfs_invalidate($id, (int)$fields['board']);
+        }
+    }
 }
 
 function thread_delete(int $id): bool
@@ -313,6 +323,7 @@ function thread_delete(int $id): bool
     Store::delete('threads/t' . $id . '.php');
     Store::delete('replies/t' . $id . '.php');
     reports_close_target('thread', $id);
+    mfs_invalidate($id, (int)($t['board'] ?? 0)); /* v1.36.0 静态加速：删帖后失效对应快照 */
     return true;
 }
 
@@ -416,6 +427,7 @@ function reply_add(int $tid, string $content, int $author): ?int
     if ((int)$t['author'] !== $author) {
         user_bump((int)$t['author'], 'replies_recv', 1);
     }
+    mfs_invalidate($tid, (int)($t['board'] ?? 0)); /* v1.36.0 静态加速：新回复使帖子 / 版块 / 首页快照失效 */
     return $rid;
 }
 
@@ -444,6 +456,7 @@ function reply_delete(int $tid, int $rid): bool
         user_bump((int)$found['author'], 'replies_recv', -1);
     }
     reports_close_target('reply', $tid, $rid);
+    mfs_invalidate($tid, (int)($t['board'] ?? 0)); /* v1.36.0 静态加速：删回复后失效对应快照 */
     return true;
 }
 
@@ -461,6 +474,7 @@ function reply_save(int $tid, int $rid, array $fields): void
     unset($r);
     Store::write('replies/t' . $tid . '.php', $rs);
     Store::unlock($lk);
+    mfs_invalidate($tid, (int)(thread_get($tid)['board'] ?? 0)); /* v1.36.0 静态加速：编辑回复后失效对应快照 */
 }
 
 /* ================= 点赞（仅赞，可取消，不影响排序） ================= */
@@ -489,6 +503,7 @@ function like_toggle(string $type, int $tid, int $rid, int $uid): array
         Store::write('threads/t' . $tid . '.php', $t);
         sync_thread_index($tid, ['likes' => count($likes)]);
         Store::unlock($lk);
+        mfs_invalidate($tid, (int)($t['board'] ?? 0)); /* v1.36.0 静态加速：点赞数变化使列表快照失效 */
         if ((int)$t['author'] !== $uid) {
             user_bump((int)$t['author'], 'likes_recv', $liked ? -1 : 1);
         }
@@ -505,6 +520,7 @@ function like_toggle(string $type, int $tid, int $rid, int $uid): array
             $author = (int)($r['author'] ?? 0);
             Store::write('replies/t' . $tid . '.php', $rs);
             Store::unlock($lk);
+            mfs_invalidate($tid, (int)(thread_get($tid)['board'] ?? 0)); /* v1.36.0 静态加速：回复点赞后失效对应快照 */
             if ($author !== $uid) {
                 user_bump($author, 'likes_recv', $liked ? -1 : 1);
             }

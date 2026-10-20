@@ -494,4 +494,23 @@ return [
     '总开关在「功能总开关」的「扫码登录」' => 'Master switch: "QR login" in the feature toggles above',
     '保存扫码设置' => 'Save QR settings',
     '登录页出现「扫码登录」页签：已登录的手机等设备扫码确认后，待登录设备自动进入该账号；二维码有效期在下方「扫码登录 · 参数」配置（v1.34.0）' => 'Adds a "Scan QR code" tab to the login page: a signed-in phone scans and confirms, then the waiting device enters that account automatically; validity is configured below (v1.34.0)',
+
+        /* v1.36.0 HTML 静态加速 */
+        'HTML 静态加速' => 'HTML static acceleration',
+        'PHP 动态优先' => 'PHP dynamic first',
+        'HTML 静态优先' => 'HTML static first',
+        '切换回 PHP 动态优先' => 'Switch back to PHP dynamic',
+        '确认切换回 PHP 动态优先？将移除 .htaccess 加速块并清空全部静态快照，所有页面恢复实时渲染。' => 'Switch back to PHP dynamic mode? The .htaccess boost block will be removed and all static snapshots cleared; every page returns to real-time rendering.',
+        '清空静态快照' => 'Clear snapshots',
+        '确认清空全部静态快照？游客将暂时回退 PHP 实时渲染，快照随访问自动重新生成。' => 'Clear all static snapshots? Guests will temporarily fall back to real-time PHP rendering; snapshots rebuild automatically as pages are visited.',
+        '立即预生成全站静态页' => 'Pre-generate all static pages now',
+        '切换到 HTML 静态优先' => 'Switch to HTML static first',
+        '确认切换到 HTML 静态优先？游客将直接浏览预生成的静态快照（首页 / 版块 / 帖子），登录用户与发帖等操作照常实时；将尝试写入 .htaccess 加速块（原文件自动备份，可随时一键移除）。' => 'Switch to HTML static first? Guests will browse pre-generated snapshots of the home, board and thread pages, while logged-in users and posting keep working in real time; the .htaccess boost block will be written (original file backed up, removable anytime).',
+        '重新写入 .htaccess 加速块' => 'Rewrite .htaccess boost block',
+        '确认重新写入 .htaccess 加速块？将按当前环境更新标记块（先自动备份原文件，幂等可重复执行）。' => 'Rewrite the .htaccess boost block? It will be refreshed for the current environment (original file backed up; idempotent and repeatable).',
+        '移除 .htaccess 加速块' => 'Remove .htaccess boost block',
+        '确认移除 .htaccess 加速块？移除后游客访问回退 PHP 实时渲染（不影响登录用户）；原文件先自动备份。' => 'Remove the .htaccess boost block? Guests will fall back to real-time PHP rendering (logged-in users unaffected); the original file is backed up first.',
+        '下载 .htaccess（已合并加速块，FTP 上传）' => 'Download .htaccess (boost block merged; upload via FTP)',
+        '安装 .htaccess 加速块' => 'Install .htaccess boost block',
+        '确认写入 .htaccess 加速块？先自动备份原文件到 data/backup/，再在末尾追加标记块（幂等，可随时一键移除）。' => 'Write the .htaccess boost block? The original file is backed up to data/backup/ first, then the marked block is appended (idempotent; removable anytime with one click).',
 ];

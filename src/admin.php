@@ -1346,6 +1346,59 @@ function admin_tab_monitor(): void
     }
     echo '</div>';
 
+    /* v1.36.0 HTML 静态加速：坛主一键切换「PHP 动态优先 / HTML 静态优先」——
+       游客直接浏览预生成的静态快照（首页 / 版块 / 帖子），登录用户与全部操作照常实时处理 */
+    $sgModeOn = mfs_mode_on();
+    $sgCap = mfs_capable();
+    [$sgN, $sgBytes, $sgLast] = mfs_stats();
+    $sgHtStat = mfs_htaccess_status();
+    [$sgHtFW, $sgHtRW] = mf_root_write_check(dirname(DATA_DIR) . '/.htaccess');
+    $sgHtManual = !$sgHtFW && !$sgHtRW;
+    echo '<div class="card form-card"><h2 class="card-title">' . t('HTML 静态加速') . '</h2><div class="mon-grid">' .
+        '<div class="mon-cell"><b>' . ($sgModeOn ? t('HTML 静态优先') : t('PHP 动态优先')) . '</b><span>当前模式</span></div>' .
+        '<div class="mon-cell"><b>' . $sgN . ' 页 · ' . e(fmt_bytes($sgBytes)) . '</b><span>静态快照</span></div>' .
+        '<div class="mon-cell"><b>' . ($sgLast > 0 ? e(fmt_time($sgLast)) : '—') . '</b><span>最近生成</span></div>' .
+        '<div class="mon-cell"><b>' . ($sgHtStat === 'installed' ? '✔ 已安装' : ($sgHtStat === 'none' ? '— 无 .htaccess' : '未安装')) . '</b><span>.htaccess 加速块</span></div>' .
+        '</div>';
+    echo '<p class="hint">游客访问「首页 / 版块页 / 帖子页」时直接返回预生成的 HTML 快照，跳过内容读取与页面渲染——慢盘共享主机上加载速度量级提升。登录用户、发帖 / 回帖 / 管理 / 搜索等全部功能照常实时处理；内容更新自动作废对应快照（另有 6 小时保鲜期兜底）。仅缓存游客可见的公开页：关闭「游客可浏览」或开启「协议访问门禁」时自动停用并清空快照。Apache / LiteSpeed 由加速块直出（PHP 不启动）；其他服务器自动走 PHP 快速通道（同样跳过渲染，零配置）。</p>';
+    if (!$sgCap) {
+        echo '<p class="hint" style="color:var(--danger)"><b>前提不满足：</b>' .
+            (!feat_on('guest_browse') ? '「游客可浏览」已关闭（私密论坛不缓存游客页面）。' : '') .
+            ((int)cfg('doc_gate', 0) === 1 ? '「协议访问门禁」已开启（直出快照无法执行门禁判定）。' : '') .
+            '请先调整后再切换模式。</p>';
+    }
+    if ($sgModeOn) {
+        echo '<form method="post" action="' . e(u('a=admin_static_mode')) . '" class="inline" data-n="' . e(t('确认切换回 PHP 动态优先？将移除 .htaccess 加速块并清空全部静态快照，所有页面恢复实时渲染。')) . '">' . csrf_field() .
+            '<button class="btn btn-ghost" type="submit" name="op" value="php">' . t('切换回 PHP 动态优先') . '</button></form>' .
+            '<form method="post" action="' . e(u('a=admin_static_clear')) . '" class="inline" data-n="' . e(t('确认清空全部静态快照？游客将暂时回退 PHP 实时渲染，快照随访问自动重新生成。')) . '">' . csrf_field() .
+            '<button class="btn btn-ghost" type="submit">' . t('清空静态快照') . '</button></form>';
+        if ($sgCap) {
+            echo '<button class="btn btn-primary" type="button" id="mf-sgen-btn">' . t('立即预生成全站静态页') . '</button>' .
+                '<span class="hint" id="mf-sgen-out">按最近活跃顺序逐页生成，可随时关闭页面；未生成的会随游客访问自动补齐</span>' .
+                '<script id="mf-sgen-list" type="application/json">' . json_encode(mfs_gen_list(), JSON_UNESCAPED_UNICODE) . '</script>';
+        }
+    } else {
+        echo '<form method="post" action="' . e(u('a=admin_static_mode')) . '" class="inline" data-n="' . e(t('确认切换到 HTML 静态优先？游客将直接浏览预生成的静态快照（首页 / 版块 / 帖子），登录用户与发帖等操作照常实时；将尝试写入 .htaccess 加速块（原文件自动备份，可随时一键移除）。')) . '">' . csrf_field() .
+            '<button class="btn btn-primary" type="submit" name="op" value="html"' . (!$sgCap ? ' disabled' : '') . '>' . t('切换到 HTML 静态优先') . '</button></form>';
+    }
+    if ($sgModeOn || $sgHtStat === 'installed') {
+        if ($sgHtStat === 'installed') {
+            echo '<form method="post" action="' . e(u('a=admin_static_htaccess')) . '" class="inline" data-n="' . e(t('确认重新写入 .htaccess 加速块？将按当前环境更新标记块（先自动备份原文件，幂等可重复执行）。')) . '">' . csrf_field() .
+                '<button class="btn btn-ghost" type="submit" name="op" value="install">' . t('重新写入 .htaccess 加速块') . '</button></form>' .
+                '<form method="post" action="' . e(u('a=admin_static_htaccess')) . '" class="inline" data-n="' . e(t('确认移除 .htaccess 加速块？移除后游客访问回退 PHP 实时渲染（不影响登录用户）；原文件先自动备份。')) . '">' . csrf_field() .
+                '<button class="btn btn-ghost" type="submit" name="op" value="remove">' . t('移除 .htaccess 加速块') . '</button></form>';
+        } elseif ($sgHtManual) {
+            echo '<p class="hint" style="color:var(--danger)"><b>站点根目录对 PHP 不可写——无法自动写入 .htaccess。</b>不影响使用：PHP 快速通道已生效。需要 Apache 直出时，点下方按钮下载已合并加速块的完整文件，通过 FTP 上传到站点根目录并重命名为 .htaccess。</p>' .
+                '<form method="post" action="' . e(u('a=admin_file_download')) . '" class="inline">' . csrf_field() .
+                '<input type="hidden" name="what" value="htaccess">' .
+                '<button class="btn btn-primary" type="submit">' . t('下载 .htaccess（已合并加速块，FTP 上传）') . '</button></form>';
+        } else {
+            echo '<form method="post" action="' . e(u('a=admin_static_htaccess')) . '" class="inline" data-n="' . e(t('确认写入 .htaccess 加速块？先自动备份原文件到 data/backup/，再在末尾追加标记块（幂等，可随时一键移除）。')) . '">' . csrf_field() .
+                '<button class="btn btn-ghost" type="submit" name="op" value="install">' . t('安装 .htaccess 加速块') . '</button></form>';
+        }
+    }
+    echo '</div>';
+
     echo '<div class="card form-card"><h2 class="card-title">' . t('内容规模') . '</h2><div class="mon-grid">' .
         '<div class="mon-cell"><b>' . $threads . '</b><span>帖子</span></div>' .
         '<div class="mon-cell"><b>' . $withReplies . '</b><span>有回复的帖</span></div>' .
@@ -2126,6 +2179,9 @@ function admin_cfg_defaults(): array
         'seo_sitemap_limit'=> [500, 'Sitemap 收录上限'],
         'seo_og'           => [1, 'Open Graph 标签'],
         'seo_extra_head'   => ['', '自定义 head 内容'],
+        /* v1.36.0 HTML 静态加速 */
+        'static_mode' => ['php', 'HTML 静态加速模式（php=动态优先 / html=静态优先）'],
+        'static_ttl'  => [21600, '静态快照保鲜期（秒）'],
         /* 语言 */
         'lang_default' => ['zh-cn', '默认论坛语言'],
         'lang_auto_ip' => [0, '按 IP 自动切换语言'],
@@ -2358,6 +2414,9 @@ function admin_search_index(): array
         ['monitor', '性能体检', 'OPcache / .user.ini / gzip / ETag 304', 'opcache 性能 缓存 慢 加速'],
         ['monitor', '性能体检', '追加 OPcache 配置到现有 .user.ini（同意式，原内容保留并自动备份）', 'opcache 追加 user.ini 同意 备份'],
         ['monitor', '性能体检', '站点根目录不可写降级：下载 .user.ini 后 FTP 上传', 'user.ini 下载 ftp 不可写 降级 手动 上传 opcache'],
+        ['monitor', 'HTML 静态加速', 'PHP 动态优先 / HTML 静态优先一键切换，游客快照直出', 'html 静态 快照 加速 缓存 游客 直出 切换 模式'],
+        ['monitor', 'HTML 静态加速', '立即预生成全站静态页 / 清空快照 / 保鲜期', '预生成 生成 静态 清空 快照 保鲜'],
+        ['monitor', 'HTML 静态加速', '.htaccess 加速块：同意式安装 / 重新写入 / 移除 / 不可写时下载合并文件', 'htaccess apache 重写 直出 安装 移除 下载 ftp 加速块'],
         ['monitor', '存储占用', '存储空间统计', 'disk usage'],
         ['monitor', '实时资源', 'CPU / 内存 / 负载', 'cpu memory load 资源'],
         ['monitor', '服务器信息', 'PHP / 系统版本', 'server php info'],

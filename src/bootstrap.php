@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.35.1');
+    define('MF_VERSION', '1.36.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -47,6 +47,7 @@ require_once __DIR__ . '/firewall.php';
 require_once __DIR__ . '/update.php';
 require_once __DIR__ . '/sysmon.php';
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/staticize.php';
 require_once __DIR__ . '/roles.php';
 require_once __DIR__ . '/devices.php';
 require_once __DIR__ . '/qrcodec.php';
