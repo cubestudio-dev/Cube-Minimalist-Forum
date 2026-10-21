@@ -155,6 +155,7 @@ function route_action(string $a): void
         case 'admin_save_monitor': admin_tab_guard(); act_admin_save_monitor(); return;
         case 'admin_test_monitor': admin_tab_guard(); act_admin_test_monitor(); return;
         case 'admin_repair_dirs': admin_tab_guard(); act_admin_repair_dirs(); return;
+        case 'admin_envfix':      admin_tab_guard(); act_admin_envfix(); return; /* v1.38.0 运行环境 */
         case 'admin_opcache_ini': admin_tab_guard(); act_admin_opcache_ini(); return;
         case 'admin_robots_sync': admin_tab_guard(); act_admin_robots_sync(); return;
         case 'admin_file_download': admin_tab_guard(); act_admin_file_download(); return; /* v1.35.1 降级下载 */
@@ -2420,6 +2421,39 @@ function act_admin_repair_dirs(): void
     admin_redirect('p=admin&tab=monitor');
 }
 
+/** v1.38.0 运行环境：一键开启缺失扩展 / 调大上传限制
+ *  同意式自改（延续 v1.35 规矩）：前端确认弹窗 → efx_apply 强制备份 php.ini 到 data/backup/
+ *  → 取消注释 / 追加标记块 → 原子写入；失败不落盘，成功后给出面板重启指引。
+ *  传入扩展名经白名单与「当前缺失且扩展文件随附」双重过滤，不能开启任意指令。 */
+function act_admin_envfix(): void
+{
+    $back = 'p=admin&tab=monitor';
+    $names = [];
+    foreach ((array)($_POST['exts'] ?? []) as $n) {
+        if (is_string($n) && preg_match('/^[a-z0-9_]{2,20}$/', $n)) {
+            $names[] = $n;
+        }
+    }
+    $plan = efx_plan();
+    $names = array_values(array_intersect($names, $plan['fixable'])); /* 只允许当前缺失且可自动开启的 */
+    $upfix = isset($_POST['upfix']) && ($plan['up']['up_sug'] || $plan['up']['post_sug']);
+    if (!$names && !$upfix) {
+        flash('err', '没有需要修改的项目：缺失扩展已全部启用，或当前环境无可用的自动修改。');
+        admin_redirect($back);
+    }
+    $res = efx_apply($names, $upfix);
+    if ($res['ok']) {
+        log_action('admin_envfix', '一键开启 PHP 扩展：' . (implode('、', $names) !== '' ? implode('、', $names) : '无')
+            . ($res['up'] ? '；上传限制 ' . implode(' / ', $res['up']) : '')
+            . ($res['backup'] !== '' ? '（php.ini 备份：' . basename($res['backup']) . '）' : ''));
+        flash('ok', efx_result_msg($res));
+    } else {
+        log_action('admin_envfix', '一键开启失败：' . cut_str((string)$res['err'], 160));
+        flash('err', (string)$res['err']);
+    }
+    admin_redirect($back);
+}
+
 /** v1.33.0 性能体检：一键创建站点根目录 .user.ini（开启 OPcache）
  *  LiteSpeed / CGI / FastCGI / FPM 类主机读取该文件；Apache mod_php 忽略（提示文案已说明）。
  *  v1.35.0 同意式自改：
@@ -2612,6 +2646,11 @@ function act_admin_file_download(): void
         }
         $content = trim($base) === '' ? mfs_htaccess_block() . "\n" : rtrim($base) . "\n\n" . mfs_htaccess_block() . "\n";
         mf_text_download($content, 'htaccess.txt');
+    }
+    /* v1.38.0 运行环境：php.ini 不可写 / 未找到时的降级方案——下载配置片段（与一键写入同源），
+       FTP / 面板编辑器追加到当前 PHP 的 php.ini 末尾后重启 */
+    if ($what === 'envfix') {
+        mf_text_download(efx_snippet(), 'php-ini-snippet.txt');
     }
     mf_text_download(mf_robots_recommended(true), 'robots.txt');
 }

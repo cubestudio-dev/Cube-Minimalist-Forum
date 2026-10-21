@@ -1290,6 +1290,63 @@ function admin_tab_monitor(): void
     }
     echo '</div>';
 
+    /* v1.38.0 运行环境 · PHP 扩展：自动区分 Windows / Linux 与主机面板（小皮面板 phpStudy / 宝塔 / XAMPP…），
+       推荐扩展一键开启（同意式：先备份 php.ini；取消注释 / 追加标记块）+ 上传限制体检 + 面板专用指引 */
+    $efx = efx_plan();
+    $efxRecTotal = 0;
+    $efxRecLoaded = 0;
+    foreach ($efx['exts'] as $x) {
+        if ($x['level'] === 'rec') {
+            $efxRecTotal++;
+            $efxRecLoaded += $x['loaded'] ? 1 : 0;
+        }
+    }
+    $efxUpSug = $efx['up']['up_sug'] || $efx['up']['post_sug'];
+    echo '<div class="card form-card"><h2 class="card-title">' . t('运行环境 · PHP 扩展') . '</h2><div class="mon-grid">' .
+        '<div class="mon-cell"><b>' . e($efx['os']) . '</b><span>操作系统' . ($efx['panel']['name'] !== '' ? ' · ' . e($efx['panel']['name']) : '（未识别到常见面板）') . '</span></div>' .
+        '<div class="mon-cell"><b>' . ($efx['ini'] !== '' ? ($efx['ini_writable'] ? '✔ 可写' : '只读') : '未找到') . '</b><span>php.ini' . ($efx['ini'] !== '' ? ' · ' . e(cut_str($efx['ini'], 56)) : '（命令行或特殊加载）') . '</span></div>' .
+        '<div class="mon-cell' . ($efxUpSug ? ' cell-bad' : '') . '"><b>' . e($efx['up']['cur']) . ' / ' . e($efx['up']['post']) . '</b><span>上传 / POST 体积限制</span></div>' .
+        '<div class="mon-cell' . ($efxRecLoaded < $efxRecTotal ? ' cell-bad' : '') . '"><b>' . $efxRecLoaded . ' / ' . $efxRecTotal . '</b><span>推荐扩展已启用</span></div>' .
+        '</div>';
+    echo '<table class="log-table" style="margin-top:10px"><thead><tr><th>扩展</th><th>用途（缺失时对应能力降级，程序核心零依赖）</th><th>状态</th></tr></thead><tbody>';
+    foreach ($efx['exts'] as $x) {
+        if ($x['loaded']) {
+            $state = '<b style="color:#15803d">✔ ' . t('已启用') . '</b>';
+        } elseif ($x['file'] !== '') {
+            $state = '<b style="color:#b45309">● ' . t('未启用') . '</b>';
+        } else {
+            $state = '<span class="muted">✘ ' . t('未随附') . '</span>';
+        }
+        $lv = $x['level'] === 'opt' ? ' <span class="muted">（可选）</span>' : ($x['level'] === 'perf' ? ' <span class="muted">（性能）</span>' : '');
+        echo '<tr><td><b>' . e($x['name']) . '</b>' . $lv . '</td><td class="muted">' . e(t($x['why'])) . '</td><td>' . $state . '</td></tr>';
+    }
+    echo '</tbody></table>';
+    if ($efx['fixable'] || $efxUpSug) {
+        if ($efx['ini'] !== '' && $efx['ini_writable']) {
+            echo '<form method="post" action="' . e(u('a=admin_envfix')) . '" style="margin-top:12px" data-n="' . e(t('确认写入 php.ini？将先自动备份原文件到 data/backup/（php-ini-bak-*.ini），然后取消注释或追加缺失扩展的加载行；写入后需重启 PHP 生效。')) . '">' . csrf_field();
+            foreach ($efx['fixable'] as $n) {
+                echo '<input type="hidden" name="exts[]" value="' . e($n) . '">';
+            }
+            if ($efxUpSug) {
+                echo '<label class="hint" style="display:block;margin:0 0 8px"><input type="checkbox" name="upfix" value="1" checked> ' . t('同时调大上传限制') . '（' . e($efx['up']['cur']) . ' → 32M / ' . e($efx['up']['post']) . ' → 64M；迁移包 / 更新包上传需要）</label>';
+            }
+            echo '<button class="btn btn-primary" type="submit">' . t('一键开启缺失扩展') . '（' . count($efx['fixable']) . '）</button></form>';
+            echo '<p class="hint">只开启上表「未启用」项，绝不改动其他配置；写入前自动备份 php.ini 到 data/backup/（php-ini-bak-*.ini）。写入后 ' . e(efx_restart_hint()) . ' 然后刷新本页复检。</p>';
+        } else {
+            echo '<p class="hint" style="color:#b45309"><b>php.ini 未找到或不可写——未做任何修改。</b>已改用降级方案：点下方按钮下载配置片段（与一键写入内容同源），通过 FTP / 面板编辑器追加到当前 PHP 的 php.ini 末尾，然后重启 PHP。</p>';
+            echo '<form method="post" action="' . e(u('a=admin_file_download')) . '" class="inline">' . csrf_field() .
+                '<input type="hidden" name="what" value="envfix">' .
+                '<button class="btn btn-primary" type="submit">' . t('下载 php.ini 配置片段（FTP 上传用）') . '</button></form>';
+            echo '<p class="hint">' . e(efx_panel_hint()) . '</p>';
+        }
+    } else {
+        echo '<p class="hint">扩展环境全部就绪：本程序核心零依赖即可运行，以上为增强项。如需上传较大迁移包 / 更新包，可在 php.ini 调整 upload_max_filesize / post_max_size。</p>';
+    }
+    if ($efx['nobundle']) {
+        echo '<p class="hint">以下扩展当前 PHP 未随附二进制文件（写入 php.ini 也加载不了），请通过面板扩展商店 / 主机商安装后再看：' . e(implode('、', $efx['nobundle'])) . '。</p>';
+    }
+    echo '</div>';
+
     /* v1.33.0 性能体检：OPcache 是弱 CPU / 共享主机整站缓慢的头号原因——
        未启用时每个请求都要重新编译全部 PHP 源码（30+ 文件），CPU 全耗在重复劳动上。
        提供一键创建 / 删除 .user.ini（LiteSpeed / CGI / FastCGI / FPM 类主机生效） */
@@ -2450,6 +2507,9 @@ function admin_search_index(): array
         ['monitor', '监控与告警设置', '告警阈值（MB）/ 自动告警', 'threshold 告警'],
         ['monitor', '监控与告警设置', '监控页实时刷新间隔', 'monitor interval'],
         ['monitor', '环境自检', '目录权限 / 一键修复', 'env check 修复 权限'],
+        ['monitor', '运行环境', 'PHP 扩展一键开启（mbstring / openssl / curl / gd / zip / opcache），自动区分 Windows / Linux', '扩展 php.ini 小皮 phpstudy 宝塔 mbstring openssl curl gd zip opcache 一键 开启 windows linux 运行环境'],
+        ['monitor', '运行环境', '上传限制体检：upload_max_filesize / post_max_size 过小一键调大（迁移包 / 更新包上传需要）', '上传 限制 upload post 2m 迁移包 更新包 调大 32m 64m'],
+        ['monitor', '运行环境', '小皮面板 / 宝塔面板自动识别与重启指引；php.ini 不可写时下载配置片段 FTP 上传', '小皮 面板 phpstudy 宝塔 xampp wamp upupw 指引 片段 下载 ftp 重启'],
         ['monitor', '性能体检', 'OPcache / .user.ini / gzip / ETag 304', 'opcache 性能 缓存 慢 加速'],
         ['monitor', '性能体检', '追加 OPcache 配置到现有 .user.ini（同意式，原内容保留并自动备份）', 'opcache 追加 user.ini 同意 备份'],
         ['monitor', '性能体检', '站点根目录不可写降级：下载 .user.ini 后 FTP 上传', 'user.ini 下载 ftp 不可写 降级 手动 上传 opcache'],

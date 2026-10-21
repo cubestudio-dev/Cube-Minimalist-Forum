@@ -92,6 +92,7 @@ const LOG_ACTIONS = [
     'admin_save_monitor'   => '后台·监控设置',
     'admin_test_monitor'   => '后台·测试告警',
     'admin_repair_dirs'    => '后台·修复目录权限',
+    'admin_envfix'         => '后台·PHP 扩展一键开启',
     'admin_opcache_ini'    => '后台·OPcache 性能体检',
     'admin_robots_sync'    => '后台·robots.txt 同步',
     'admin_static_mode'    => '后台·HTML 静态加速',

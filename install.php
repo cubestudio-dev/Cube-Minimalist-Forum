@@ -128,9 +128,53 @@ if (isset($_GET['restore'])) {
     exit;
 }
 
-/* ---------- AJAX 测试（邮件 / AI） ---------- */
+/* ---------- AJAX 测试（邮件 / AI）与环境优化（v1.38.0） ---------- */
 if (isset($_GET['a']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $a = (string)$_GET['a'];
+    /* v1.38.0 一键开启缺失扩展 / 调大上传限制（仅限未安装站点 + CSRF 门禁；
+       传入扩展名经白名单与「当前缺失且扩展文件随附」双重过滤） */
+    if ($a === 'env_fix') {
+        if (!isset($_SESSION['inst']) || !is_array($_SESSION['inst'])) {
+            $_SESSION['inst'] = [];
+        }
+        if (!csrf_ok()) {
+            $_SESSION['inst']['efx_msg'] = ['ok' => false, 'msg' => '页面已过期，请刷新重试'];
+            redirect(ua('install.php?step=1'));
+        }
+        $names = [];
+        foreach ((array)($_POST['exts'] ?? []) as $n) {
+            if (is_string($n) && preg_match('/^[a-z0-9_]{2,20}$/', $n)) {
+                $names[] = $n;
+            }
+        }
+        $efxPlan = efx_plan();
+        $names = array_values(array_intersect($names, $efxPlan['fixable']));
+        $upfix = isset($_POST['upfix']) && ($efxPlan['up']['up_sug'] || $efxPlan['up']['post_sug']);
+        if ($names || $upfix) {
+            $res = efx_apply($names, $upfix);
+            $_SESSION['inst']['efx_msg'] = $res['ok']
+                ? ['ok' => true, 'msg' => efx_result_msg($res)]
+                : ['ok' => false, 'msg' => (string)$res['err']];
+        } else {
+            $_SESSION['inst']['efx_msg'] = ['ok' => false, 'msg' => '没有需要修改的项目：缺失扩展已全部启用，或当前环境无可用修改。'];
+        }
+        redirect(ua('install.php?step=1'));
+    }
+    /* v1.38.0 下载 php.ini 配置片段（php.ini 未找到 / 不可写时的降级方案，与一键写入同源） */
+    if ($a === 'env_dl') {
+        if (!csrf_ok()) {
+            redirect(ua('install.php?step=1'));
+        }
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="php-ini-snippet.txt"');
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: no-store');
+        echo efx_snippet();
+        exit;
+    }
     if (!csrf_ok()) {
         json_response(['ok' => false, 'msg' => '页面已过期，请刷新重试']);
     }
@@ -385,6 +429,16 @@ try {
 }
 $checks[] = inst_check('JSON 读写正常', $jOk, '全部数据以 JSON 文件存储');
 
+/* v1.38.0 扩展体检（推荐项，不阻断安装）：自动区分 Windows / Linux 与主机面板，缺失项可在下方一键开启 */
+$efx = efx_plan();
+$efxMissing = array_merge($efx['fixable'], $efx['nobundle']);
+$efxUpSug = $efx['up']['up_sug'] || $efx['up']['post_sug'];
+$checks[] = '<div class="check-row"><span class="check-ico">' . ($efxMissing === [] ? '✔' : '⚠') . '</span><div><b>PHP 扩展环境（' . e($efx['os']) . ($efx['panel']['name'] !== '' ? ' · ' . e($efx['panel']['name']) : '') . '）</b>' .
+    '<p class="muted">' . ($efxMissing === []
+        ? '推荐扩展全部就绪（程序核心零依赖，缺扩展只降级对应能力）'
+        : '缺 ' . count($efxMissing) . ' 项推荐扩展：' . e(implode('、', $efxMissing)) . '（不影响安装与运行，可在下方一键开启）') . '</p></div>' .
+    '<span class="badge ' . ($efxMissing === [] ? 'badge-ok' : 'badge-warn') . '">' . ($efxMissing === [] ? '通过' : '建议开启') . '</span></div>';
+
 $allPass = $phpOk && $wOk && $sOk && $lOk && $jOk; // 邮件能力允许缺失（后续可跳过）
 ?>
 <!DOCTYPE html>
@@ -417,9 +471,30 @@ $allPass = $phpOk && $wOk && $sOk && $lOk && $jOk; // 邮件能力允许缺失�
 <?php if ($step === 1): ?>
     <div class="card form-card">
       <h1 class="card-title">环境检测</h1>
+      <?php if (!empty($_SESSION['inst']['efx_msg'])): $efxMsg = $_SESSION['inst']['efx_msg']; unset($_SESSION['inst']['efx_msg']); ?>
+        <div class="flash <?= $efxMsg['ok'] ? 'flash-ok' : 'flash-err' ?>"><?= e($efxMsg['msg']) ?></div>
+      <?php endif; ?>
       <?php foreach ($checks as $c) {
           echo $c;
       } ?>
+      <?php if ($efxMissing || $efxUpSug): ?>
+        <div style="border:1px solid color-mix(in srgb, var(--line) 80%, transparent);border-radius:10px;padding:10px 14px;margin:6px 0 4px">
+          <b>运行环境一键优化</b>（自动区分 Windows / Linux<?php if ($efx['panel']['name'] !== ''): ?> · 已识别面板：<?= e($efx['panel']['name']) ?><?php endif; ?>）
+          <?php if ($efx['ini'] !== '' && $efx['ini_writable']): ?>
+            <form method="post" action="<?= e(ua('install.php?a=env_fix')) ?>" style="margin:8px 0 4px" onsubmit="return confirm('确认写入 php.ini？将先自动备份原文件到 data/backup/，写入后需重启 PHP 生效。')">
+              <?= csrf_field() ?>
+              <?php foreach ($efx['fixable'] as $n): ?><input type="hidden" name="exts[]" value="<?= e($n) ?>"><?php endforeach; ?>
+              <?php if ($efxUpSug): ?><label style="display:block;margin:4px 0"><input type="checkbox" name="upfix" value="1" checked> 同时调大上传限制（<?= e($efx['up']['cur']) ?> → 32M / <?= e($efx['up']['post']) ?> → 64M）</label><?php endif; ?>
+              <button class="btn btn-primary" type="submit" style="margin-top:6px"><?= $efx['fixable'] ? '一键开启缺失扩展（' . count($efx['fixable']) . '）' : '一键调大上传限制' ?></button>
+            </form>
+            <p class="muted" style="margin:4px 0 0">只开启缺失项，绝不改动其他配置；写入前自动备份 php.ini 到 data/backup/。写入后需重启 PHP（<?= e(efx_restart_hint()) ?>）并刷新本页复检。</p>
+          <?php else: ?>
+            <p class="muted" style="margin:6px 0 6px">php.ini 未找到或不可写（未做任何修改）：已生成配置片段，下载后把内容追加到当前 PHP 的 php.ini 末尾并重启 PHP 即可。</p>
+            <form method="post" action="<?= e(ua('install.php?a=env_dl')) ?>" style="margin:0 0 4px"><?= csrf_field() ?><button class="btn btn-ghost" type="submit">下载 php.ini 配置片段</button></form>
+            <p class="muted" style="margin:4px 0 0"><?= e(efx_panel_hint()) ?></p>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
       <div class="form-foot">
         <span class="muted"><?= $allPass ? '环境全部就绪（邮件能力可在下一步实测）' : '存在不通过项，请处理后刷新本页' ?></span>
         <?php if ($allPass): ?>

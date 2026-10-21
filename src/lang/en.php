@@ -531,4 +531,20 @@ return [
         '我确认：导入将覆盖当前全部数据（帖子 / 用户 / 设置）' => 'I understand: importing will overwrite ALL current data (threads / users / settings)',
         '确定导入迁移包？当前站点数据将被完整覆盖，导入前会自动备份到 data/backup/；完成后所有用户需重新登录。' => 'Import this migration package? The current site data will be fully overwritten; an automatic backup is saved to data/backup/ first; all users must log in again afterwards.',
         '导入并覆盖' => 'Import & overwrite',
+
+    /* v1.38.0 运行环境 · PHP 扩展（小皮面板 / Windows / Linux 自动区分） */
+        '运行环境 · PHP 扩展' => 'Runtime environment · PHP extensions',
+        '已启用' => 'Enabled',
+        '未启用' => 'Not enabled',
+        '未随附' => 'Not bundled',
+        '一键开启缺失扩展' => 'Enable missing extensions',
+        '同时调大上传限制' => 'Also raise upload limits',
+        '下载 php.ini 配置片段（FTP 上传用）' => 'Download php.ini snippet (for FTP upload)',
+        '确认写入 php.ini？将先自动备份原文件到 data/backup/（php-ini-bak-*.ini），然后取消注释或追加缺失扩展的加载行；写入后需重启 PHP 生效。' => 'Write to php.ini? The original file is backed up to data/backup/ (php-ini-bak-*.ini) first, then loading lines for missing extensions are uncommented or appended; restart PHP afterwards to take effect.',
+        '中文字符串处理（长度 / 搜索 / 截断）' => 'Chinese string handling (length / search / truncation)',
+        'SMTP SSL 发信（465 端口）' => 'SMTP over SSL (port 465)',
+        'AI 审核 / 防火墙 IP 库 / 更新检查' => 'AI moderation / firewall IP database / update checks',
+        '扫码登录二维码（PNG 图片）' => 'QR login image (PNG)',
+        '通用压缩（部分插件使用；程序自带 MiniZip 不依赖）' => 'Generic compression (used by some plugins; the bundled MiniZip does not need it)',
+        '字节码缓存，整站提速' => 'Opcode cache that speeds up the whole site',
 ];
