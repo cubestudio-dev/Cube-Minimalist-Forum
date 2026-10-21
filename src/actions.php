@@ -133,6 +133,10 @@ function route_action(string $a): void
         case 'admin_static_mode':     admin_tab_guard(); act_admin_static_mode(); return;
         case 'admin_static_htaccess': admin_tab_guard(); act_admin_static_htaccess(); return;
         case 'admin_static_clear':    admin_tab_guard(); act_admin_static_clear(); return;
+        /* v1.37.0 迁移搬家 */
+        case 'admin_migrate_build':   admin_tab_guard(); act_admin_migrate_build(); return;
+        case 'admin_migrate_delete':  admin_tab_guard(); act_admin_migrate_delete(); return;
+        case 'admin_migrate_import':  admin_tab_guard(); act_admin_migrate_import(); return;
         case 'admin_user_mute':  admin_tab_guard(); act_admin_user_mute(); return;
         case 'admin_user_ban':   admin_tab_guard(); act_admin_user_ban(); return;
         case 'admin_user_unban': admin_tab_guard(); act_admin_user_unban(); return;
@@ -2331,7 +2335,7 @@ function act_admin_backup_dl(): void
 {
     $u = require_admin();
     $name = (string)($_GET['id'] ?? '');
-    if (!preg_match('/^(backup|pre-update)-\d{8}-\d{6}\.zip$/', $name)) {
+    if (!preg_match('/^(backup|pre-update|pre-rollback|pre-migrate|migration)-\d{8}-\d{6}\.zip$/', $name)) {
         flash('err', '无效的备份文件名');
         admin_redirect('p=admin&tab=system');
     }
@@ -2354,7 +2358,7 @@ function act_admin_backup_del(): void
 {
     $u = require_admin();
     $name = (string)($_POST['id'] ?? '');
-    if (!preg_match('/^(backup|pre-update)-\d{8}-\d{6}\.zip$/', $name)) {
+    if (!preg_match('/^(backup|pre-update|pre-rollback|pre-migrate|migration)-\d{8}-\d{6}\.zip$/', $name)) {
         flash('err', '无效的备份文件名');
         admin_redirect('p=admin&tab=system');
     }
@@ -2686,6 +2690,103 @@ function act_admin_static_clear(): void
     $n = mfs_clear_all();
     log_action('admin_static_clear', '清空静态快照：' . $n . ' 个文件');
     act_ok('已清空 ' . $n . ' 个静态快照。游客访问将回退 PHP 实时渲染，快照随访问自动重新生成。', u('p=admin&tab=monitor'));
+}
+
+/* ================= 管理员：迁移搬家（v1.37.0） ================= */
+
+/** 制作迁移包（选项：含附件 / 含日志），完成后在系统页列表下载 */
+function act_admin_migrate_build(): void
+{
+    $u = admin_tab_guard();
+    $incMedia = !empty($_POST['inc_media']);
+    $incLogs = !empty($_POST['inc_logs']);
+    $err = '';
+    $name = mig_build($incMedia, $incLogs, $err);
+    if ($name === null) {
+        log_action('migrate_build_fail', '迁移包制作失败：' . $err, (int)$u['id'], (string)$u['name']);
+        flash('err', '制作失败：' . $err);
+        admin_redirect('p=admin&tab=system');
+    }
+    flash('ok', '迁移包已生成：' . $name . '（在下方列表点「下载」保存到本地，新服务器安装向导或本页导入时使用）');
+    admin_redirect('p=admin&tab=system');
+}
+
+/** 删除迁移包 */
+function act_admin_migrate_delete(): void
+{
+    $u = admin_tab_guard();
+    $name = (string)($_POST['name'] ?? '');
+    if (!mig_delete($name)) {
+        flash('err', '删除失败：无效的迁移包文件名或文件不存在');
+        admin_redirect('p=admin&tab=system');
+    }
+    log_action('migrate_delete', '删除迁移包：' . $name, (int)$u['id'], (string)$u['name']);
+    flash('ok', '迁移包已删除：' . $name);
+    admin_redirect('p=admin&tab=system');
+}
+
+/**
+ * 导入迁移包（已安装站点）：上传 zip 或选择 FTP 上传到 data/backup/ 的已有包。
+ * 成功后原会话作废，需用迁移包内（原站）管理员账号重新登录。
+ */
+function act_admin_migrate_import(): void
+{
+    $u = admin_tab_guard();
+    if (empty($_POST['confirm'])) {
+        flash('err', '请先勾选「我确认覆盖当前全部数据」再执行导入');
+        admin_redirect('p=admin&tab=system');
+    }
+    $path = '';
+    $pick = (string)($_POST['pick'] ?? '');
+    if ($pick !== '') {
+        /* 大包降级通道：FTP 上传到 data/backup/ 后在此选择导入 */
+        if (!preg_match('/^migration-\d{8}-\d{6}\.zip$/', $pick)) {
+            flash('err', '无效的迁移包文件名');
+            admin_redirect('p=admin&tab=system');
+        }
+        $path = Store::path('backup/' . $pick);
+        if (!is_file($path)) {
+            flash('err', '所选迁移包不存在：' . $pick);
+            admin_redirect('p=admin&tab=system');
+        }
+    } else {
+        if (empty($_FILES['f']) || !is_array($_FILES['f'])
+            || (int)($_FILES['f']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK
+            || !is_uploaded_file((string)($_FILES['f']['tmp_name'] ?? ''))) {
+            flash('err', '请选择迁移包文件（zip）。若提示超出上传限制，可改用 FTP 上传到 data/backup/ 后从列表选择导入');
+            admin_redirect('p=admin&tab=system');
+        }
+        $path = (string)$_FILES['f']['tmp_name'];
+    }
+    $res = [];
+    try {
+        mig_import($path, $res);
+    } catch (RuntimeException $e) {
+        flash('err', '导入中止：' . $e->getMessage());
+        admin_redirect('p=admin&tab=system');
+    } catch (Throwable $e) {
+        flash('err', '导入中止：迁移包无法读取（' . cut_str($e->getMessage(), 80) . '）');
+        admin_redirect('p=admin&tab=system');
+    }
+    $m = $res['manifest'];
+    log_action('migrate_import_ok', sprintf(
+        '迁移导入完成：v%s「%s」，%d 文件已覆盖%s',
+        (string)($m['version'] ?? '?'),
+        (string)($m['site'] ?? ''),
+        (int)$res['files'],
+        $res['backup'] !== '' ? '；导入前备份 ' . $res['backup'] : ''
+    ));
+    $msg = sprintf(
+        '迁移完成：「%s」的数据已就位（%d 帖 / %d 用户），当前会话已作废。请使用原站账号登录',
+        (string)($m['site'] ?? '未命名站点'),
+        (int)($m['counts']['threads'] ?? 0),
+        (int)($m['counts']['users'] ?? 0)
+    );
+    foreach ($res['notes'] as $n) {
+        $msg .= '；' . $n;
+    }
+    flash('ok', $msg);
+    redirect(u('p=login'));
 }
 
 /** 手动发送测试 / 真实告警邮件（force 跳过冷却） */

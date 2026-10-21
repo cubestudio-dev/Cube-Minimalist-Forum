@@ -20,6 +20,114 @@ if (FileStore::exists('lock/install.lock')) {
 Store::ensureDir('lock');
 Store::ensureDir('locks');
 
+/* ---------- v1.37.0 从迁移包恢复安装（服务器搬迁）：?restore=1 ----------
+ * 全新站点无需走 6 步向导：上传旧站导出的迁移包，帖子 / 回复 / 用户 / 版块 /
+ * 设置原样就位，管理员账号即原站账号。仅在未安装时可进入（已装走后台导入）。 */
+if (isset($_GET['restore'])) {
+    /* 安装进度会话（与主流程同一份 $_SESSION['inst']） */
+    if (!isset($_SESSION['inst']) || !is_array($_SESSION['inst'])) {
+        $_SESSION['inst'] = [];
+    }
+    $inst = &$_SESSION['inst'];
+    $rErr = '';
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!csrf_ok()) {
+            $rErr = '页面已过期，请刷新重试';
+        } else {
+            $path = '';
+            $pick = trim((string)($_POST['pick'] ?? ''));
+            if ($pick !== '') {
+                /* 大包降级通道：FTP 上传迁移包到 data/backup/ 后在此选择 */
+                if (preg_match('/^migration-\d{8}-\d{6}\.zip$/', $pick) && is_file(Store::path('backup/' . $pick))) {
+                    $path = Store::path('backup/' . $pick);
+                } else {
+                    $rErr = '所选迁移包不存在或文件名不正确';
+                }
+            } elseif (!empty($_FILES['f']) && is_array($_FILES['f'])
+                && (int)($_FILES['f']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK
+                && is_uploaded_file((string)($_FILES['f']['tmp_name'] ?? ''))) {
+                $path = (string)$_FILES['f']['tmp_name'];
+            } else {
+                $rErr = '请选择迁移包文件（zip）。超出主机上传上限时，可用 FTP 把迁移包上传到 data/backup/ 后在下方选择导入';
+            }
+            if ($rErr === '') {
+                try {
+                    $rRes = [];
+                    mig_import($path, $rRes);
+                    unset($inst['site'], $inst['smtp'], $inst['ai'], $inst['admin'], $inst['smtp_skip'], $inst['ai_skip']);
+                    $inst['restore_done'] = 1;
+                    $inst['restore_info'] = is_array($rRes['manifest'] ?? null) ? $rRes['manifest'] : [];
+                } catch (Throwable $e) {
+                    $rErr = '恢复中止：' . $e->getMessage();
+                }
+            }
+        }
+    }
+    $rDone = !empty($inst['restore_done']);
+    $rInfo = is_array($inst['restore_info'] ?? null) ? $inst['restore_info'] : [];
+?>
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf" content="<?= e(csrf_token()) ?>">
+<title>从迁移包恢复 · Cube Minimalist Forum</title>
+<link rel="stylesheet" href="<?= e(ua('assets/style.css?v=' . MF_VERSION)) ?>">
+<script>window.THEME_DEFAULT="system";window.DEMO_PORT=<?= json_encode(demo_port()) ?>;</script>
+<script>(function(){try{var d=localStorage.getItem('mf-theme')||'system';if(d==='system'){d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',d);}catch(e){}})();</script>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar"><div class="topbar-in">
+    <a class="brand" href="<?= e(ua('install.php')) ?>"><span class="logo"></span><b>Cube Minimalist Forum · 从迁移包恢复</b></a>
+    <div class="flex1"></div><button class="icon-btn" id="themeToggle" type="button" aria-label="切换深色模式">◐</button>
+  </div></header>
+  <main class="main main-narrow">
+<?php if ($rErr !== ''): ?>
+    <div class="flash flash-err"><?= e($rErr) ?></div>
+<?php endif; ?>
+<?php if ($rDone): ?>
+    <div class="card form-card done-card">
+      <div class="done-ico">📦</div>
+      <h1 class="card-title">恢复完成！</h1>
+      <p>「<?= e((string)($rInfo['site'] ?? '站点')) ?>」的数据已原样就位<?php if (!empty($rInfo['version'])): ?>（数据版本 v<?= e((string)$rInfo['version']) ?>）<?php endif; ?>。
+      <?php if (!empty($rInfo['counts']) && is_array($rInfo['counts'])): ?>
+        共 <?= (int)($rInfo['counts']['threads'] ?? 0) ?> 帖 / <?= (int)($rInfo['counts']['users'] ?? 0) ?> 用户 / <?= (int)($rInfo['counts']['boards'] ?? 0) ?> 版块。
+      <?php endif; ?></p>
+      <p>请使用<b>原站的管理员账号</b>登录（密码与旧站一致）。若迁移包版本比当前程序旧，建议随后到「后台 → 更新升级」确认版本。</p>
+      <div class="flash flash-warn">安全提醒：请立即通过 FTP <b>删除 install.php</b>，避免被他人重新安装。</div>
+      <div class="form-foot"><a class="btn btn-ghost" href="<?= e(ua('install.php?restore=1')) ?>">再恢复一个迁移包</a><a class="btn btn-primary" href="<?= e(u('p=login')) ?>">去登录</a></div>
+    </div>
+<?php else: ?>
+    <div class="card form-card">
+      <h1 class="card-title">从迁移包恢复安装</h1>
+      <p class="hint">适用于服务器搬迁：先在旧站「后台 → 系统 → 迁移搬家」制作迁移包并下载，然后在这里上传，整站内容自动就位，无需逐步配置。只需全新安装（不带旧数据）请返回<a href="<?= e(ua('install.php?step=1')) ?>">标准安装向导</a>。</p>
+      <form method="post" action="<?= e(ua('install.php?restore=1')) ?>" enctype="multipart/form-data">
+        <?= csrf_field() ?>
+        <label class="field"><span class="field-l">迁移包文件（zip）</span><input class="input" type="file" name="f" accept=".zip" required></label>
+        <?php $rPkgs = mig_list(); if ($rPkgs): ?>
+        <label class="field"><span class="field-l">或选择已上传到 data/backup/ 的迁移包（FTP 上传大包后在此导入）</span>
+          <select class="input" name="pick"><option value="">— 不使用，从上传文件导入 —</option>
+          <?php foreach ($rPkgs as $rp): ?><option value="<?= e($rp['name']) ?>"><?= e($rp['name']) ?>（<?= e(fmt_bytes($rp['size'])) ?>）</option><?php endforeach; ?>
+          </select></label>
+        <?php else: ?>
+        <p class="hint">迁移包超出主机上传限制？用 FTP 把它上传到 <b>data/backup/</b> 目录，刷新本页即可在列表中选择导入。</p>
+        <?php endif; ?>
+        <div class="form-foot"><a class="btn btn-ghost" href="<?= e(ua('install.php?step=1')) ?>">返回标准安装</a><button class="btn btn-primary" type="submit">开始恢复</button></div>
+      </form>
+    </div>
+<?php endif; ?>
+  </main>
+  <footer class="footer"><span>Cube Minimalist Forum · 安装向导</span><span class="muted">纯 PHP · 文件存储 · 无数据库</span></footer>
+</div>
+<script src="<?= e(ua('assets/app.js?v=' . MF_VERSION)) ?>" defer></script>
+</body>
+</html>
+<?php
+    exit;
+}
+
 /* ---------- AJAX 测试（邮件 / AI） ---------- */
 if (isset($_GET['a']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $a = (string)$_GET['a'];
@@ -320,6 +428,7 @@ $allPass = $phpOk && $wOk && $sOk && $lOk && $jOk; // 邮件能力允许缺失�
           <a class="btn btn-ghost" href="<?= e(ua('install.php?step=1')) ?>">重新检测</a>
         <?php endif; ?>
       </div>
+      <p class="hint">搬迁服务器？<a href="<?= e(ua('install.php?restore=1')) ?>">从迁移包恢复安装</a> —— 上传旧站导出的迁移包，帖子 / 用户 / 设置一键就位，无需逐步配置。</p>
     </div>
 
 <?php elseif ($step === 2): ?>

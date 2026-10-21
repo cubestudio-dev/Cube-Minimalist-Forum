@@ -513,4 +513,22 @@ return [
         '下载 .htaccess（已合并加速块，FTP 上传）' => 'Download .htaccess (boost block merged; upload via FTP)',
         '安装 .htaccess 加速块' => 'Install .htaccess boost block',
         '确认写入 .htaccess 加速块？先自动备份原文件到 data/backup/，再在末尾追加标记块（幂等，可随时一键移除）。' => 'Write the .htaccess boost block? The original file is backed up to data/backup/ first, then the marked block is appended (idempotent; removable anytime with one click).',
+
+    /* v1.37.0 迁移搬家 */
+        '迁移搬家' => 'Migrate & move',
+        '把整站内容（帖子 / 回复 / 用户 / 版块 / 设置，可选附件与日志）打包为迁移包：新服务器在安装向导选「从迁移包恢复」即可原样就位；已装好的站可在下方导入覆盖。迁移包含全部用户数据，请妥善保管，不要存放在网站目录内。' => 'Pack the entire site (threads / replies / users / boards / settings, with optional attachments and logs) into a migration package: on a new server, choose "Restore from migration package" in the installer and everything lands in place; an already-installed site can import it below to overwrite. A migration package contains all user data — keep it safe and never store it in a web-accessible directory.',
+        '包含附件（上传的图片 / 文件）' => 'Include attachments (uploaded images / files)',
+        '包含运行日志' => 'Include runtime logs',
+        '开始制作迁移包？内容较多时可能需要数十秒。' => 'Build the migration package now? It may take tens of seconds with lots of content.',
+        '制作迁移包' => 'Build migration package',
+        '单包上限 32MB；附件较多时可取消「包含附件」，改用 FTP 把 data/media/ 整目录搬到新站同位置，功能不受影响。' => 'One package is capped at 32MB; with many attachments, uncheck "Include attachments" and move the whole data/media/ directory to the same path on the new server via FTP — functionality is unaffected.',
+        '当前为数据库引擎：数据存于数据库中，迁移包暂不适用（请用数据库自带导出 / 导入）。' => 'Database engine is active: data lives in the database, so migration packages do not apply (use the database\'s own export / import).',
+        '还没有迁移包' => 'No migration packages yet',
+        '确认删除该迁移包？' => 'Delete this migration package?',
+        '导入迁移包（zip）' => 'Import migration package (zip)',
+        '或选择已上传到 data/backup/ 的迁移包（FTP 上传大包后在此导入）' => '…or pick a package already uploaded to data/backup/ (upload large packages via FTP, then import here)',
+        '— 不使用，从上传文件导入 —' => '— Do not use; import from the uploaded file —',
+        '我确认：导入将覆盖当前全部数据（帖子 / 用户 / 设置）' => 'I understand: importing will overwrite ALL current data (threads / users / settings)',
+        '确定导入迁移包？当前站点数据将被完整覆盖，导入前会自动备份到 data/backup/；完成后所有用户需重新登录。' => 'Import this migration package? The current site data will be fully overwritten; an automatic backup is saved to data/backup/ first; all users must log in again afterwards.',
+        '导入并覆盖' => 'Import & overwrite',
 ];

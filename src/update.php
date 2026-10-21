@@ -292,6 +292,10 @@ function update_apply(string $zipPath, array &$res): void
     $entries = MiniZipRead::read($zipPath);
 
     if (!isset($entries['update.json'])) {
+        /* v1.37.0 交叉提示：拿错包时给出准确去处 */
+        if (isset($entries['migration.json'])) {
+            throw new RuntimeException('这是「迁移包」不是更新包：请到「后台 → 系统 → 迁移搬家」导入（新服务器也可在安装向导选择「从迁移包恢复」）');
+        }
         throw new RuntimeException('更新包缺少 update.json，不是有效的更新包（完整安装包请解压后 FTP 上传，而不是在此上传）');
     }
     $m = json_decode($entries['update.json'], true);

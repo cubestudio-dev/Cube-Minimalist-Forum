@@ -1470,6 +1470,45 @@ function admin_tab_system(array $me): void
             '</span></div>';
     }
     echo '</div></div>';
+    /* v1.37.0 迁移搬家：制作 / 管理 / 导入迁移包 */
+    $migPkgs = mig_list();
+    echo '<div class="card form-card"><h2 class="card-title">' . t('迁移搬家') . '</h2>' .
+        '<p class="hint">' . t('把整站内容（帖子 / 回复 / 用户 / 版块 / 设置，可选附件与日志）打包为迁移包：新服务器在安装向导选「从迁移包恢复」即可原样就位；已装好的站可在下方导入覆盖。迁移包含全部用户数据，请妥善保管，不要存放在网站目录内。') . '</p>' .
+        '<form method="post" action="' . e(u('a=admin_migrate_build')) . '" class="inline-form">' . csrf_field() .
+        '<label class="check"><input type="checkbox" name="inc_media" value="1" checked> ' . t('包含附件（上传的图片 / 文件）') . '</label>' .
+        '<label class="check"><input type="checkbox" name="inc_logs" value="1"> ' . t('包含运行日志') . '</label>' .
+        '<button class="btn btn-primary" type="submit" data-confirm="' . t('开始制作迁移包？内容较多时可能需要数十秒。') . '">' . t('制作迁移包') . '</button></form>' .
+        '<p class="hint">' . t('单包上限 32MB；附件较多时可取消「包含附件」，改用 FTP 把 data/media/ 整目录搬到新站同位置，功能不受影响。') . '</p>' .
+        '<div class="admin-list">';
+    if (!mig_engine_ok()) {
+        echo '<p class="hint">' . t('当前为数据库引擎：数据存于数据库中，迁移包暂不适用（请用数据库自带导出 / 导入）。') . '</p>';
+    } elseif (!$migPkgs) {
+        echo empty_state(t('还没有迁移包'));
+    }
+    foreach ($migPkgs as $p) {
+        echo '<div class="admin-row"><div class="u-info"><b>' . e($p['name']) . '</b>' .
+            '<span class="muted">' . e(fmt_bytes($p['size'])) . ' · ' . e(date('Y-m-d H:i', $p['mtime'])) . '</span></div>' .
+            '<span class="admin-row-actions">' .
+            '<a class="btn btn-ghost btn-sm" href="' . e(u('a=admin_backup_dl&id=' . $p['name'])) . '">' . t('下载') . '</a>' .
+            '<form method="post" action="' . e(u('a=admin_migrate_delete')) . '" class="inline" data-confirm="' . t('确认删除该迁移包？') . '">' . csrf_field() . hidden_back() .
+            '<input type="hidden" name="name" value="' . e($p['name']) . '">' .
+            '<button class="btn btn-danger btn-sm" type="submit">' . t('删除') . '</button></form>' .
+            '</span></div>';
+    }
+    echo '</div>' .
+        '<form method="post" action="' . e(u('a=admin_migrate_import')) . '" enctype="multipart/form-data" class="inline-form">' . csrf_field() .
+        '<label class="field"><span class="field-l">' . t('导入迁移包（zip）') . '</span><input class="input" type="file" name="f" accept=".zip"></label>';
+    if ($migPkgs) {
+        echo '<label class="field"><span class="field-l">' . t('或选择已上传到 data/backup/ 的迁移包（FTP 上传大包后在此导入）') . '</span>' .
+            '<select class="input" name="pick" style="max-width:340px"><option value="">' . t('— 不使用，从上传文件导入 —') . '</option>';
+        foreach ($migPkgs as $p) {
+            echo '<option value="' . e($p['name']) . '">' . e($p['name']) . '（' . e(fmt_bytes($p['size'])) . '）</option>';
+        }
+        echo '</select></label>';
+    }
+    echo '<label class="check"><input type="checkbox" name="confirm" value="1"> ' . t('我确认：导入将覆盖当前全部数据（帖子 / 用户 / 设置）') . '</label>' .
+        '<div class="form-foot"><button class="btn btn-danger" type="submit" data-confirm="' . t('确定导入迁移包？当前站点数据将被完整覆盖，导入前会自动备份到 data/backup/；完成后所有用户需重新登录。') . '">' . t('导入并覆盖') . '</button></div>' .
+        '</form></div>';
     /* v1.16.0 存量数据一键压缩 */
     echo '<div class="card form-card"><h2 class="card-title">' . t('数据占用压缩') . '</h2>' .
         '<p class="muted">v1.16.0 起新写入的数据文件均为 gzip 压缩格式（中文数据体积约省一半以上）；此按钮可把存量明文数据一次性转为压缩格式。</p>' .
@@ -2429,6 +2468,10 @@ function admin_search_index(): array
         /* 系统 */
         ['system', '系统信息', '程序版本 / 数据统计', 'system info 系统'],
         ['system', '注销账号管理', '注销请求', 'delete account 注销'],
+        /* v1.37.0 迁移搬家 */
+        ['system', '迁移搬家', '制作迁移包：整站内容（帖子 / 用户 / 设置 / 附件）打包下载，用于搬迁服务器', 'migrate 迁移 搬家 迁移包 打包 导出 备份 新服务器'],
+        ['system', '导入迁移包', '已装站点上传迁移包覆盖恢复；大包可 FTP 上传到 data/backup 后选择导入', '导入 恢复 覆盖 迁移包 上传 ftp'],
+        ['system', '从迁移包恢复安装', '新服务器安装向导内选择迁移包，跳过 6 步向导一键就位', '安装 恢复 迁移包 搬迁 部署 就位'],
     ];
     return $i;
 }
