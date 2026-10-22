@@ -13,6 +13,8 @@
  *   - 拒绝绝对路径、..、盘符等不安全条目名
  *   - 应用前自动把当前程序文件备份到 data/backup/pre-update-*.zip（保留最近 3 份）
  *   - 版本号只前进不后退
+ *   - 写入自带自愈与精确诊断（v1.38.1）：自动解除只读锁逐级重试，替换失败时给出
+ *     面板防篡改 / Windows 只读属性 / 属主不一致等具体原因与修复指引，不再笼统报权限
  */
 defined('APP') or exit('Forbidden');
 
@@ -243,21 +245,19 @@ function update_rollback(string $bkPath, array &$res): void
         throw new RuntimeException('回滚前备份失败：data/backup 不可写，已中止回滚');
     }
 
-    /* 逐条原子写入（与更新应用同一套逻辑） */
+    /* 逐条写入（与更新应用同一套自愈逻辑） */
     $root = dirname(DATA_DIR);
     $applied = 0;
+    $total = count($copy);
     foreach ($copy as $name => $content) {
-        $target = $root . '/' . $name;
-        $dir = dirname($target);
-        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
-            throw new RuntimeException('无法创建目录：' . $name . '（请检查程序目录权限）');
+        try {
+            update_write_entry($root, $name, $content);
+        } catch (RuntimeException $ex) {
+            $extra = $applied > 0
+                ? '。本次已写入 ' . $applied . '/' . $total . ' 个文件：修复后重新回滚同一备份即可自动补齐（数据不受影响）'
+                : '';
+            throw new RuntimeException($ex->getMessage() . $extra);
         }
-        $tmp = $target . '.uptmp' . getmypid();
-        if (@file_put_contents($tmp, $content) === false || !@rename($tmp, $target)) {
-            @unlink($tmp);
-            throw new RuntimeException('写入文件失败（权限不足？）：' . $name);
-        }
-        @chmod($target, 0644);
         $applied++;
     }
 
@@ -278,6 +278,87 @@ function update_rollback(string $bkPath, array &$res): void
         @opcache_reset();
     }
     $res = ['version' => $ver, 'from' => $cur, 'files' => $applied, 'new_backup' => $rbName];
+}
+
+/* ================= 文件写入（自愈 + 精确诊断，v1.38.1） ================= */
+
+/**
+ * 把单个程序文件写入程序目录，尽量自动排除常见障碍：
+ *   1) 临时文件 + rename 原子替换（首选）；
+ *   2) 解除目标文件只读锁（chmod 0666：Windows 只读属性 / 部分面板锁定）后重试；
+ *   3) 删除旧文件后重建（仅目录可写时启用，绕过覆盖限制）；
+ *   4) 目录写不进临时文件但目标文件本身可写时，直接覆盖写入。
+ * 目录不可写时绝不删除旧文件，避免破坏现状；全部失败时抛出含修复指引的异常，
+ * 区分「程序目录不可写」与「文件被保护 / 占用」两类原因，便于按指引一次修好。
+ */
+function update_write_entry(string $root, string $name, string $content): void
+{
+    $target = $root . '/' . $name;
+    $dir = dirname($target);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+        throw new RuntimeException('无法创建目录：' . $name . '（请检查程序目录权限）');
+    }
+
+    /* 目录可写性探测（一次即可，后续不再依赖 is_writable 的平台差异） */
+    $probe = $dir . '/.uptest' . getmypid();
+    $dirOk = @file_put_contents($probe, 'x') !== false;
+    @unlink($probe);
+
+    $replace = function () use ($target, $content): bool {
+        $tmp = $target . '.uptmp' . getmypid();
+        if (@file_put_contents($tmp, $content) === false) {
+            @unlink($tmp);
+            return false;
+        }
+        if (!@rename($tmp, $target)) {
+            @unlink($tmp);
+            return false;
+        }
+        return true;
+    };
+
+    if ($replace()) {
+        @chmod($target, 0644);
+        return;
+    }
+
+    if (!$dirOk) {
+        /* 目录不可写：唯一出路是目标文件本身可写（直接覆盖），绝不删除旧文件 */
+        error_clear_last();
+        if (@file_put_contents($target, $content) !== false) {
+            @chmod($target, 0644);
+            return;
+        }
+        $err = error_get_last();
+        $sys = ($err && !empty($err['message'])
+            && preg_match('/(Permission denied|Read-only file system|Operation not permitted|Disk quota exceeded|No space left|Text file busy|Device or resource busy)/i', $err['message'], $m))
+            ? '（系统原因：' . $m[1] . '）' : '';
+        throw new RuntimeException('写入文件失败：程序目录不可写，无法创建临时文件' . $sys
+            . '——请通过 FTP / 面板把程序目录权限改为 755（或 775）并确认属主与 PHP 运行用户一致后重试：' . $name);
+    }
+
+    /* 目录可写：先解除只读锁重试，再尝试删除重建 */
+    if (file_exists($target)) {
+        @chmod($target, 0666);
+        if ($replace()) {
+            @chmod($target, 0644);
+            return;
+        }
+        error_clear_last();
+        if (@unlink($target) && $replace()) {
+            @chmod($target, 0644);
+            return;
+        }
+    }
+
+    $err = error_get_last();
+    $sys = ($err && !empty($err['message'])
+        && preg_match('/(Permission denied|Operation not permitted|Read-only file system|Disk quota exceeded|No space left|Text file busy|Device or resource busy|Resource temporarily unavailable)/i', $err['message'], $m))
+        ? '（系统原因：' . $m[1] . '）' : '';
+    throw new RuntimeException('写入文件失败：无法替换 ' . $name . '（目录可写，文件被保护或占用）' . $sys
+        . '——常见原因：①主机面板的「网站防篡改 / 文件保护」锁定了程序文件（宝塔等），请临时关闭后重试；'
+        . '②Windows（小皮面板）文件为只读属性，请取消只读或在面板重启 PHP 后重试；'
+        . '③文件属主与 PHP 进程不一致，请在 FTP 中把该文件权限改为 666（或删除后重试）');
 }
 
 /* ================= 更新应用 ================= */
@@ -344,21 +425,20 @@ function update_apply(string $zipPath, array &$res): void
         throw new RuntimeException('更新前备份失败：data/backup 不可写，已中止更新');
     }
 
-    /* ---- 逐条原子写入 ---- */
+    /* ---- 逐条原子写入（只读自愈 + 精确诊断） ---- */
     $root = dirname(DATA_DIR);
     $applied = 0;
+    $total = count($copy);
     foreach ($copy as $name => $content) {
-        $target = $root . '/' . $name;
-        $dir = dirname($target);
-        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
-            throw new RuntimeException('无法创建目录：' . $name . '（请检查程序目录权限）');
+        try {
+            update_write_entry($root, $name, $content);
+        } catch (RuntimeException $ex) {
+            $extra = $applied > 0
+                ? '。本次已写入 ' . $applied . '/' . $total . ' 个文件，更新前备份：data/backup/' . $bkName
+                  . '；修复原因后重新上传同一更新包即可自动补齐覆盖（数据与设置不受影响）'
+                : '（更新前备份已存于 data/backup/' . $bkName . '，数据与设置不受影响；修复原因后重新上传同一更新包即可）';
+            throw new RuntimeException($ex->getMessage() . $extra);
         }
-        $tmp = $target . '.uptmp' . getmypid();
-        if (@file_put_contents($tmp, $content) === false || !@rename($tmp, $target)) {
-            @unlink($tmp);
-            throw new RuntimeException('写入文件失败（权限不足？）：' . $name);
-        }
-        @chmod($target, 0644);
         $applied++;
     }
 
