@@ -140,7 +140,7 @@ function admin_card_limits(): string
         '<label class="field"><span class="field-l">' . t('图片大小上限（MB）') . '</span><input class="input" name="upload_img_max_mb" type="number" min="1" max="50" value="' . (int)cfg('upload_img_max_mb', 5) . '"></label>' .
         '<label class="field"><span class="field-l">' . t('附件大小上限（MB）') . '</span><input class="input" name="upload_file_max_mb" type="number" min="1" max="100" value="' . (int)cfg('upload_file_max_mb', 10) . '"></label>' .
         '<label class="field"><span class="field-l">' . t('允许的附件扩展名') . '</span><input class="input" name="upload_allow_ext" value="' . e((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx')) . '">' .
-        '<span class="hint">空格分隔；图片（png / jpg / gif / webp）始终允许，svg / 可执行 / 脚本类永远拒绝；上传总开关在「功能」页「允许上传图片 / 附件」</span></label>' .
+        '<span class="hint">空格或逗号分隔（保存时自动统一为空格，v1.41.0 前用逗号会被无声吞掉导致白名单粘成一坨、附件上传被拒）；图片（png / jpg / gif / webp）始终允许，svg / 可执行 / 脚本类永远拒绝；上传总开关在「功能」页「允许上传图片 / 附件」</span></label>' .
         '</div>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存内容与限制') . '</button></div></form>' .
         admin_restore_btn('thread_title_max,thread_len_max,reply_len_max,name_max,sign_len_max,upload_per_post,upload_img_max_mb,upload_file_max_mb,upload_allow_ext') . '</div>';
@@ -307,7 +307,7 @@ function admin_tab_feat(): void
             /* AI 两项的原生配置键不带 feat_ 前缀（还原默认注册表按原键登记） */
             $allKeys[] = in_array($k, $aiKeys, true) ? $k : 'feat_' . $k;
             $on = in_array($k, $aiKeys, true) ? (int)cfg($k, 1) === 1 : feat_on($k);
-            echo '<label class="feat-row"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
+            echo '<label class="feat-row"><input type="hidden" name="feat_' . e($k) . '" value="0"><input type="checkbox" class="feat-check" name="feat_' . e($k) . '" value="1"' . ($on ? ' checked' : '') . '>' .
                 '<span class="feat-txt"><b>' . e(t($name)) . '</b>' . ($desc !== '' ? '<span class="muted">' . e(t($desc)) . '</span>' : '') . '</span>' .
                 '<span class="badge' . ($on ? ' badge-ok' : '') . '" data-feat-state="' . e($k) . '">' . e(t($on ? '开启' : '关闭')) . '</span></label>';
         }

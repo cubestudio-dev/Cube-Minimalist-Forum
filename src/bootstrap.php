@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.40.0');
+    define('MF_VERSION', '1.41.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -93,6 +93,22 @@ unset($mfHttps);
 
 /* 配置 */
 $GLOBALS['CFG'] = Store::read('config.php', []);
+/* v1.41.0 启动自愈：config.php 缺失 / 损坏 / 空读时，从 last-good 备份自动恢复——
+ * 介质抖动（ARM 盒子 SD 卡掉电丢写等）后整站配置不再「回默认」，本请求即恢复可用 */
+if (!is_array($GLOBALS['CFG']) || !$GLOBALS['CFG']) {
+    $lgCfg = Store::read('backup/config-last-good.php', []);
+    if (is_array($lgCfg) && $lgCfg) {
+        $GLOBALS['CFG'] = $lgCfg;
+        if (Store::writable()) {
+            Store::write('config.php', $lgCfg);
+        }
+        error_log('[MF] config.php 读取失败，已从 backup/config-last-good.php 自动恢复（' . count($lgCfg) . ' 个配置键）');
+        if (empty($GLOBALS['ENV_WARN'])) {
+            $GLOBALS['ENV_WARN'] = '检测到 data/config.php 缺失或损坏，已自动从最近一次完好备份恢复（' . count($lgCfg) . ' 个配置键）。'
+                . '若存储介质反复出现此问题，建议尽快备份数据并更换存储介质。';
+        }
+    }
+}
 if (!is_array($GLOBALS['CFG'])) {
     $GLOBALS['CFG'] = [];
 }
@@ -294,7 +310,10 @@ function mf_session_release(): void
     }
 }
 
-/** 更新配置（加锁 + 原子写） */
+/** 更新配置（加锁 + 原子写 + 空读防御 + last-good 备份）
+ *  v1.41.0：「配置时不时回到默认」第二道根因防线——读到空配置时绝不照常写回：
+ *  介质抖动 / 文件损坏会让本请求读到空数组，若照常合并写回，瞬时读失败就被永久固化成全站配置丢失；
+ *  保护性拒绝本次写入并留痕告警，磁盘上的原文件分毫不动。 */
 function cfg_update(array $kv): void
 {
     $lk = Store::lock('config');
@@ -302,10 +321,23 @@ function cfg_update(array $kv): void
     if (!is_array($c)) {
         $c = [];
     }
+    if ($c === [] && Store::exists('config.php')) {
+        Store::unlock($lk);
+        error_log('[MF] config.php 读取异常（存在但读出为空 / 损坏），已拒绝本次配置写入以防配置被清空');
+        if (empty($GLOBALS['ENV_WARN'])) {
+            $GLOBALS['ENV_WARN'] = 'config.php 读取异常（文件存在但内容为空 / 损坏）：为保护现有配置，刚才的设置保存已被拒绝、写入未执行。'
+                . '请检查存储介质或从 data/backup/config-last-good.php 恢复。';
+        }
+        if (function_exists('log_action')) {
+            log_action('cfg_guard', 'config.php 读取异常（存在但读出为空），已拒绝本次配置写入——现有设置未改动；请检查存储介质或从 data/backup/ 恢复');
+        }
+        return;
+    }
     foreach ($kv as $k => $v) {
         $c[$k] = $v;
     }
     Store::write('config.php', $c);
+    Store::write('backup/config-last-good.php', $c); /* v1.41.0 last-good 备份：启动自愈数据源 */
     $GLOBALS['CFG'] = $c;
     Store::unlock($lk);
 }

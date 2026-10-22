@@ -233,6 +233,28 @@ function act_err(string $msg, bool $ajax = false): void
     back_or(u('p=home'));
 }
 
+/**
+ * v1.41.0 POST 完整性守卫：设置保存类动作专用。
+ * 锚点字段 = 表单里正常提交时必然存在的控件名（文本输入 / hidden / CSRF 令牌）。
+ * 缺任何一个都说明请求体被截断或整体丢弃（网络抖动、Cloudflare 隧道 / 代理异常、
+ * post_max_size / max_input_vars 触顶等）——此时表单里未到达的字段会被 `?? 默认值`
+ * 与 post_str 静默回退，照常保存会把用户的整页配置覆盖成默认（「部分配置时不时
+ * 消失、回到默认」的根因防线）。宁可拒绝保存，绝不覆盖：
+ * 一律报错终止，现有设置分毫不动，用户重试即可。
+ */
+function post_guard(string ...$keys): void
+{
+    $missing = array_values(array_filter($keys, fn (string $k): bool => !isset($_POST[$k])));
+    if (!$missing) {
+        return;
+    }
+    act_err('表单数据不完整（缺少 ' . count($missing) . ' 个字段'
+        . (count($missing) <= 3 ? '：' . implode(' / ', $missing) : '，如 ' . implode(' / ', array_slice($missing, 0, 3)))
+        . '），本次保存已放弃，现有设置未做任何改动。'
+        . '多为网络抖动或服务器 POST 限制（post_max_size / max_input_vars）所致，请直接重试；'
+        . '若反复出现，请到后台「监控 → 运行环境」体检并调大 POST 限制。');
+}
+
 function act_ok(string $msg, string $goto = ''): void
 {
     if (is_ajax()) {
@@ -278,6 +300,7 @@ function admin_redirect(string $fallback = 'p=admin'): void
 /** 后台保存三份协议（v1.16.0） */
 function act_admin_save_docs(): void
 {
+    post_guard('csrf', 'doc_footer', 'doc_gate');
     $me = admin_tab_guard();
     $kv = [];
     $nowDoc = time();
@@ -316,6 +339,7 @@ function act_admin_save_docs(): void
 /** 后台保存开放 API 设置（v1.19.0）：总开关 / 访客调用 / 限速 / CORS / 条款 / 端点开关 / 调用日志 */
 function act_admin_save_api(): void
 {
+    post_guard('csrf', 'api_enabled', 'api_rate_guest');
     $me = admin_tab_guard();
     $kv = [
         'api_enabled' => !empty($_POST['api_enabled']) ? 1 : 0,
@@ -863,6 +887,7 @@ function act_dev_verify_toggle(): void
 /** v1.20.0：后台「安全防护」页 · 账号安全设置（二次验证总闸 + 同时在线设备上限） */
 function act_admin_save_security(): void
 {
+    post_guard('csrf', 'sess_max');
     admin_tab_guard();
     $max = max(1, min(50, (int)($_POST['sess_max'] ?? 10)));
     /* checkbox 用 hidden(0)+checkbox(1) 组合提交：未勾选=标量'0'（empty→关），勾选=数组（non-empty→开） */
@@ -989,11 +1014,24 @@ function act_media_upload(): void
     $u = require_login();
     feat_guard('upload', '上传功能已关闭');
     if (empty($_FILES['file']) || !is_array($_FILES['file']) || !is_string($_FILES['file']['name'] ?? null)) {
-        act_err('请选择要上传的文件');
+        act_err('请选择要上传的文件（若已选择文件仍提示此错误，多半是整个请求超过服务器 post_max_size 被 PHP 丢弃——可在后台「监控 → 运行环境」一键调大后重试）');
     }
     $f = $_FILES['file'];
     if ((int)($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        act_err('上传失败（错误码 ' . (int)($f['error'] ?? -1) . '，可能超过服务器上传限制）');
+        $code = (int)($f['error'] ?? -1);
+        $why = [
+            1 => '超过服务器 PHP 上传限制（upload_max_filesize）',
+            2 => '超过表单声明的上传上限（MAX_FILE_SIZE）',
+            3 => '上传中断，只收到部分文件',
+            4 => '没有收到文件（若确认已选择文件，多半是整个请求超过 post_max_size 被 PHP 丢弃）',
+            6 => '服务器临时目录不可用',
+            7 => '服务器写入临时文件失败',
+            8 => '上传被 PHP 扩展中断',
+        ][$code] ?? '未知原因';
+        $fix = ($code === 1 || $code === 2)
+            ? '——可在后台「监控 → 运行环境」把 upload_max_filesize / post_max_size 一键调大后重试'
+            : '';
+        act_err('上传失败：' . $why . '（错误码 ' . $code . '）' . $fix);
     }
     $size = (int)($f['size'] ?? 0);
     $name = (string)$f['name'];
@@ -1004,7 +1042,7 @@ function act_media_upload(): void
         act_err('不支持的文件类型：.' . $ext);
     }
     $isImg = in_array($ext, $imgExt, true);
-    $allow = preg_split('/[\s,，]+/u', trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'))) ?: [];
+    $allow = preg_split('/[\s,，;；]+/u', trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'))) ?: [];
     $allow = array_values(array_filter(array_map(fn ($x) => strtolower(trim(ltrim((string)$x, '.'))), $allow)));
     if (!$isImg && !in_array($ext, $allow, true)) {
         act_err('不支持的附件类型：.' . $ext . '（后台「基本设置」可调整允许的扩展名）');
@@ -1023,12 +1061,12 @@ function act_media_upload(): void
     $sub = date('Ym');
     $dir = DATA_DIR . '/uploads/' . $sub;
     if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
-        act_err('存储目录创建失败（data/ 不可写？）');
+        act_err('存储目录创建失败：data/uploads/ 不可写（请通过 FTP / 面板检查目录权限与属主，或到后台「监控」页一键修复目录权限）');
     }
     $hex = bin2hex(random_bytes(8));
     $target = $dir . '/' . $hex . '.' . $ext;
     if (!@move_uploaded_file((string)$f['tmp_name'], $target)) {
-        act_err('文件保存失败（目录不可写？）');
+        act_err('文件保存失败：' . $dir . ' 不可写或属主不对（请将 data/ 及其子目录权限设为 755，确保 PHP 运行账号可写，或到后台「监控」页一键修复）');
     }
     @chmod($target, 0644);
     /* 环境中立 URL（v1.32.0）：存储内容不带演示网关参数；渲染时 markdown 规则经 u() 重写 */
@@ -1403,6 +1441,10 @@ function act_notify_read_all(): void
 
 function act_admin_save_basic(): void
 {
+    post_guard('csrf', 'site_name', 'per_page', 'thread_title_max', 'upload_allow_ext');
+    if (post_str('site_name', 30) === '') {
+        act_err('论坛名称不能为空');
+    }
     /* 绑定域名：规范化清洗（去协议头 / 端口 / 路径、转小写、去重），仅保留合法域名字符 */
     $bd = implode(',', bind_domain_list(post_str('bind_domains', 500)));
     cfg_update([
@@ -1424,7 +1466,9 @@ function act_admin_save_basic(): void
         'upload_img_max_mb' => max(1, min(50, (int)($_POST['upload_img_max_mb'] ?? 5))),
         'upload_file_max_mb' => max(1, min(100, (int)($_POST['upload_file_max_mb'] ?? 10))),
         'upload_per_post' => max(1, min(20, (int)($_POST['upload_per_post'] ?? 4))),
-        'upload_allow_ext' => cut_str(preg_replace('/[^a-z0-9 ]/', '', strtolower(trim((string)($_POST['upload_allow_ext'] ?? '')))), 200),
+        'upload_allow_ext' => cut_str(trim((string)preg_replace('/\s+/', ' ', preg_replace('/[^a-z0-9]+/', ' ', strtolower(trim((string)($_POST['upload_allow_ext'] ?? '')))))), 1000),
+        /* v1.41.0：分隔符统一化 —— 逗号 / 中文逗号 / 分号 / 点号等一律转空格（旧版正则直接吞掉分隔符，
+         * 「jpg,png,gif」保存后粘成一坨「jpgpnggif」，白名单失效导致附件上传全部被拒）；上限 200 → 1000 */
     ]);
     log_action('admin_save_basic', '基本设置已保存' . ($bd !== '' ? '（绑定域名：' . $bd . '）' : ''));
     act_ok('基本设置已保存', u('p=admin&tab=basic'));
@@ -1433,11 +1477,12 @@ function act_admin_save_basic(): void
 /** 后台「功能」页：总开关保存（v1.14.0） */
 function act_admin_save_feat(): void
 {
+    post_guard('csrf', 'feat_register');
     $keys = ['register', 'guest_browse', 'post', 'reply', 'edit', 'del_own', 'like', 'report', 'search', 'search_suggest', 'emoji', 'online', 'signature', 'mention', 'motion', 'titles', 'qr_login', 'upload'];
     $kv = [];
     $off = [];
     foreach ($keys as $k) {
-        $v = isset($_POST['feat_' . $k]) ? 1 : 0;
+        $v = !empty($_POST['feat_' . $k]) ? 1 : 0; /* v1.41.0：表单侧 hidden(0) 兜底，键恒在——POST 异常时守卫直接拒绝，不再静默全关 */
         $kv['feat_' . $k] = $v;
         if ($v === 0) {
             $off[] = $k;
@@ -1445,7 +1490,7 @@ function act_admin_save_feat(): void
     }
     /* AI 两项直接写「AI」页的原生配置键（ai_precheck / ai_autopilot），与功能页同一份开关 */
     foreach (['ai_precheck', 'ai_autopilot'] as $k) {
-        $v = isset($_POST['feat_' . $k]) ? 1 : 0;
+        $v = !empty($_POST['feat_' . $k]) ? 1 : 0; /* v1.41.0：同上，hidden 兜底 */
         $kv[$k] = $v;
         if ($v === 0) {
             $off[] = $k;
@@ -1463,6 +1508,7 @@ function act_admin_save_feat(): void
 /** v1.34.0：扫码登录参数（有效期；总开关在功能开关列表内） */
 function act_admin_save_qr(): void
 {
+    post_guard('csrf', 'qr_ttl');
     $ttl = (int)($_POST['qr_ttl'] ?? 180);
     $ttl = max(60, min(600, $ttl));
     cfg_update(['qr_ttl' => $ttl]);
@@ -1478,7 +1524,9 @@ function act_admin_icon_upload(): void
     }
     $f = $_FILES['icon'];
     if ((int)($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        act_err('图标上传失败（错误码 ' . (int)($f['error'] ?? -1) . '，可能超过服务器上传限制）');
+        $code = (int)($f['error'] ?? -1);
+        $why = $code === 1 || $code === 2 ? '超过服务器 PHP 上传限制（upload_max_filesize）——可在后台「监控 → 运行环境」一键调大' : '服务器接收失败（错误码 ' . $code . '）';
+        act_err('图标上传失败：' . $why);
     }
     if ((int)($f['size'] ?? 0) <= 0 || (int)$f['size'] > 200 * 1024) {
         act_err('图标大小需在 200KB 以内');
@@ -1543,6 +1591,7 @@ function act_admin_icon_del(): void
 
 function act_admin_save_mail(): void
 {
+    post_guard('csrf', 'smtp_host', 'smtp_from');
     cfg_update([
         'smtp_host' => cut_str(post_str('smtp_host', 100), 100),
         'smtp_port' => max(1, min(65535, (int)($_POST['smtp_port'] ?? 465))),
@@ -1576,6 +1625,7 @@ function act_admin_test_mail(): void
 
 function act_admin_save_ai(): void
 {
+    post_guard('csrf', 'ai_mode', 'ai_timeout');
     /* v1.16.0：AI 页与「安全防护」页（严全面区块）共用本动作，各页只提交自己的字段，
        因此全部按"提交了才更新"处理，避免一页保存把另一页的设置重置为默认值 */
     $kv = [];
@@ -2286,6 +2336,7 @@ function theme_pick_color(string $cur, string $radio, string $custom): string
 
 function act_admin_save_theme(): void
 {
+    post_guard('csrf', 'theme_color', 'footer_text');
     $cur = (string)cfg('theme_color', '#0f766e');
     $color = theme_pick_color($cur, post_str('theme_color', 9), post_str('theme_color_custom', 9));
     $dark = (string)($_POST['dark_default'] ?? 'system');
@@ -2307,6 +2358,7 @@ function act_admin_save_theme(): void
  *  v1.30.0：支持 back 参数——导航栏快捷设置保存后回当前标签页（back 必须是合法标签名，否则回主题页） */
 function act_admin_save_nav(): void
 {
+    post_guard('csrf', 'admin_nav_layout', 'admin_nav_cols');
     $layout = (string)($_POST['admin_nav_layout'] ?? 'side') === 'flat' ? 'flat' : 'side';
     $cols = (int)($_POST['admin_nav_cols'] ?? 1);
     if ($cols < 1 || $cols > 3) {
@@ -2381,6 +2433,7 @@ function act_admin_backup_del(): void
 /** 保存监控设置：自动告警开关 + 阈值 + 主机配额（v1.39.0 起支持到 1TB） */
 function act_admin_save_monitor(): void
 {
+    post_guard('csrf', 'monitor_mb', 'quota_mb');
     $on = !empty($_POST['monitor_on']) ? 1 : 0;
     $mb = max(1, min(1048576, (int)($_POST['monitor_mb'] ?? 95)));
     $qmb = max(10, min(1048576, (int)($_POST['quota_mb'] ?? 100)));
@@ -2920,6 +2973,7 @@ function act_admin_logs_export(): void
 /** 保存攻击告警设置（阈值 / 冷却 / 开关；独立接口，不影响其他防护设置） */
 function act_admin_save_attack(): void
 {
+    post_guard('csrf', 'fw_atk_alert_n');
     $on = !empty($_POST['fw_atk_alert_on']) ? 1 : 0;
     $n = max(5, min(10000, (int)($_POST['fw_atk_alert_n'] ?? 20)));
     $cool = max(5, min(1440, (int)($_POST['fw_atk_alert_cool'] ?? 30)));
@@ -3240,6 +3294,7 @@ function act_admin_fw_geo_batch(): void
 /** 保存 SEO 设置（搜索引擎展示：标题模板 / 描述 / 关键词 / 收收 / Sitemap / OG / 自定义 head） */
 function act_admin_save_seo(): void
 {
+    post_guard('csrf', 'seo_title_tpl', 'seo_robots');
     $me = admin_tab_guard();
     $robotsOk = ['', 'noindex, follow', 'index, nofollow', 'noindex, nofollow'];
     $robots = post_str('seo_robots', 30);
@@ -3268,6 +3323,7 @@ function act_admin_save_seo(): void
 /** 保存界面语言设置（默认语言 / 按 IP 自动切换） */
 function act_admin_save_lang(): void
 {
+    post_guard('csrf', 'lang', 'lang_default');
     $me = admin_tab_guard();
     $def = (string)($_POST['lang_default'] ?? 'zh-cn');
     if (!is_lang($def)) {
@@ -3304,6 +3360,7 @@ function act_save_lang(): void
 /** 保存数据库连接信息（永远写文件侧 config；绝不改动 storage_engine 引擎键） */
 function act_admin_save_storage(): void
 {
+    post_guard('csrf', 'db_driver', 'db_host');
     $me = admin_tab_guard();
     $driver = strtolower(post_str('db_driver', 10));
     if (!in_array($driver, ['sqlite', 'mysql', 'pgsql'], true)) {
@@ -3334,10 +3391,16 @@ function act_admin_save_storage(): void
     if (!is_array($c)) {
         $c = [];
     }
+    /* v1.41.0 空读防御：config.php 存在却读出空——介质抖动 / 文件损坏，照常写回会把瞬时读失败固化成全站配置清空 */
+    if ($c === [] && FileStore::exists('config.php')) {{
+        FileStore::unlock($lk);
+        act_err('config.php 读取异常（文件存在但内容为空 / 损坏），已放弃本次写入以防配置被清空——请检查 data/config.php，或从 data/backup/ 恢复备份');
+    }}
     foreach ($kv as $k => $v) {
         $c[$k] = $v;
     }
     FileStore::write('config.php', $c);
+        FileStore::write('backup/config-last-good.php', $c); /* v1.41.0 last-good 备份：启动自愈数据源 */
     FileStore::unlock($lk);
     foreach ($kv as $k => $v) {
         $GLOBALS['CFG'][$k] = $v;
@@ -3406,8 +3469,14 @@ function act_admin_storage_migrate(): void
         if (!is_array($c)) {
             $c = [];
         }
+    /* v1.41.0 空读防御：config.php 存在却读出空——介质抖动 / 文件损坏，照常写回会把瞬时读失败固化成全站配置清空 */
+        if ($c === [] && FileStore::exists('config.php')) {{
+            FileStore::unlock($lk);
+            act_err('config.php 读取异常（文件存在但内容为空 / 损坏），已放弃本次写入以防配置被清空——请检查 data/config.php，或从 data/backup/ 恢复备份');
+        }}
         $c['storage_engine'] = 'db';
         FileStore::write('config.php', $c);
+                FileStore::write('backup/config-last-good.php', $c); /* v1.41.0 last-good 备份：启动自愈数据源 */
         FileStore::unlock($lk);
         $GLOBALS['CFG']['storage_engine'] = 'db';
         log_action('admin_storage_migrate', '存储引擎 文件 → 数据库（' . DbStore::kind() . '）：' . $log['done'] . ' 个文件，备份 ' . $log['backup'], (int)$me['id']);
@@ -3429,8 +3498,14 @@ function act_admin_storage_migrate(): void
         if (!is_array($c)) {
             $c = [];
         }
+    /* v1.41.0 空读防御：config.php 存在却读出空——介质抖动 / 文件损坏，照常写回会把瞬时读失败固化成全站配置清空 */
+        if ($c === [] && FileStore::exists('config.php')) {{
+            FileStore::unlock($lk);
+            act_err('config.php 读取异常（文件存在但内容为空 / 损坏），已放弃本次写入以防配置被清空——请检查 data/config.php，或从 data/backup/ 恢复备份');
+        }}
         $c['storage_engine'] = 'file';
         FileStore::write('config.php', $c);
+                FileStore::write('backup/config-last-good.php', $c); /* v1.41.0 last-good 备份：启动自愈数据源 */
         FileStore::unlock($lk);
         $GLOBALS['CFG']['storage_engine'] = 'file';
         log_action('admin_storage_migrate', '存储引擎 数据库 → 文件：' . $log['done'] . ' 行，备份 ' . $log['backup'], (int)$me['id']);
@@ -3516,8 +3591,14 @@ function act_admin_daemon_start(): void
         if (!is_array($c)) {
             $c = [];
         }
+    /* v1.41.0 空读防御：config.php 存在却读出空——介质抖动 / 文件损坏，照常写回会把瞬时读失败固化成全站配置清空 */
+        if ($c === [] && FileStore::exists('config.php')) {{
+            FileStore::unlock($lk);
+            act_err('config.php 读取异常（文件存在但内容为空 / 损坏），已放弃本次写入以防配置被清空——请检查 data/config.php，或从 data/backup/ 恢复备份');
+        }}
         $c['daemon_php_bin'] = $bin;
         FileStore::write('config.php', $c);
+                FileStore::write('backup/config-last-good.php', $c); /* v1.41.0 last-good 备份：启动自愈数据源 */
         FileStore::unlock($lk);
         $GLOBALS['CFG']['daemon_php_bin'] = $bin;
     }
