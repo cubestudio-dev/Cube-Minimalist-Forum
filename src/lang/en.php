@@ -446,7 +446,7 @@ return [
     '侧边' => 'Sidebar',
     '平铺' => 'Flat',
     '搜索预览' => 'Search preview',
-    '搜索框输入时实时下拉显示匹配的帖子（标题优先，近 300 帖内），点击直达帖子；关闭后搜索仍可用但不显示预览（v1.30.0）' => 'Shows matching threads in a live dropdown as you type in the search box (title matches first, within the latest 300 threads); click to open a thread directly. Search still works without the preview when disabled (v1.30.0)',
+    '搜索框输入时实时下拉显示匹配的帖子（标题优先，近 500 帖内），点击直达帖子；关闭后搜索仍可用但不显示预览（v1.30.0）' => 'Shows matching threads in a live dropdown as you type in the search box (title matches first, within the latest 500 threads); click to open a thread directly. Search still works without the preview when disabled (v1.30.0)',
 
     /* v1.32.0 Content & limits / upload / traffic stats */
     '图片 / 附件'          => 'Image / File',

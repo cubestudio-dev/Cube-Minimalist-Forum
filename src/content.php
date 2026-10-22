@@ -677,6 +677,8 @@ function search_threads(string $q, int $scan = 500): array
 /**
  * v1.30.0 搜索预览（输入联想）：轻量版站内搜索。
  * 标题命中零文件读优先返回；不足 $limit 条再补正文命中（只对未命中标题的帖子读正文）。
+ * v1.40.0：扫描窗口 300 → 500，与搜索结果页 search_threads 对齐——此前老帖关键词
+ * 联想永远无提示（结果页却搜得到），表现为「部分关键词搜索框没反应」。
  * @return array 线索行数组（最多 $limit 条，按发布时间倒序）
  */
 function search_suggest_items(string $q, int $limit = 8): array
@@ -689,7 +691,7 @@ function search_suggest_items(string $q, int $limit = 8): array
     usort($all, function ($a, $b) {
         return (int)($b['created'] ?? 0) <=> (int)($a['created'] ?? 0);
     });
-    $all = array_slice($all, 0, 300);
+    $all = array_slice($all, 0, 500);
     $out = [];
     $pending = [];
     foreach ($all as $t) {

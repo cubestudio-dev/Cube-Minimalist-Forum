@@ -190,11 +190,14 @@ function layout_header(string $title = '', int $boardId = 0): void
         <?php endforeach; ?>
       </div>
     <?php if (feat_on('search')): ?>
+    <?php /* v1.40.0：搜索结果页把当前关键词回填进侧栏搜索框（其余页面留空），
+           修掉「搜索完侧栏框总是空的」的断感；值经 cut_str + e() 双重处理 */ ?>
+    <?php $sideQ = (string)($_GET['p'] ?? '') === 'search' && isset($_GET['q']) && is_scalar($_GET['q']) ? cut_str(trim(strip_tags((string)$_GET['q'])), 50) : ''; ?>
     <div class="side-block side-search">
       <form method="get" action="index.php" role="search">
         <input type="hidden" name="p" value="search">
         <?php if (demo_port() !== ''): ?><input type="hidden" name="XTransformPort" value="<?= e(demo_port()) ?>"><?php endif; ?>
-        <input class="input input-sm" type="search" name="q" maxlength="50" placeholder="<?= e(t('搜索帖子…')) ?>" aria-label="<?= e(t('站内搜索')) ?>" <?= feat_on('search_suggest') ? 'autocomplete="off"' : '' ?>>
+        <input class="input input-sm" type="search" name="q" maxlength="50" value="<?= e($sideQ) ?>" placeholder="<?= e(t('搜索帖子…')) ?>" aria-label="<?= e(t('站内搜索')) ?>" <?= feat_on('search_suggest') ? 'autocomplete="off"' : '' ?>>
       </form>
       <?php if (feat_on('search_suggest')): /* v1.30.0 搜索预览：输入时实时下拉显示匹配帖子，app.js 渲染 */ ?>
       <div class="srs-pop" id="srsPop" hidden></div>

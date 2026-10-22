@@ -1530,6 +1530,19 @@ function fw_score_tick(string $ip): void
     $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
     $uri = (string)($_SERVER['REQUEST_URI'] ?? '/');
     $query = (string)($_SERVER['QUERY_STRING'] ?? '');
+    /* v1.40.0：站内搜索关键词豁免——注入特征扫描此前覆盖整个查询串 / URI，
+       把「搜索 <svg、<script、onerror=、select…from、eval( 等正常技术关键词」
+       误判为攻击（+90 风险分 / 次），10 分钟窗口内两次即触发 24h 自动封禁，
+       该访客随后看到的整站只剩无侧栏无搜索框的「访问受限」拦截页。
+       q 参数仅在搜索端点（p=search / a=search_suggest）上是合法业务输入，
+       论坛对搜索词逐字转义输出且搜索链路无 SQL 拼接，此处把搜索端点的 q 值
+       从扫描文本中摘除；其余端点（q 出现在任何非搜索页面）仍照常全量扫描。 */
+    $scanQ = $query;
+    $scanU = $uri;
+    if ($query !== '' && preg_match('/(?:^|&)(?:p=search|a=search_suggest)(?:&|$)/', $query)) {
+        $scanQ = (string)preg_replace('/(?:^|&)q=[^&]*/', '', $scanQ);
+        $scanU = (string)preg_replace('/(?<=[?&])q=[^&]*/', '', $scanU);
+    }
     $hits = [];
     $score = 0;
     if ((int)cfg('fw_r_empty_ua', 1) === 1 && trim($ua) === '') {
@@ -1546,7 +1559,7 @@ function fw_score_tick(string $ip): void
         $score += 80;
         $hits[] = '敏感路径探测';
     }
-    if ((int)cfg('fw_r_inject', 1) === 1 && ($query !== '' || $uri !== '') && (preg_match(FW_RE_INJECT, $query) || preg_match(FW_RE_INJECT, $uri))) {
+    if ((int)cfg('fw_r_inject', 1) === 1 && ($scanQ !== '' || $scanU !== '') && (preg_match(FW_RE_INJECT, $scanQ) || preg_match(FW_RE_INJECT, $scanU))) {
         $score += 90;
         $hits[] = '注入 / 攻击特征';
     }
