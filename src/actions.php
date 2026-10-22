@@ -2437,13 +2437,15 @@ function act_admin_envfix(): void
     $plan = efx_plan();
     $names = array_values(array_intersect($names, $plan['fixable'])); /* 只允许当前缺失且可自动开启的 */
     $upfix = isset($_POST['upfix']) && ($plan['up']['up_sug'] || $plan['up']['post_sug']);
-    if (!$names && !$upfix) {
-        flash('err', '没有需要修改的项目：缺失扩展已全部启用，或当前环境无可用的自动修改。');
+    $hasIssues = !empty($plan['ini_issues']['count']); /* v1.38.2：php.ini 坏行也可一键修复 */
+    if (!$names && !$upfix && !$hasIssues) {
+        flash('err', '没有需要修改的项目：缺失扩展已全部启用，上传限制已达标，php.ini 也无坏行。');
         admin_redirect($back);
     }
     $res = efx_apply($names, $upfix);
     if ($res['ok']) {
         log_action('admin_envfix', '一键开启 PHP 扩展：' . (implode('、', $names) !== '' ? implode('、', $names) : '无')
+            . ($res['fixed'] ? '；php.ini 修复 ' . count($res['fixed']) . ' 处' : '')
             . ($res['up'] ? '；上传限制 ' . implode(' / ', $res['up']) : '')
             . ($res['backup'] !== '' ? '（php.ini 备份：' . basename($res['backup']) . '）' : ''));
         flash('ok', efx_result_msg($res));

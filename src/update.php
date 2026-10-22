@@ -15,6 +15,9 @@
  *   - 版本号只前进不后退
  *   - 写入自带自愈与精确诊断（v1.38.1）：自动解除只读锁逐级重试，替换失败时给出
  *     面板防篡改 / Windows 只读属性 / 属主不一致等具体原因与修复指引，不再笼统报权限
+ *   - 写入三重加固（v1.38.2）：内容一致的文件直接跳过（幂等重传）；「文件被占用」
+ *     类失败自动进入时间窗重试（Windows 下监控心跳 / 守护进程 / 杀毒扫描多为瞬态占用）；
+ *     「删除重建」失败时自动还原旧文件，站点绝不因更新中断而缺文件
  */
 defined('APP') or exit('Forbidden');
 
@@ -284,10 +287,15 @@ function update_rollback(string $bkPath, array &$res): void
 
 /**
  * 把单个程序文件写入程序目录，尽量自动排除常见障碍：
+ *   0) 内容与包内一致 → 直接跳过（v1.38.2：幂等重传补齐的关键，绝不无谓触碰正被
+ *      高频访问的入口文件——如 index.php 常被站点心跳 / 守护进程每秒请求）；
  *   1) 临时文件 + rename 原子替换（首选）；
- *   2) 解除目标文件只读锁（chmod 0666：Windows 只读属性 / 部分面板锁定）后重试；
- *   3) 删除旧文件后重建（仅目录可写时启用，绕过覆盖限制）；
- *   4) 目录写不进临时文件但目标文件本身可写时，直接覆盖写入。
+ *   2) 解除目标文件只读锁（chmod 0666：Windows 只读属性 / 部分面板锁定）后进入
+ *      时间窗重试（约 4 秒 12 次）——v1.38.2：Windows（小皮面板）下站点自身访问
+ *      （监控心跳 / 守护进程 / 杀毒扫描）会瞬时占用文件，「占用」几乎都是瞬态；
+ *   3) 目录写不进临时文件但目标文件本身可写时，直接覆盖写入（绝不删除旧文件）；
+ *   4) 最后手段：删除重建（仅目录可写）——先留旧内容，重建失败自动还原（v1.38.2），
+ *      站点绝不因更新中断而缺文件。
  * 目录不可写时绝不删除旧文件，避免破坏现状；全部失败时抛出含修复指引的异常，
  * 区分「程序目录不可写」与「文件被保护 / 占用」两类原因，便于按指引一次修好。
  */
@@ -297,6 +305,14 @@ function update_write_entry(string $root, string $name, string $content): void
     $dir = dirname($target);
     if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
         throw new RuntimeException('无法创建目录：' . $name . '（请检查程序目录权限）');
+    }
+
+    /* v1.38.2：内容一致直接跳过（计入已处理文件数） */
+    if (is_file($target)) {
+        $cur = @file_get_contents($target);
+        if (is_string($cur) && $cur === $content) {
+            return;
+        }
     }
 
     /* 目录可写性探测（一次即可，后续不再依赖 is_writable 的平台差异） */
@@ -337,28 +353,54 @@ function update_write_entry(string $root, string $name, string $content): void
             . '——请通过 FTP / 面板把程序目录权限改为 755（或 775）并确认属主与 PHP 运行用户一致后重试：' . $name);
     }
 
-    /* 目录可写：先解除只读锁重试，再尝试删除重建 */
-    if (file_exists($target)) {
-        @chmod($target, 0666);
+    /* v1.38.2：时间窗重试——「文件被占用」多为瞬态（站点心跳 / 守护进程 / 杀毒扫描
+     * 都只在瞬间持有文件），自动重试约 4 秒即可命中空闲窗口 */
+    @chmod($target, 0666); /* 解除只读锁（Windows 只读属性 / 部分面板锁定） */
+    $done = false;
+    for ($i = 0; $i < 12; $i++) {
         if ($replace()) {
-            @chmod($target, 0644);
-            return;
+            $done = true;
+            break;
         }
-        error_clear_last();
-        if (@unlink($target) && $replace()) {
+        if ($i === 5) {
+            @chmod($target, 0666);
+        }
+        usleep(350000);
+    }
+    if ($done) {
+        @chmod($target, 0644);
+        return;
+    }
+
+    /* 最后手段：删除重建（目录可写才走到这里）。先留旧内容，重建失败自动还原 */
+    $old = @file_get_contents($target);
+    error_clear_last();
+    $removed = @unlink($target);
+    if ($removed) {
+        for ($i = 0; $i < 4; $i++) {
+            if ($replace()) {
+                @chmod($target, 0644);
+                return;
+            }
+            usleep(350000);
+        }
+        /* 重建失败：尽力还原旧文件，保住正在运行的站点 */
+        if (is_string($old) && @file_put_contents($target, $old) !== false) {
             @chmod($target, 0644);
-            return;
         }
     }
+    $gone = $removed && !is_file($target);
 
     $err = error_get_last();
     $sys = ($err && !empty($err['message'])
         && preg_match('/(Permission denied|Operation not permitted|Read-only file system|Disk quota exceeded|No space left|Text file busy|Device or resource busy|Resource temporarily unavailable)/i', $err['message'], $m))
         ? '（系统原因：' . $m[1] . '）' : '';
-    throw new RuntimeException('写入文件失败：无法替换 ' . $name . '（目录可写，文件被保护或占用）' . $sys
+    throw new RuntimeException('写入文件失败：无法替换 ' . $name . '（目录可写，文件被保护或占用，已自动重试约 5 秒仍未成功）' . $sys
         . '——常见原因：①主机面板的「网站防篡改 / 文件保护」锁定了程序文件（宝塔等），请临时关闭后重试；'
-        . '②Windows（小皮面板）文件为只读属性，请取消只读或在面板重启 PHP 后重试；'
-        . '③文件属主与 PHP 进程不一致，请在 FTP 中把该文件权限改为 666（或删除后重试）');
+        . '②Windows（小皮面板）文件被其他进程占用或只读：请暂停站点监控 / 计划任务与守护进程（如 daemon.php）、'
+        . '关闭会自动刷新的后台页面，或取消文件只读属性，在面板重启 PHP 后立即重试；'
+        . '③文件属主与 PHP 进程不一致，请在 FTP 中把该文件权限改为 666（或删除后重试）'
+        . ($gone ? '。注意：该文件已被更新器清理且自动还原未成功，重新上传同一更新包会自动补建' : ''));
 }
 
 /* ================= 更新应用 ================= */

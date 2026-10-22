@@ -1302,9 +1302,12 @@ function admin_tab_monitor(): void
         }
     }
     $efxUpSug = $efx['up']['up_sug'] || $efx['up']['post_sug'];
+    $efxIssues = $efx['ini_issues'];
+    $efxExtDirBad = !empty($efx['extdir']['missing']);
     echo '<div class="card form-card"><h2 class="card-title">' . t('运行环境 · PHP 扩展') . '</h2><div class="mon-grid">' .
         '<div class="mon-cell"><b>' . e($efx['os']) . '</b><span>操作系统' . ($efx['panel']['name'] !== '' ? ' · ' . e($efx['panel']['name']) : '（未识别到常见面板）') . '</span></div>' .
-        '<div class="mon-cell"><b>' . ($efx['ini'] !== '' ? ($efx['ini_writable'] ? '✔ 可写' : '只读') : '未找到') . '</b><span>php.ini' . ($efx['ini'] !== '' ? ' · ' . e(cut_str($efx['ini'], 56)) : '（命令行或特殊加载）') . '</span></div>' .
+        '<div class="mon-cell' . ($efxExtDirBad ? ' cell-bad' : '') . '"><b>' . ($efx['ini'] !== '' ? ($efx['ini_writable'] ? '✔ 可写' : '只读') : '未找到') . '</b><span>php.ini' . ($efx['ini'] !== '' ? ' · ' . e(cut_str($efx['ini'], 40)) : '（命令行或特殊加载）')
+            . ($efxExtDirBad ? ' · ' . t('扩展目录不存在') . '（' . e(cut_str($efx['extdir']['dir'], 32)) . '）' : '') . '</span></div>' .
         '<div class="mon-cell' . ($efxUpSug ? ' cell-bad' : '') . '"><b>' . e($efx['up']['cur']) . ' / ' . e($efx['up']['post']) . '</b><span>上传 / POST 体积限制</span></div>' .
         '<div class="mon-cell' . ($efxRecLoaded < $efxRecTotal ? ' cell-bad' : '') . '"><b>' . $efxRecLoaded . ' / ' . $efxRecTotal . '</b><span>推荐扩展已启用</span></div>' .
         '</div>';
@@ -1321,7 +1324,12 @@ function admin_tab_monitor(): void
         echo '<tr><td><b>' . e($x['name']) . '</b>' . $lv . '</td><td class="muted">' . e(t($x['why'])) . '</td><td>' . $state . '</td></tr>';
     }
     echo '</tbody></table>';
-    if ($efx['fixable'] || $efxUpSug) {
+    if ($efxIssues['count'] > 0) {
+        echo '<p class="hint" style="margin:10px 0 0;color:#b45309"><b>⚠ ' . t('php.ini 体检发现问题') . '（' . (int)$efxIssues['count'] . '）：</b>'
+            . e(implode('；', $efxIssues['notes'])) . ($efxIssues['count'] > count($efxIssues['notes']) ? ' 等' : '')
+            . '——' . t('一键开启缺失扩展时会一并修复：写法错误的行改写为当前平台正确写法，无效行与 PHP 8 已移除指令自动注释（先备份）。') . '</p>';
+    }
+    if ($efx['fixable'] || $efxUpSug || $efxIssues['count'] > 0) {
         if ($efx['ini'] !== '' && $efx['ini_writable']) {
             echo '<form method="post" action="' . e(u('a=admin_envfix')) . '" style="margin-top:12px" data-n="' . e(t('确认写入 php.ini？将先自动备份原文件到 data/backup/（php-ini-bak-*.ini），然后取消注释或追加缺失扩展的加载行；写入后需重启 PHP 生效。')) . '">' . csrf_field();
             foreach ($efx['fixable'] as $n) {
@@ -1330,7 +1338,9 @@ function admin_tab_monitor(): void
             if ($efxUpSug) {
                 echo '<label class="hint" style="display:block;margin:0 0 8px"><input type="checkbox" name="upfix" value="1" checked> ' . t('同时调大上传限制') . '（' . e($efx['up']['cur']) . ' → 32M / ' . e($efx['up']['post']) . ' → 64M；迁移包 / 更新包上传需要）</label>';
             }
-            echo '<button class="btn btn-primary" type="submit">' . t('一键开启缺失扩展') . '（' . count($efx['fixable']) . '）</button></form>';
+            echo '<button class="btn btn-primary" type="submit">'
+                . ($efx['fixable'] ? t('一键开启缺失扩展') . '（' . count($efx['fixable']) . '）' : t('一键修复 php.ini 问题') . '（' . (int)$efxIssues['count'] . '）')
+                . '</button></form>';
             echo '<p class="hint">只开启上表「未启用」项，绝不改动其他配置；写入前自动备份 php.ini 到 data/backup/（php-ini-bak-*.ini）。写入后 ' . e(efx_restart_hint()) . ' 然后刷新本页复检。</p>';
         } else {
             echo '<p class="hint" style="color:#b45309"><b>php.ini 未找到或不可写——未做任何修改。</b>已改用降级方案：点下方按钮下载配置片段（与一键写入内容同源），通过 FTP / 面板编辑器追加到当前 PHP 的 php.ini 末尾，然后重启 PHP。</p>';
@@ -2508,6 +2518,7 @@ function admin_search_index(): array
         ['monitor', '监控与告警设置', '监控页实时刷新间隔', 'monitor interval'],
         ['monitor', '环境自检', '目录权限 / 一键修复', 'env check 修复 权限'],
         ['monitor', '运行环境', 'PHP 扩展一键开启（mbstring / openssl / curl / gd / zip / opcache），自动区分 Windows / Linux', '扩展 php.ini 小皮 phpstudy 宝塔 mbstring openssl curl gd zip opcache 一键 开启 windows linux 运行环境'],
+        ['monitor', '运行环境', 'php.ini 格式体检：自动发现并修复「php_ 前缀缺后缀」等写法错误、无效扩展行与 PHP 8 已移除指令（如 track_errors）', 'php.ini 格式 体检 坏行 修正 注释 track_errors 无效 修复 php_ 前缀'],
         ['monitor', '运行环境', '上传限制体检：upload_max_filesize / post_max_size 过小一键调大（迁移包 / 更新包上传需要）', '上传 限制 upload post 2m 迁移包 更新包 调大 32m 64m'],
         ['monitor', '运行环境', '小皮面板 / 宝塔面板自动识别与重启指引；php.ini 不可写时下载配置片段 FTP 上传', '小皮 面板 phpstudy 宝塔 xampp wamp upupw 指引 片段 下载 ftp 重启'],
         ['monitor', '性能体检', 'OPcache / .user.ini / gzip / ETag 304', 'opcache 性能 缓存 慢 加速'],

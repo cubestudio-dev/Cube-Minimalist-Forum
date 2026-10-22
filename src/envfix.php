@@ -14,6 +14,11 @@
  *    → 优先取消注释已有行（保持面板原有排版），无现成行才追加标记块 → 原子写入
  *  - 上传限制体检：upload_max_filesize / post_max_size 过小时一键调大
  *    （32M / 64M，与迁移包 32MB 上限对齐；只调大、绝不调小）
+ *  - php.ini 健康修复（v1.38.2）：自动发现「php_ 前缀缺 .dll/.so 后缀」等永远加载
+ *    不到的扩展行（phpStudy 老模板常见，如 extension=php_mysqli）→ 改写为当前平台
+ *    正确写法；指向不存在扩展文件的无效行（如 Windows 上的 sysvshm）与 PHP 8 已移除
+ *    指令（如 track_errors，每次启动刷 Fatal）→ 自动注释；extension_dir 目录不存在
+ *    时明确提示。修复「已启用行（哪怕写法错误）被静默跳过」的问题
  *  - php.ini 不可写或未加载：不写盘，改走「下载配置片段 → FTP / 面板编辑器粘贴」降级方案
  *    （延续 v1.35.1 规矩：预检先行，绝不产生必然失败的写盘）
  *
@@ -180,13 +185,20 @@ function efx_ext_loaded(string $ext): bool
     return extension_loaded($ext);
 }
 
+/** 扩展加载指令的操作数（按系统自动区分写法；OPcache 是 Zend 扩展） */
+function efx_operand(string $ext, bool $zend = false): string
+{
+    if ($zend) {
+        return efx_is_win() ? 'php_opcache.dll' : 'opcache.so';
+    }
+    return efx_is_win() ? 'php_' . $ext . '.dll' : $ext . '.so';
+}
+
 /** 该扩展的加载指令行（按系统自动区分写法；OPcache 是 Zend 扩展） */
 function efx_directive(string $ext): string
 {
-    if ($ext === 'opcache') {
-        return efx_is_win() ? 'zend_extension=php_opcache.dll' : 'zend_extension=opcache.so';
-    }
-    return efx_is_win() ? 'extension=php_' . $ext . '.dll' : 'extension=' . $ext . '.so';
+    $zend = $ext === 'opcache';
+    return ($zend ? 'zend_extension=' : 'extension=') . efx_operand($ext, $zend);
 }
 
 /**
@@ -222,6 +234,19 @@ function efx_ext_file(string $ext): string
     return '';
 }
 
+/** extension_dir（含相对路径回退）指向的目录是否真实存在——不存在时全部扩展必然加载失败 */
+function efx_extdir_ok(): bool
+{
+    $dir = str_replace('\\', '/', trim((string)ini_get('extension_dir')));
+    if ($dir === '') {
+        return true; /* 无法判定时不报问题 */
+    }
+    if ($dir[0] !== '/' && !preg_match('#^[a-z]:/#i', $dir)) {
+        $dir = rtrim(str_replace('\\', '/', dirname(PHP_BINARY)), '/') . '/' . $dir;
+    }
+    return @is_dir(rtrim($dir, '/'));
+}
+
 /** 当前 SAPI 正在使用的 php.ini 路径（未加载返回 ''） */
 function efx_ini_path(): string
 {
@@ -235,6 +260,101 @@ function efx_line_preg(string $ext, bool $commented): string
     $n = preg_quote($ext, '/');
     $lead = $commented ? '\s*;+\s*' : '\s*';
     return '/^' . $lead . '(?:zend_)?extension\s*=\s*(?:php_)?' . $n . '(?:\.(?:dll|so))?\s*$/i';
+}
+
+/** PHP 8 已移除的常见指令（phpStudy 等老模板残留；设置它们会在每次启动时刷 Fatal 日志） */
+function efx_removed_directives(): array
+{
+    return [
+        'track_errors', 'register_globals', 'magic_quotes_gpc', 'magic_quotes_runtime',
+        'magic_quotes_sybase', 'allow_call_time_pass_reference', 'define_syslog_variables',
+        'safe_mode', 'zend.ze1_compatibility_mode', 'session.bug_compat_42', 'session.bug_compat_warn',
+    ];
+}
+
+/**
+ * 解析一行（未注释的）扩展加载指令。
+ * 返回 ['op'=>操作数, 'zend'=>bool, 'name'=>扩展名]；非扩展行 / 注释行返回 null。
+ * 兼容：extension= / zend_extension=、裸名 / php_ 前缀、.dll / .so 后缀、行内注释。
+ */
+function efx_parse_ext_line(string $ln): ?array
+{
+    if (!preg_match('/^\s*(zend_)?extension\s*=\s*(.+)$/i', $ln, $m)) {
+        return null;
+    }
+    $op = trim($m[2]);
+    $op = (string)preg_replace('/\s+[;#].*$/', '', $op); /* 去行内注释 */
+    $op = trim($op, "\"'");
+    if ($op === '') {
+        return null;
+    }
+    $base = strtolower(basename(str_replace('\\', '/', $op)));
+    $name = (string)preg_replace('/^(?:php_)?(.+?)(?:\.(?:dll|so))?$/i', '$1', $base);
+    return ['op' => $op, 'zend' => ($m[1] ?? '') !== '', 'name' => $name];
+}
+
+/**
+ * 扫描 ini 行，找出需要修复的问题（v1.38.2 php.ini 健康体检核心）：
+ *  - PHP 8 已移除指令（仅 PHP >= 8 判定）→ 注释掉；
+ *  - 「php_ 前缀缺后缀」等永远加载不到的扩展行 → 改写为当前平台正确写法
+ *    （仅当扩展文件真实存在时改写，否则按无效行注释）；
+ *  - 写法有效但指向的扩展文件不存在的无效行（如 Windows 上的 sysvshm）→ 注释掉。
+ * 已正常加载的扩展（可能由 conf.d 片段等其他途径加载）绝不动。
+ * 返回 ['fix' => [行下标 => 新行], 'note' => [描述, ...]]。
+ */
+function efx_ini_scan(array $lines): array
+{
+    $fix = [];
+    $note = [];
+    $tag = '[Cube Forum ' . MF_VERSION . ']';
+    /* extension_dir 指向的目录不存在时：无法核实任何扩展文件是否存在——
+       只处理「已移除指令」，扩展行一律不动（先修 extdir，再复检） */
+    $extdirMissing = !efx_extdir_ok();
+    foreach ($lines as $i => $ln) {
+        $t = ltrim($ln);
+        if ($t === '' || $t[0] === ';' || $t[0] === '#') {
+            continue;
+        }
+        if (PHP_VERSION_ID >= 80000
+            && preg_match('/^([A-Za-z0-9_.]+)\s*=/', $t, $km)
+            && in_array(strtolower($km[1]), efx_removed_directives(), true)) {
+            $fix[$i] = ';' . rtrim($ln) . "  ; $tag PHP 8 已移除该指令，自动注释（每次启动都在刷 Fatal 日志）";
+            $note[] = $km[1] . '（PHP 8 已移除指令 → 注释）';
+            continue;
+        }
+        $ext = efx_parse_ext_line($ln);
+        if ($ext === null || $ext['name'] === '') {
+            continue;
+        }
+        if ($extdirMissing) {
+            continue; /* extdir 坏了无法核实文件存在性，扩展行一律不动 */
+        }
+        if (extension_loaded($ext['name'])
+            || ($ext['zend'] && (extension_loaded('Zend OPcache') || function_exists('opcache_get_status')))) {
+            continue; /* 已正常加载（可能来自其他配置片段），绝不动 */
+        }
+        $win = efx_is_win();
+        $base = strtolower(basename(str_replace('\\', '/', $ext['op'])));
+        $prefixed = strpos($base, 'php_') === 0;
+        $goodSuffix = $win ? (substr($base, -4) === '.dll') : (substr($base, -3) === '.so');
+        $file = efx_ext_file($ext['name']);
+        if ($prefixed && !$goodSuffix) {
+            /* 写法无效：php_ 前缀 + 无本平台后缀 → 解析成 php_php_xxx.dll / php_xxx.so，任何系统都加载不到 */
+            if ($file !== '') {
+                $line = ($ext['zend'] ? 'zend_extension=' : 'extension=') . efx_operand($ext['name'], $ext['zend']);
+                $fix[$i] = $line . "  ; $tag 修正写法（原行 php_ 前缀缺后缀，永远加载不到）";
+                $note[] = $ext['name'] . '（修正加载行写法 → ' . $line . '）';
+            } else {
+                $fix[$i] = ';' . rtrim($ln) . "  ; $tag 注释无效行：写法错误且扩展文件不存在，该行只会刷加载失败警告";
+                $note[] = $ext['name'] . '（注释无效加载行：写法错误且扩展文件不存在）';
+            }
+        } elseif ($file === '' && $ext['name'] !== '') {
+            /* 写法有效但指向的扩展文件不存在（如 Windows 上的 sysvshm / 未安装的扩展） */
+            $fix[$i] = ';' . rtrim($ln) . "  ; $tag 注释无效行：扩展文件不存在，该行只会刷加载失败警告";
+            $note[] = $ext['name'] . '（注释无效加载行：扩展文件不存在）';
+        }
+    }
+    return ['fix' => $fix, 'note' => $note];
 }
 
 /** 在 ini 行数组中查找该扩展的行：0=已启用行下标，1=注释行下标，2=未出现；返回 [$active, $commented]（下标或 -1） */
@@ -288,6 +408,18 @@ function efx_plan(): array
     }
     $upBytes = sysmon_memlimit_bytes((string)ini_get('upload_max_filesize'));
     $postBytes = sysmon_memlimit_bytes((string)ini_get('post_max_size'));
+
+    /* v1.38.2 php.ini 健康体检：坏写法 / 无效行 / 已移除指令 + extension_dir 存在性 */
+    $extdir = str_replace('\\', '/', trim((string)ini_get('extension_dir')));
+    $issues = ['count' => 0, 'notes' => []];
+    if ($ini !== '') {
+        $rawIni = (string)@file_get_contents($ini);
+        if ($rawIni !== '') {
+            $scan = efx_ini_scan(preg_split('/\R/', $rawIni) ?: []);
+            $issues = ['count' => count($scan['note']), 'notes' => array_slice($scan['note'], 0, 8)];
+        }
+    }
+
     return [
         'os'           => efx_os_label(),
         'win'          => efx_is_win(),
@@ -297,6 +429,8 @@ function efx_plan(): array
         'exts'         => $exts,
         'fixable'      => $fixable,
         'nobundle'     => $nobundle,
+        'ini_issues'   => $issues,
+        'extdir'       => ['dir' => $extdir, 'missing' => $extdir !== '' && !@is_dir($extdir)],
         'up'           => [
             'cur'      => (string)ini_get('upload_max_filesize') ?: '-',
             'post'     => (string)ini_get('post_max_size') ?: '-',
@@ -329,7 +463,7 @@ function efx_ini_set_line(array &$lines, string $key, string $value): void
  */
 function efx_apply(array $names, bool $fixUpload = true, ?string $iniOverride = null): array
 {
-    $res = ['ok' => false, 'err' => '', 'enabled' => [], 'skipped' => [], 'up' => [], 'backup' => ''];
+    $res = ['ok' => false, 'err' => '', 'enabled' => [], 'skipped' => [], 'up' => [], 'fixed' => [], 'backup' => ''];
     $ini = $iniOverride !== null && @is_file($iniOverride) ? $iniOverride : efx_ini_path();
     if ($ini === '') {
         $res['err'] = '未找到当前 PHP 正在使用的 php.ini（可能为命令行参数加载）。请按面板指引在面板中开启扩展，或下载配置片段后手动放置。';
@@ -347,6 +481,13 @@ function efx_apply(array $names, bool $fixUpload = true, ?string $iniOverride = 
     }
     $lines = preg_split('/\R/', $raw) ?: [];
     $appended = [];
+    /* v1.38.2：php.ini 健康修复（坏写法改写 / 无效行与已移除指令注释）——
+       与扩展开启共用同一套备份与原子写；即使不缺扩展也执行（一键修复 php.ini） */
+    $scan = efx_ini_scan($lines);
+    foreach ($scan['fix'] as $i => $newLine) {
+        $lines[$i] = $newLine;
+    }
+    $res['fixed'] = $scan['note'];
     foreach ($names as $ext) {
         if (efx_ext_loaded($ext)) {
             continue;
@@ -379,9 +520,9 @@ function efx_apply(array $names, bool $fixUpload = true, ?string $iniOverride = 
             $res['up'][] = 'post_max_size ' . $plan['up']['post'] . ' → 64M';
         }
     }
-    if (!$res['enabled'] && !$res['up']) {
+    if (!$res['enabled'] && !$res['up'] && !$res['fixed']) {
         $res['ok'] = true; // 无可做修改（可能已被并行处理），视为成功但无动作
-        $res['err'] = '没有需要修改的项目（缺失扩展可能已启用，或上传限制已达标）。';
+        $res['err'] = '没有需要修改的项目（缺失扩展可能已启用，或上传限制已达标，php.ini 无坏行）。';
         return $res;
     }
     /* 强制备份：失败即中止，原文件未动 */
@@ -426,11 +567,14 @@ function efx_result_msg(array $res): string
         return (string)$res['err'];
     }
     $msg = '已写入 php.ini';
+    if ($res['fixed']) {
+        $msg .= '：修复 ' . count($res['fixed']) . ' 处（' . implode('、', array_slice($res['fixed'], 0, 5)) . (count($res['fixed']) > 5 ? ' 等' : '') . '）';
+    }
     if ($res['enabled']) {
-        $msg .= '：开启 ' . implode('、', $res['enabled']);
+        $msg .= ($res['fixed'] ? '；开启 ' : '：开启 ') . implode('、', $res['enabled']);
     }
     if ($res['up']) {
-        $msg .= ($res['enabled'] ? '；' : '：') . '上传限制已调大（' . implode(' / ', $res['up']) . '）';
+        $msg .= ($res['fixed'] || $res['enabled'] ? '；' : '：') . '上传限制已调大（' . implode(' / ', $res['up']) . '）';
     }
     if ($res['backup'] !== '') {
         $msg .= '。原文件已备份为 data/backup/' . basename($res['backup']) . '（如需回退，FTP 覆盖回去即可）';
@@ -452,6 +596,21 @@ function efx_snippet(): string
     $out[] = '; 用法：把下面未注释的行追加到当前 PHP 正在使用的 php.ini 末尾（面板编辑器或 FTP 均可），然后重启 PHP。';
     $out[] = '; 当前 php.ini：' . ($plan['ini'] !== '' ? $plan['ini'] : '未找到（请向主机商 / 面板确认路径）');
     $out[] = '';
+    /* v1.38.2：php.ini 已发现问题时的手工修复指引（片段只能追加，改写 / 注释坏行需手动） */
+    $raw = $plan['ini'] !== '' ? (string)@file_get_contents($plan['ini']) : '';
+    if ($raw !== '') {
+        $scan = efx_ini_scan(preg_split('/\R/', $raw) ?: []);
+        foreach ($scan['note'] as $n) {
+            $out[] = '; [体检] 发现并建议修复：' . $n . '（追加无法修复坏行，请按描述注释 / 改写原行）';
+        }
+        if ($scan['note']) {
+            $out[] = '';
+        }
+    }
+    if ($plan['extdir']['missing']) {
+        $out[] = '; [体检] extension_dir 指向的目录不存在：' . $plan['extdir']['dir'] . ' —— 这是全部扩展加载失败的隐形根因，请改为真实的 ext 目录（如小皮面板 H:\\phpstudy_pro\\Extensions\\php\\phpX.Y.Znts\\ext）';
+        $out[] = '';
+    }
     foreach ($plan['exts'] as $x) {
         if ($x['loaded']) {
             continue;

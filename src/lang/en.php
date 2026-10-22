@@ -547,4 +547,10 @@ return [
         '扫码登录二维码（PNG 图片）' => 'QR login image (PNG)',
         '通用压缩（部分插件使用；程序自带 MiniZip 不依赖）' => 'Generic compression (used by some plugins; the bundled MiniZip does not need it)',
         '字节码缓存，整站提速' => 'Opcode cache that speeds up the whole site',
+
+    /* v1.38.2 php.ini format check & one-click repair */
+        '一键修复 php.ini 问题' => 'Fix php.ini issues',
+        'php.ini 体检发现问题' => 'php.ini issues detected',
+        '扩展目录不存在' => 'extension_dir missing',
+        '一键开启缺失扩展时会一并修复：写法错误的行改写为当前平台正确写法，无效行与 PHP 8 已移除指令自动注释（先备份）。' => 'Fixing is included in one-click enable: lines with broken syntax are rewritten to the correct form for this platform; invalid lines and directives removed in PHP 8 are commented out (backed up first).',
 ];
