@@ -1,9 +1,9 @@
 <?php
 /**
  * 极简论坛 · 服务器性能监控
- * - 存储占用：程序本体 + data 数据目录（虚拟主机总配额一般 100MB，默认按此预警）
+ * - 存储占用：程序本体 + data 数据目录（主机配额可配置，默认 100MB，大磁盘服务器可调到 GB / TB 级）
  * - 磁盘 / 负载 / PHP 运行信息：只读系统接口，无任何特殊扩展依赖
- * - 存储告警：数据占用超过阈值（默认 95MB）自动邮件通知全部管理员
+ * - 存储告警：总占用超过阈值（默认 95MB，上限 1TB）自动邮件通知全部管理员
  *   触发时机：随论坛访问检查（每小时至多一次），持续超限时每 6 小时提醒一次，回落即重置
  */
 defined('APP') or exit('Forbidden');
@@ -290,7 +290,7 @@ function sysmon_storage_alert(bool $manual = false, bool $force = false): array
             $st['last_check'] = $now;
             sysmon_state_save($st);
         }
-        return ['ok', '存储占用 ' . fmt_bytes($total) . '，未达告警阈值 ' . (int)cfg('monitor_mb', 95) . 'MB'];
+        return ['ok', '存储占用 ' . fmt_bytes($total) . '，未达告警阈值 ' . fmt_bytes(max(1, (int)cfg('monitor_mb', 95)) * 1048576)];
     }
 
     // 冷却期内不重复发送（手动强制除外）
@@ -303,17 +303,20 @@ function sysmon_storage_alert(bool $manual = false, bool $force = false): array
     }
 
     // 发送告警邮件
-    $mb = round($total / 1048576, 1);
     $th = (int)cfg('monitor_mb', 95);
+    $qmb = max(10, (int)cfg('quota_mb', 100));
+    $totalH = fmt_bytes($total);
+    $thH = fmt_bytes(max(1, $th) * 1048576);
+    $quotaH = fmt_bytes($qmb * 1048576);
     $site = (string)cfg('site_name', '论坛');
-    $pct = min(100, (int)round($total / (100 * 1048576) * 100));
-    $inner = '<p style="margin:0 0 14px">站点总占用已达 <b style="color:#b45309">' . $mb . 'MB</b>，超过告警阈值 <b>' . $th . 'MB</b>（虚拟主机配额通常为 100MB，请尽快清理）。</p>'
+    $pct = min(100, (int)round($total / ($qmb * 1048576) * 100));
+    $inner = '<p style="margin:0 0 14px">站点总占用已达 <b style="color:#b45309">' . $totalH . '</b>，超过告警阈值 <b>' . $thH . '</b>（主机配额 ' . $quotaH . '，已用 ' . $pct . '%），请尽快清理。</p>'
         . '<div style="margin:0 0 14px;background:#f4f4f5;border-radius:8px;height:14px;overflow:hidden"><div style="width:' . $pct . '%;height:100%;background:' . ($pct >= 95 ? '#dc2626' : '#f59e0b') . '"></div></div>'
         . '<p style="margin:0 0 8px"><b>占用明细</b></p>'
         . '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin:0 0 16px">'
         . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">程序本体</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . fmt_bytes($app) . '</b></td></tr>'
         . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">数据目录</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . fmt_bytes($data) . '</b>（其中操作日志 ' . fmt_bytes(sysmon_content_stats()[4]) . '）</td></tr>'
-        . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">总占用 / 100MB 配额</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . $pct . '%</b></td></tr>'
+        . '<tr><td style="padding:6px 12px;border:1px solid #e5e5ea">总占用 / 主机配额</td><td style="padding:6px 12px;border:1px solid #e5e5ea"><b>' . $pct . '%</b></td></tr>'
         . '</table>'
         . '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.9;color:#713f12">'
         . '<b>建议操作</b>（后台「系统 / 日志 / 监控」页）：<br>'
@@ -321,7 +324,7 @@ function sysmon_storage_alert(bool $manual = false, bool $force = false): array
         . '2. 下载并删除旧的数据备份与更新前备份（保留最近 1-2 份即可）；<br>'
         . '3. 删除不再需要的测试内容；<br>'
         . '4. 如持续紧张，导出数据后联系主机服务商扩容。</div>';
-    $body = mail_template('存储告警', $inner, ['note' => '本邮件由论坛监控系统自动发送（阈值 ' . $th . 'MB，冷却 ' . round(SYSMON_ALERT_COOLDOWN / 3600) . ' 小时）。']);
+    $body = mail_template('存储告警', $inner, ['note' => '本邮件由论坛监控系统自动发送（阈值 ' . $thH . '，冷却 ' . round(SYSMON_ALERT_COOLDOWN / 3600) . ' 小时）。']);
     $sent = 0;
     $lastErr = '';
     $admins = 0;
@@ -334,7 +337,7 @@ function sysmon_storage_alert(bool $manual = false, bool $force = false): array
         if (!valid_email($to)) {
             continue;
         }
-        [$ok, $err] = mail_send($to, "【存储告警】{$site} 占用 {$mb}MB，已超过 {$th}MB", $body);
+        [$ok, $err] = mail_send($to, "【存储告警】{$site} 占用 {$totalH}，已超过 {$thH}", $body);
         if ($ok) {
             $sent++;
         } else {
@@ -349,10 +352,10 @@ function sysmon_storage_alert(bool $manual = false, bool $force = false): array
     sysmon_state_save($st);
 
     if ($sent > 0) {
-        log_action('storage_alert', "存储占用 {$mb}MB 超过阈值 {$th}MB，告警邮件已发送 {$sent}/{$admins} 位管理员", 0, '系统');
-        return ['alert', "已超限（{$mb}MB / 阈值 {$th}MB），告警邮件已发送 {$sent}/{$admins} 位管理员"];
+        log_action('storage_alert', "存储占用 {$totalH} 超过阈值 {$thH}，告警邮件已发送 {$sent}/{$admins} 位管理员", 0, '系统');
+        return ['alert', "已超限（{$totalH} / 阈值 {$thH}），告警邮件已发送 {$sent}/{$admins} 位管理员"];
     }
-    log_action('storage_alert', "存储占用 {$mb}MB 超过阈值 {$th}MB，但告警邮件发送失败" . ($lastErr !== '' ? '：' . cut_str($lastErr, 120) : '（SMTP 未配置或无管理员邮箱）'), 0, '系统');
+    log_action('storage_alert', "存储占用 {$totalH} 超过阈值 {$thH}，但告警邮件发送失败" . ($lastErr !== '' ? '：' . cut_str($lastErr, 120) : '（SMTP 未配置或无管理员邮箱）'), 0, '系统');
     return ['error', '已超限但告警邮件发送失败' . ($lastErr !== '' ? '：' . cut_str($lastErr, 100) : '（请检查后台邮件配置与管理员邮箱）')];
 }
 

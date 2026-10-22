@@ -1206,10 +1206,10 @@ function admin_tab_monitor(): void
 
     echo '<div class="card form-card"><h2 class="card-title">' . t('存储占用') . '</h2>' .
         '<div class="flex" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">' .
-        '<span>合计 <b>' . e(fmt_bytes($total)) . '</b> / 配额 ' . (int)cfg('quota_mb', 100) . 'MB</span>' .
+        '<span>合计 <b>' . e(fmt_bytes($total)) . '</b> / 配额 ' . e(fmt_bytes($quota)) . '</span>' .
         '<span class="muted">程序 ' . e(fmt_bytes($app)) . ' · 数据 ' . e(fmt_bytes($data)) . '</span></div>' .
         '<div class="meter" role="img" aria-label="存储占用 ' . $pct . '%"><i class="' . trim($meterCls) . '" style="width:' . $pct . '%"></i></div>' .
-        '<p class="hint">告警阈值 ' . $th . 'MB（阈值线位于进度条 ' . $thPct . '% 处）；' .
+        '<p class="hint">告警阈值 ' . e(fmt_bytes($thBytes)) . '（阈值线位于进度条 ' . $thPct . '% 处）；' .
         ($over
             ? '<b style="color:var(--danger)">当前已超过阈值！' . (!empty($st['last_alert_sent']) && $st['last_alert_sent'] > 0 ? '告警邮件已于 ' . e(fmt_dt((int)$st['last_alert'])) . ' 发送 ' . (int)$st['last_alert_sent'] . ' 位管理员。' : '尚未成功发送告警邮件，请检查邮件配置。') . '</b>'
             : '占用正常。') .
@@ -1476,20 +1476,22 @@ function admin_tab_monitor(): void
         '</div></div>';
 
     $on = (int)cfg('monitor_on', 1) === 1;
+    $qmb = max(10, (int)cfg('quota_mb', 100));
     echo '<div class="card form-card"><h2 class="card-title">' . t('监控与告警设置') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_save_monitor')) . '">' . csrf_field() .
         '<div class="grid2">' .
         '<label class="field"><span class="field-l">' . t('自动告警') . '</span><select name="monitor_on" class="input">' .
         '<option value="1"' . ($on ? ' selected' : '') . '>' . t('开启') . '</option>' .
         '<option value="0"' . (!$on ? ' selected' : '') . '>' . t('关闭') . '</option></select></label>' .
-        '<label class="field"><span class="field-l">' . t('告警阈值（MB）') . '</span><input class="input" name="monitor_mb" type="number" min="1" max="999" value="' . $th . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('告警阈值（MB）') . '</span><input class="input" name="monitor_mb" type="number" min="1" max="1048576" value="' . $th . '"><span class="hint">程序 + 数据总占用超过此值发告警邮件（当前总占用 ' . e(fmt_bytes($total)) . '）；虚拟主机小配额建议 80～95，云服务器 / 大磁盘可按需填 2048（2GB）、10240（10GB）等</span></label>' .
+        '<label class="field"><span class="field-l">' . t('主机配额（MB）') . '</span><input class="input" name="quota_mb" type="number" min="10" max="1048576" value="' . $qmb . '"><span class="hint">主机空间总配额，仅用于存储进度条与百分比展示（不影响告警判定）；虚拟主机一般 100～1000，云服务器按实际磁盘填，支持到 1TB</span></label>' .
         '<label class="field"><span class="field-l">' . t('监控页实时刷新间隔（秒，0=关闭）') . '</span><input class="input" name="monitor_interval" type="number" min="0" max="300" value="' . $monInt . '"><span class="hint">实时资源卡的自动刷新频率，建议 3～30 秒；0 为关闭以节省流量</span></label>' .
         '</div>' .
         '<div class="form-foot"><button class="btn btn-ghost" type="button" data-admin-test="monitor">发送测试告警邮件</button>' .
         '<button class="btn btn-primary" type="submit">' . t('保存监控设置') . '</button></div>' .
         '<span class="test-msg muted"></span></form>' .
-        admin_restore_btn('monitor_on,monitor_interval,monitor_mb') .
-        '<p class="hint">总占用（程序 + 数据）超过阈值时自动给全部管理员发告警邮件。检查随论坛访问进行（每小时至多一次）；持续超限时每 6 小时提醒一次，回落到阈值下后自动重置。告警通过后台「邮件」中配置的 SMTP 发送。</p></div>';
+        admin_restore_btn('monitor_on,monitor_interval,monitor_mb,quota_mb') .
+        '<p class="hint">总占用（程序 + 数据）超过「告警阈值」时自动给全部管理员发告警邮件；「主机配额」只用于存储进度条与百分比展示，按主机实际空间填写。检查随论坛访问进行（每小时至多一次）；持续超限时每 6 小时提醒一次，回落到阈值下后自动重置。告警通过后台「邮件」中配置的 SMTP 发送。</p></div>';
 }
 
 /* ---------------- 系统 ---------------- */
@@ -2344,7 +2346,7 @@ function admin_cfg_defaults(): array
         'daemon_php_bin' => ['', '巡逻器 PHP 路径'],
         /* 监控 */
         'monitor_on' => [1, '存储占用监控'], 'monitor_interval' => [5, '监控刷新间隔（秒）'],
-        'monitor_mb' => [95, '占用告警阈值（%）'],
+        'monitor_mb' => [95, '占用告警阈值（MB）'], 'quota_mb' => [100, '主机配额（MB）'],
         /* 开放 API */
         'api_enabled' => [0, 'API 总开关'], 'api_guest' => [0, '访客 API'],
         'api_rate_guest' => [30, '访客限速（次 / 分钟）'], 'api_rate_token' => [120, '令牌限速（次 / 分钟）'],

@@ -2378,15 +2378,16 @@ function act_admin_backup_del(): void
 
 /* ================= 管理员：监控 ================= */
 
-/** 保存监控设置：自动告警开关 + 阈值 */
+/** 保存监控设置：自动告警开关 + 阈值 + 主机配额（v1.39.0 起支持到 1TB） */
 function act_admin_save_monitor(): void
 {
     $on = !empty($_POST['monitor_on']) ? 1 : 0;
-    $mb = max(1, min(999, (int)($_POST['monitor_mb'] ?? 95)));
+    $mb = max(1, min(1048576, (int)($_POST['monitor_mb'] ?? 95)));
+    $qmb = max(10, min(1048576, (int)($_POST['quota_mb'] ?? 100)));
     $mi = (int)($_POST['monitor_interval'] ?? 5);
     $mi = $mi === 1 ? 2 : max(0, min(300, $mi)); // 0=关闭，1 归一为 2（太频繁伤主机）
-    cfg_update(['monitor_on' => $on, 'monitor_mb' => $mb, 'monitor_interval' => $mi]);
-    log_action('admin_save_monitor', '存储告警：' . ($on ? '开启' : '关闭') . '，阈值 ' . $mb . 'MB，监控刷新间隔 ' . ($mi > 0 ? $mi . ' 秒' : '关闭'));
+    cfg_update(['monitor_on' => $on, 'monitor_mb' => $mb, 'monitor_interval' => $mi, 'quota_mb' => $qmb]);
+    log_action('admin_save_monitor', '存储告警：' . ($on ? '开启' : '关闭') . '，阈值 ' . fmt_bytes($mb * 1048576) . '，主机配额 ' . fmt_bytes($qmb * 1048576) . '，监控刷新间隔 ' . ($mi > 0 ? $mi . ' 秒' : '关闭'));
     act_ok('监控设置已保存', u('p=admin&tab=monitor'));
 }
 

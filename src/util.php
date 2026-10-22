@@ -262,7 +262,7 @@ function fmt_dt(int $ts): string
 
 function fmt_bytes(int $n): string
 {
-    $u = ['B', 'KB', 'MB', 'GB'];
+    $u = ['B', 'KB', 'MB', 'GB', 'TB'];
     $i = 0;
     $v = (float)$n;
     while ($v >= 1024 && $i < count($u) - 1) {

@@ -164,6 +164,7 @@ return [
         '后台管理' => 'Admin panel',
         '告警冷却（分钟）' => 'Alert cooldown (minutes)',
         '告警阈值（MB）' => 'Alert threshold (MB)',
+        '主机配额（MB）' => 'Host quota (MB)',
         '命中动作' => 'Action on match',
         '回复' => 'Replies',
         '在线名单' => 'Online list',

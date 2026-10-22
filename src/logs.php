@@ -301,7 +301,7 @@ function log_files(): array
 }
 
 /**
- * 清理过期日志（保留天数 0 = 永久保留；同时保证日志目录总量 ≤ 20MB，超出时从最旧删起）
+ * 清理过期日志（保留天数 0 = 永久保留；同时保证日志目录总量 ≤ max(20MB, 主机配额的 20%)，超出时从最旧删起）
  * @return int 删除的文件数
  */
 function log_prune(int $days): int
@@ -317,8 +317,8 @@ function log_prune(int $days): int
             }
         }
     }
-    // 总量保护：100MB 空间里给日志的上限 20MB
-    $maxTotal = 20 * 1048576;
+    // 总量保护：日志上限 = max(20MB, 主机配额的 20%)——小配额主机防写爆，大磁盘自动放宽不误删
+    $maxTotal = max(20, (int)ceil(max(10, (int)cfg('quota_mb', 100)) / 5)) * 1048576;
     $total = 0;
     $sizes = [];
     foreach (log_files() as $f) {
@@ -326,7 +326,7 @@ function log_prune(int $days): int
         $sizes[$f] = $s;
         $total += $s;
     }
-    foreach (log_files() as $f) { // 从最旧开始删（log_files 新→旧，倒序遍历）
+    foreach (array_reverse(log_files()) as $f) { // 从最旧开始删（log_files 新→旧，反转后旧→新；v1.39.0 修正此前误删最新日志）
         if ($total <= $maxTotal) {
             break;
         }
