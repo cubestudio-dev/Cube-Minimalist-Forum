@@ -1441,22 +1441,43 @@ function act_notify_read_all(): void
 
 function act_admin_save_basic(): void
 {
-    post_guard('csrf', 'site_name', 'per_page', 'thread_title_max', 'upload_allow_ext');
-    if (post_str('site_name', 30) === '') {
-        act_err('论坛名称不能为空');
+    /* v1.41.1 分组修复：本页实为两个独立表单（「基本设置」与「内容与限制」）共用同一保存动作——
+     * ①守卫必须按「提交了哪一组锚点」分组，绝不能挂两段字段的并集：那样点任一表单都缺另一段的
+     *   字段，正常保存必被误拦（v1.41.0 误杀实锤：点「保存基本设置」报缺 thread_title_max / upload_allow_ext）；
+     * ②写入同样必须分组：旧版把两段 18 个键一把写入，另一段不在 POST 里的键被 `?? 默认值` 静默
+     *   重置——「点一次『保存内容与限制』，基本设置整段回默认」（反之亦然），这正是「部分配置
+     *   时不时回到默认」的高频根因之一（v1.41.0 之前即存在）。分组后两表单互不干扰。 */
+    $isBasic = isset($_POST['site_name']);
+    $isLimits = !$isBasic && isset($_POST['thread_title_max']);
+    if ($isBasic) {
+        post_guard('csrf', 'site_name', 'site_desc', 'site_url', 'bind_domains', 'per_page', 'post_interval', 'online_window', 'live_interval', 'ping_interval');
+        if (post_str('site_name', 30) === '') {
+            act_err('论坛名称不能为空');
+        }
+        /* 绑定域名：规范化清洗（去协议头 / 端口 / 路径、转小写、去重），仅保留合法域名字符 */
+        $bd = implode(',', bind_domain_list(post_str('bind_domains', 500)));
+        cfg_update([
+            'site_name' => cut_str(post_str('site_name', 30), 30),
+            'site_desc' => cut_str(post_str('site_desc', 100), 100),
+            'site_url' => cut_str(post_str('site_url', 200), 200),
+            'bind_domains' => cut_str($bd, 500),
+            'per_page' => max(5, min(100, (int)($_POST['per_page'] ?? 20))),
+            'post_interval' => max(0, min(3600, (int)($_POST['post_interval'] ?? 30))),
+            'online_window' => max(60, min(86400, (int)($_POST['online_window'] ?? 300))),
+            'live_interval' => max(0, min(300, (int)($_POST['live_interval'] ?? 20))),
+            'ping_interval' => max(0, min(300, (int)($_POST['ping_interval'] ?? 15))), // v1.18.0：侧栏 Ping 测量间隔，0=关闭
+        ]);
+        log_action('admin_save_basic', '基本设置已保存' . ($bd !== '' ? '（绑定域名：' . $bd . '）' : ''));
+        act_ok('基本设置已保存', u('p=admin&tab=basic'));
+        return;
     }
-    /* 绑定域名：规范化清洗（去协议头 / 端口 / 路径、转小写、去重），仅保留合法域名字符 */
-    $bd = implode(',', bind_domain_list(post_str('bind_domains', 500)));
+    if (!$isLimits) {
+        /* 两组锚点都没出现：请求体异常，按缺字段拒绝 */
+        post_guard('csrf', 'site_name');
+        return;
+    }
+    post_guard('csrf', 'thread_title_max', 'thread_len_max', 'reply_len_max', 'name_max', 'sign_len_max', 'upload_img_max_mb', 'upload_file_max_mb', 'upload_per_post', 'upload_allow_ext');
     cfg_update([
-        'site_name' => cut_str(post_str('site_name', 30), 30),
-        'site_desc' => cut_str(post_str('site_desc', 100), 100),
-        'site_url' => cut_str(post_str('site_url', 200), 200),
-        'bind_domains' => cut_str($bd, 500),
-        'per_page' => max(5, min(100, (int)($_POST['per_page'] ?? 20))),
-        'post_interval' => max(0, min(3600, (int)($_POST['post_interval'] ?? 30))),
-        'online_window' => max(60, min(86400, (int)($_POST['online_window'] ?? 300))),
-        'live_interval' => max(0, min(300, (int)($_POST['live_interval'] ?? 20))),
-        'ping_interval' => max(0, min(300, (int)($_POST['ping_interval'] ?? 15))), // v1.18.0：侧栏 Ping 测量间隔，0=关闭
         /* v1.32.0 内容与限制 */
         'thread_title_max' => max(4, min(200, (int)($_POST['thread_title_max'] ?? 30))),
         'thread_len_max' => max(100, min(200000, (int)($_POST['thread_len_max'] ?? 1500))),
@@ -1470,8 +1491,8 @@ function act_admin_save_basic(): void
         /* v1.41.0：分隔符统一化 —— 逗号 / 中文逗号 / 分号 / 点号等一律转空格（旧版正则直接吞掉分隔符，
          * 「jpg,png,gif」保存后粘成一坨「jpgpnggif」，白名单失效导致附件上传全部被拒）；上限 200 → 1000 */
     ]);
-    log_action('admin_save_basic', '基本设置已保存' . ($bd !== '' ? '（绑定域名：' . $bd . '）' : ''));
-    act_ok('基本设置已保存', u('p=admin&tab=basic'));
+    log_action('admin_save_limits', '内容与限制已保存');
+    act_ok('内容与限制已保存', u('p=admin&tab=basic'));
 }
 
 /** 后台「功能」页：总开关保存（v1.14.0） */
