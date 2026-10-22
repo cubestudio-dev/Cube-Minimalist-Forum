@@ -494,7 +494,14 @@ function update_apply(string $zipPath, array &$res): void
         } else {
             $ctx = ['old' => $cur, 'new' => $new, 'manifest' => $m, 'data_dir' => DATA_DIR];
             try {
-                include $migFile;
+                /* v1.41.2 作用域隔离：迁移脚本在独立闭包作用域内 include——
+                 * v1.41.0 / v1.41.1 的迁移脚本曾与宿主共享作用域并 unset 了宿主存
+                 * 「旧版本号」的 $cur，导致这两版写入的更新历史 from=null
+                 * （后台「更新历史」显示「v? → v1.41.x」）。闭包内无论定义 /
+                 * unset 什么变量都污染不到 update_apply 本体；$ctx 显式传入。 */
+                call_user_func(function () use ($ctx, $migFile) {
+                    include $migFile;
+                });
                 $migMsg = '迁移脚本已执行';
             } catch (Throwable $ex) {
                 $migMsg = '迁移脚本出错：' . $ex->getMessage();

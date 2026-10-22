@@ -1357,6 +1357,29 @@ function admin_tab_monitor(): void
     }
     echo '</div>';
 
+    /* v1.41.2 上传链路自检：生产侧「图片 / 文件无法上传」的定位入口——
+       按上传接口的真实判定顺序逐项探测（开关 → PHP 上传层 → 体积上限 → 临时目录 → 存储目录 → 白名单），
+       哪一步 ✘ 就指认哪一环并给出修复办法 */
+    $efxUp = $efx['upchain'];
+    $efxUpBad = 0;
+    foreach ($efxUp['steps'] as $s) {
+        if (!$s['ok']) {
+            $efxUpBad++;
+        }
+    }
+    echo '<div class="card form-card"><h2 class="card-title">' . t('上传链路自检') . '</h2>';
+    if ($efxUpBad > 0) {
+        echo '<p class="hint" style="color:#b45309"><b>⚠ 发现 ' . (int)$efxUpBad . ' 处异常——「图片 / 文件无法上传」多半就是它们所致，按下方对应行的办法处理后刷新本页复检：</b></p>';
+    } else {
+        echo '<p class="hint" style="color:#15803d"><b>✔ 全部通过：服务器侧上传链路就绪。若前台仍无法上传，请重试一次并留意具体报错文案（v1.41.0 起报错会精确指出原因）。</b></p>';
+    }
+    echo '<table class="log-table"><thead><tr><th style="width:30px"></th><th>检查项</th><th>当前值</th><th>异常时的修复办法</th></tr></thead><tbody>';
+    foreach ($efxUp['steps'] as $s) {
+        echo '<tr><td>' . ($s['ok'] ? '<b style="color:#15803d">✔</b>' : '<b style="color:#dc2626">✘</b>') . '</td><td><b>' . e((string)$s['t']) . '</b></td><td>' . e((string)$s['v']) . '</td><td class="muted">' . ($s['fix'] !== '' ? e((string)$s['fix']) : '—') . '</td></tr>';
+    }
+    echo '</tbody></table>';
+    echo '<p class="hint">探测顺序与发帖上传接口的判定完全一致；存储目录探针为真实「建目录 + 写入 + 删除」，不影响已有文件。图片（png / jpg / jpeg / gif / webp）不受白名单影响，恒可上传。</p></div>';
+
     /* v1.33.0 性能体检：OPcache 是弱 CPU / 共享主机整站缓慢的头号原因——
        未启用时每个请求都要重新编译全部 PHP 源码（30+ 文件），CPU 全耗在重复劳动上。
        提供一键创建 / 删除 .user.ini（LiteSpeed / CGI / FastCGI / FPM 类主机生效） */
@@ -2522,6 +2545,7 @@ function admin_search_index(): array
         ['monitor', '运行环境', 'PHP 扩展一键开启（mbstring / openssl / curl / gd / zip / opcache），自动区分 Windows / Linux', '扩展 php.ini 小皮 phpstudy 宝塔 mbstring openssl curl gd zip opcache 一键 开启 windows linux 运行环境'],
         ['monitor', '运行环境', 'php.ini 格式体检：自动发现并修复「php_ 前缀缺后缀」等写法错误、无效扩展行与 PHP 8 已移除指令（如 track_errors）', 'php.ini 格式 体检 坏行 修正 注释 track_errors 无效 修复 php_ 前缀'],
         ['monitor', '运行环境', '上传限制体检：upload_max_filesize / post_max_size 过小一键调大（迁移包 / 更新包上传需要）', '上传 限制 upload post 2m 迁移包 更新包 调大 32m 64m'],
+        ['monitor', '运行环境', '上传链路自检：功能开关 / file_uploads / 单文件与整请求上限 / 上传临时目录 / data/uploads 存储目录 / 扩展名白名单逐项真实探测，无法上传一键定位', '上传 自检 无法上传 上传失败 定位 file_uploads 临时目录 存储目录 权限 白名单 探针'],
         ['monitor', '运行环境', '小皮面板 / 宝塔面板自动识别与重启指引；php.ini 不可写时下载配置片段 FTP 上传', '小皮 面板 phpstudy 宝塔 xampp wamp upupw 指引 片段 下载 ftp 重启'],
         ['monitor', '性能体检', 'OPcache / .user.ini / gzip / ETag 304', 'opcache 性能 缓存 慢 加速'],
         ['monitor', '性能体检', '追加 OPcache 配置到现有 .user.ini（同意式，原内容保留并自动备份）', 'opcache 追加 user.ini 同意 备份'],

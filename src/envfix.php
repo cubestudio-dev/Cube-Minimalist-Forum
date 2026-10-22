@@ -376,6 +376,111 @@ function efx_find_lines(array $lines, string $ext): array
 }
 
 /**
+ * v1.41.2 上传链路自检：按 act_media_upload 的真实判定顺序逐项探测，
+ * 每步给出当前值，失败步给出精确定位与修复建议——生产侧「图片 / 文件无法上传」
+ * 的定位入口（哪一步 ✘ 就处理哪一环）。
+ * PHP 的 HTTP 上传解析层无法在页面请求内真正模拟，故以 file_uploads 开关 +
+ * 临时目录真实写探针等价判定；存储目录直接做「建年月子目录 + 写入 + 删除」真实探针。
+ * @return array{ok:bool, steps:list<array{ok:bool,t:string,v:string,fix:string}>}
+ */
+function efx_upload_chain(): array
+{
+    $steps = [];
+    /* ① 论坛功能开关（关闭时发帖页不渲染上传工具条，接口直接拒绝） */
+    $on = function_exists('feat_on') ? feat_on('upload') : true;
+    $steps[] = [
+        'ok'  => $on,
+        't'   => '论坛上传功能开关',
+        'v'   => $on ? '开启' : '关闭',
+        'fix' => $on ? '' : '后台「功能开关」勾选「允许上传图片 / 附件」并保存——关闭状态下发帖页没有上传按钮，接口返回「上传功能已关闭」',
+    ];
+    /* ② PHP 上传总开关：Off 时 PHP 直接丢弃全部上传，$_FILES 恒为空 */
+    $fu = strtolower(trim((string)ini_get('file_uploads')));
+    $fuOk = $fu === '1' || $fu === 'on' || $fu === 'true';
+    $steps[] = [
+        'ok'  => $fuOk,
+        't'   => 'PHP 上传总开关 file_uploads',
+        'v'   => $fuOk ? 'On' : (((string)ini_get('file_uploads') !== '') ? (string)ini_get('file_uploads') : '-'),
+        'fix' => $fuOk ? '' : 'php.ini 设 file_uploads=On 并重启 PHP——Off 时 PHP 丢弃所有上传，前端会提示「请选择要上传的文件」',
+    ];
+    /* ③ 单文件上限：默认 2M 连手机照片都放不下 */
+    $upB = sysmon_memlimit_bytes((string)ini_get('upload_max_filesize'));
+    $upH = (string)ini_get('upload_max_filesize') ?: '-';
+    $upOk = $upB >= 8 * 1048576;
+    $steps[] = [
+        'ok'  => $upOk,
+        't'   => '单文件上限 upload_max_filesize',
+        'v'   => $upH,
+        'fix' => $upOk ? '' : '过小——本页上方「一键修复」可调大到 32M（或 php.ini 手工改后重启 PHP）；超限时上传报「错误码 1 / 2」',
+    ];
+    /* ④ 整请求上限：必须 ≥ 单文件上限，否则 PHP 把 $_FILES 与全部 POST 一起静默丢弃 */
+    $postB = sysmon_memlimit_bytes((string)ini_get('post_max_size'));
+    $postH = (string)ini_get('post_max_size') ?: '-';
+    $postOk = $postB >= max(8 * 1048576, $upB);
+    $steps[] = [
+        'ok'  => $postOk,
+        't'   => '整请求上限 post_max_size',
+        'v'   => $postH . (($postB > 0 && $upB > 0 && $postB < $upB) ? '（小于单文件上限！）' : ''),
+        'fix' => $postOk ? '' : '必须 ≥ upload_max_filesize——整请求超限时「选了文件仍提示未收到文件」；本页「一键修复」可调大到 64M',
+    ];
+    /* ⑤ 上传临时目录真实写探针：PHP 收到文件先落这里，不可写报「错误码 6 / 7」 */
+    $tmp = trim((string)ini_get('upload_tmp_dir'));
+    if ($tmp === '') {
+        $tmp = sys_get_temp_dir();
+    }
+    $tmpNote = $tmp;
+    $tmpOk = false;
+    if (!is_dir($tmp)) {
+        $tmpNote .= '（目录不存在）';
+    } else {
+        $probe = rtrim($tmp, '/\\') . '/.mf-up-probe-' . (getmypid() ?: '0') . '.tmp';
+        $tmpOk = @file_put_contents($probe, 'probe') !== false;
+        if ($tmpOk) {
+            @unlink($probe);
+        } else {
+            $tmpNote .= '（不可写）';
+        }
+    }
+    $steps[] = [
+        'ok'  => $tmpOk,
+        't'   => '上传临时目录可写',
+        'v'   => $tmpNote,
+        'fix' => $tmpOk ? '' : 'php.ini 的 upload_tmp_dir 应指向存在且 PHP 运行账号可写的目录（未设置时用系统临时目录），修正后重启 PHP',
+    ];
+    /* ⑥ 存储目录真实写探针：等价于 act_media_upload 的落盘动作（建年月子目录 + 写入 + 删除） */
+    $dir = DATA_DIR . '/uploads/' . date('Ym');
+    $dirOk = is_dir($dir) || @mkdir($dir, 0755, true);
+    if ($dirOk) {
+        $probe = $dir . '/.mf-up-probe-' . (getmypid() ?: '0') . '.tmp';
+        $dirOk = @file_put_contents($probe, 'probe') !== false;
+        if ($dirOk) {
+            @unlink($probe);
+        }
+    }
+    $steps[] = [
+        'ok'  => $dirOk,
+        't'   => '存储目录 data/uploads 可写',
+        'v'   => ($dirOk ? '可写（' : '不可写（') . cut_str($dir, 40) . '）',
+        'fix' => $dirOk ? '' : '最终存储位置写不进——Linux 上多为权限 / 属主不对（目录 755、属主与 PHP 运行账号一致），「监控」页一键修复目录权限或 FTP 手工修正',
+    ];
+    /* ⑦ 白名单解析预览（与上传接口同一套切分逻辑；图片 png/jpg/jpeg/gif/webp 恒放行） */
+    $allow = preg_split('/[\s,，;；]+/u', trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'))) ?: [];
+    $allow = array_values(array_filter(array_map(fn ($x) => strtolower(trim(ltrim((string)$x, '.'))), $allow)));
+    $allowOk = count($allow) > 0;
+    $steps[] = [
+        'ok'  => $allowOk,
+        't'   => '附件扩展名白名单（' . count($allow) . ' 项）',
+        'v'   => $allowOk ? implode(' ', array_slice($allow, 0, 14)) . (count($allow) > 14 ? ' …' : '') : '（空）',
+        'fix' => $allowOk ? '' : '为空时所有非图片附件都会被拒（提示「不支持的附件类型」；png / jpg / jpeg / gif / webp 不受影响）——后台「内容与限制」填写，空格或逗号分隔',
+    ];
+    $allOk = true;
+    foreach ($steps as $s) {
+        $allOk = $allOk && $s['ok'];
+    }
+    return ['ok' => $allOk, 'steps' => $steps];
+}
+
+/**
  * 全量体检计划：系统 / 面板 / php.ini / 扩展状态 / 上传限制。
  * fixable   = 未启用且扩展文件随附 → 可一键开启
  * nobundle  = 未启用且扩展文件未随附 → 只能面板安装（展示 + 指引）
@@ -437,6 +542,7 @@ function efx_plan(): array
             'up_sug'   => $upBytes > 0 && $upBytes < 8 * 1048576,
             'post_sug' => $postBytes > 0 && $postBytes < 16 * 1048576,
         ],
+        'upchain'      => efx_upload_chain(),
     ];
 }
 
