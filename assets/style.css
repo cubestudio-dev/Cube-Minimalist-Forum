@@ -1083,6 +1083,73 @@ html.mf-leaving .main .flash { opacity: 1; } /* 提示条保持醒目 */
 /* ---- v1.32.0 上传工具条（发帖 / 回复 / 编辑表单） ---- */
 .upload-bar { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; flex-wrap: wrap; }
 .upload-bar .hint { font-size: 12px; color: var(--muted); }
+
+/* ---- v1.42.0 附件预览条（粘贴 / 拖拽 / 选文件共用：图片本地缩略，文件图标 + 名称 + 大小 + 进度） ---- */
+.upx { margin: 2px 0 10px; display: flex; flex-direction: column; gap: 8px; }
+.upx-cap { font-size: 12px; color: var(--muted); }
+.upx-cap.over { color: var(--danger); font-weight: 600; }
+.upx-list {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  max-height: 216px; overflow-y: auto; padding: 2px;
+  scrollbar-width: thin;
+}
+.upx-list::-webkit-scrollbar { width: 8px; }
+.upx-list::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 30%, transparent); border-radius: 99px; }
+.upx-chip {
+  display: inline-flex; align-items: center; gap: 9px;
+  max-width: 100%; padding: 7px 9px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); transition: border-color .15s ease, opacity .15s ease;
+}
+.upx-chip.is-err { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.upx-chip.is-ok .upx-st { color: var(--ok); }
+.upx-chip.is-err .upx-st { color: var(--danger); }
+.upx-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border); background: var(--hover); flex: none; }
+.upx-ico {
+  width: 40px; height: 40px; border-radius: 8px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  color: var(--muted); background: var(--hover); border: 1px solid var(--border);
+}
+.upx-ico-zip  { color: #0f766e; background: color-mix(in srgb, #0f766e 12%, transparent); border-color: transparent; }
+.upx-ico-txt  { color: #57606a; background: color-mix(in srgb, #57606a 12%, transparent); border-color: transparent; }
+.upx-ico-pdf  { color: #c0392f; background: color-mix(in srgb, #c0392f 11%, transparent); border-color: transparent; }
+.upx-ico-doc  { color: #2f6db3; background: color-mix(in srgb, #2f6db3 12%, transparent); border-color: transparent; }
+.upx-ico-xls  { color: #177245; background: color-mix(in srgb, #177245 12%, transparent); border-color: transparent; }
+.upx-ico-ppt  { color: #9a6700; background: color-mix(in srgb, #9a6700 13%, transparent); border-color: transparent; }
+.upx-ico-aud  { color: #7c3aed; background: color-mix(in srgb, #7c3aed 11%, transparent); border-color: transparent; }
+.upx-ico-vid  { color: #b4235a; background: color-mix(in srgb, #b4235a 11%, transparent); border-color: transparent; }
+.upx-ico-exe  { color: #3f3f46; background: color-mix(in srgb, #3f3f46 14%, transparent); border-color: transparent; }
+.upx-ico-gen  { color: var(--muted); background: var(--hover); }
+.upx-meta { min-width: 0; display: flex; flex-direction: column; line-height: 1.45; }
+.upx-name { font-size: 13px; font-weight: 600; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upx-sub { font-size: 12px; color: var(--muted); font-style: normal; }
+.upx-st { font-size: 12px; color: var(--muted); }
+.upx-chip.is-up .upx-st { color: var(--accent); }
+.upx-x {
+  flex: none; width: 22px; height: 22px; border-radius: 6px;
+  border: 0; background: transparent; color: var(--muted);
+  font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+}
+.upx-x:hover { background: var(--hover); color: var(--danger); }
+/* 拖拽悬停高亮（加在表单 / 输入框上） */
+.form-card.is-drag, form.is-drag textarea.input {
+  outline: 2px dashed color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 3px;
+  border-radius: var(--radius-s);
+}
+
+/* ---- v1.42.0 站内错误页（404 等，与 error/*.html 静态错误页同一套视觉） ---- */
+.errpage { text-align: center; padding: 40px 24px 44px; }
+.errpage-code {
+  font-size: 56px; font-weight: 800; letter-spacing: .04em; line-height: 1.1;
+  color: var(--accent);
+}
+.errpage-art { color: color-mix(in srgb, var(--accent) 70%, transparent); margin: 10px 0 4px; }
+.errpage-title { font-size: 18px; margin: 6px 0 6px; }
+.errpage-sub { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+.errpage-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
 /* ---- v1.32.0 监控页流量与使用统计 ---- */
 .stats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .stats-table th, .stats-table td { padding: 7px 10px; border-top: 1px solid var(--border); text-align: left; }

@@ -1262,13 +1262,43 @@
     return { start: start, done: done, prefetch: prefetch };
   })();
 
-  /* ---------------- v1.32.0 图片 / 附件上传（发帖 / 回复 / 编辑表单的上传工具条） ---------------- */
+  /* ---------------- v1.32.0 图片 / 附件上传（发帖 / 回复 / 编辑表单的上传工具条）
+     v1.42.0 重构：粘贴 / 拖拽直传 + 附件预览条（图片本地缩略 / 文件图标 + 名称 + 大小 + 进度）
+     · 客户端预检：扩展名（白名单 / 拒绝清单）与大小超限即时报错，不发起无效往返；
+     · 逐文件 XHR 进度回显（大文件不再「点了没反应」）；
+     · 失败原因精确到响应：413 / 403 / 登录过期 / 500 / 网络中断逐一分辨——
+       此前错误提示调用的 popMsg 定义在后台设置搜索块内（块级作用域不可达），
+       上传失败必抛 ReferenceError，用户看不到任何提示（静默失败），本版改用全局 toast；
+     · 附件预览条计数与后台 upload_per_post 上限联动，超限提前提醒（服务端仍兜底）。 */
   (function () {
-    var bars = document.querySelectorAll('.upload-bar');
+    var bars = Array.prototype.slice.call(document.querySelectorAll('[data-upbar]'));
     if (!bars.length) return;
-    function csrfOf(form) {
-      var i = form && form.querySelector('input[name=csrf]');
-      return i ? i.value : '';
+    var IMG_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+    var DENY = ['php', 'php3', 'php5', 'php7', 'phtml', 'phar', 'cgi', 'pl', 'py', 'sh', 'bash', 'htaccess', 'svg', 'exe', 'bat', 'cmd', 'com', 'js', 'jse', 'vbs', 'html', 'htm', 'ini', 'dll', 'so'];
+
+    function fmtSize(n) {
+      if (!n || n < 0) return '0 B';
+      if (n < 1024) return n + ' B';
+      if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+      return (n / 1048576).toFixed(1) + ' MB';
+    }
+    function extOf(name) {
+      var m = /\.([a-z0-9]{1,8})$/i.exec(String(name || ''));
+      return m ? m[1].toLowerCase() : '';
+    }
+    /* 扩展名 → 徽标（文字 + 色族）；未知类型 FILE 中性灰 */
+    function iconOf(ext) {
+      if (IMG_EXT.indexOf(ext) >= 0) return ['图片', 'img'];
+      if (['zip', 'rar', '7z', 'tar', 'gz'].indexOf(ext) >= 0) return [ext.toUpperCase(), 'zip'];
+      if (['txt', 'md', 'log'].indexOf(ext) >= 0) return ['TXT', 'txt'];
+      if (ext === 'pdf') return ['PDF', 'pdf'];
+      if (['doc', 'docx', 'rtf', 'odt'].indexOf(ext) >= 0) return ['DOC', 'doc'];
+      if (['xls', 'xlsx', 'csv', 'ods'].indexOf(ext) >= 0) return ['XLS', 'xls'];
+      if (['ppt', 'pptx', 'odp'].indexOf(ext) >= 0) return ['PPT', 'ppt'];
+      if (['mp3', 'wav', 'flac', 'm4a', 'ogg'].indexOf(ext) >= 0) return ['音频', 'aud'];
+      if (['mp4', 'mov', 'webm', 'mkv', 'avi'].indexOf(ext) >= 0) return ['视频', 'vid'];
+      if (['exe', 'msi', 'bat', 'cmd', 'sh', 'appimage', 'dmg'].indexOf(ext) >= 0) return [ext.toUpperCase(), 'exe'];
+      return [(ext || 'FILE').toUpperCase().slice(0, 4), 'gen'];
     }
     function insertMd(ta, md) {
       var s = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
@@ -1281,35 +1311,207 @@
       ta.dispatchEvent(new Event('input', { bubbles: true }));
       ta.focus();
     }
+    /* 上传失败原因精确诊断：j=服务端 JSON 时用其 msg；否则按 HTTP 状态与响应形态分辨 */
+    function diag(xhr, j) {
+      if (j) return j.msg || '上传失败';
+      var s = xhr.status;
+      if (s === 413) return '文件在 PHP 处理前就被服务器拒绝（请求体超限）：多为 nginx client_max_body_size 或 Apache FcgidMaxRequestLen 小于文件大小，请调大服务器上限后重试';
+      if (s === 403) return '上传被服务器安全层拦截（403）——连续上传多个文件可能触发限流，请稍等片刻再试';
+      if (s === 401) return '登录已过期，请刷新页面重新登录后再上传';
+      if (s === 500) return '服务器处理失败（500），请稍后重试；若反复出现请联系站长查看 data/logs/error.log';
+      if (s === 0) return '网络错误或连接中断，请重试';
+      if (s >= 200 && s < 300) return '服务器返回了无法解析的响应（可能登录已过期），请刷新页面后重试';
+      return '上传失败（HTTP ' + s + '）';
+    }
+
     Array.prototype.forEach.call(bars, function (bar) {
       var btn = bar.querySelector('[data-upload-btn]');
       var input = bar.querySelector('[data-upload-input]');
-      if (!btn || !input) return;
+      var sel = bar.getAttribute('data-ta') || (input && input.getAttribute('data-upload-target'));
       var form = bar.closest('form');
+      var ta = null;
+      try { ta = sel ? ((form && form.querySelector(sel)) || document.querySelector(sel)) : null; } catch (e) { ta = null; }
+      if (!btn || !input || !ta) return;
+      var imgMax = (parseFloat(bar.getAttribute('data-img-max')) || 5) * 1048576;
+      var fileMax = (parseFloat(bar.getAttribute('data-file-max')) || 10) * 1048576;
+      var allow = (bar.getAttribute('data-exts') || '').toLowerCase().split(/[\s,，;；]+/).filter(Boolean);
+      var cap = parseInt(bar.getAttribute('data-cap'), 10) || 0;
+      var okCount = 0;
+
+      /* 附件预览条：动态插在工具条之后（零侵入，老标记兼容） */
+      var strip = document.createElement('div');
+      strip.className = 'upx';
+      strip.hidden = true;
+      var capEl = null;
+      if (cap > 0) {
+        capEl = document.createElement('div');
+        capEl.className = 'upx-cap';
+        strip.appendChild(capEl);
+      }
+      var list = document.createElement('div');
+      list.className = 'upx-list';
+      strip.appendChild(list);
+      bar.parentNode.insertBefore(strip, bar.nextSibling);
+
+      function updCap() {
+        if (!capEl) return;
+        capEl.textContent = '附件 ' + okCount + ' / ' + cap + (okCount >= cap ? '（已达单篇上限，超出的引用将无法保存）' : '');
+        capEl.classList.toggle('over', okCount >= cap);
+      }
+      function dropChip(c, blob) {
+        if (blob && window.URL && URL.revokeObjectURL) { try { URL.revokeObjectURL(blob); } catch (e) {} }
+        if (c.parentNode) c.parentNode.removeChild(c);
+        if (!list.children.length) strip.hidden = true;
+      }
+      /* 生成一个 chip；返回 { st: 状态文本节点, x: 移除按钮 }（DOM 全部 textContent 赋值，无注入面） */
+      function makeChip(file, ico, thumb, st) {
+        strip.hidden = false;
+        var c = document.createElement('div');
+        c.className = 'upx-chip is-wait';
+        var head;
+        if (thumb) {
+          head = document.createElement('img');
+          head.className = 'upx-thumb';
+          head.src = thumb;
+          head.alt = '';
+        } else {
+          head = document.createElement('span');
+          head.className = 'upx-ico upx-ico-' + ico[1];
+          head.textContent = ico[0];
+        }
+        var meta = document.createElement('span');
+        meta.className = 'upx-meta';
+        var nm = document.createElement('b');
+        nm.className = 'upx-name';
+        nm.textContent = file.name || '未命名文件';
+        nm.title = nm.textContent;
+        var sub = document.createElement('i');
+        sub.className = 'upx-sub';
+        sub.appendChild(document.createTextNode(fmtSize(file.size) + ' · '));
+        var stEl = document.createElement('span');
+        stEl.className = 'upx-st';
+        stEl.textContent = st;
+        sub.appendChild(stEl);
+        meta.appendChild(nm);
+        meta.appendChild(sub);
+        var x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'upx-x';
+        x.setAttribute('aria-label', '移除');
+        x.textContent = '×';
+        c.appendChild(head); c.appendChild(meta); c.appendChild(x);
+        list.appendChild(c);
+        return { el: c, st: stEl, x: x };
+      }
+      /* 客户端预检：类型 / 大小即时判断（服务端校验仍是最终防线） */
+      function preCheck(file) {
+        var ext = extOf(file.name);
+        if (!ext) return '无法识别扩展名，请重命名后再上传';
+        if (DENY.indexOf(ext) >= 0) return '不支持的文件类型：.' + ext;
+        var isImg = IMG_EXT.indexOf(ext) >= 0;
+        if (!isImg && allow.indexOf(ext) < 0) return '不支持的附件类型：.' + ext + '（后台「基本设置」可调整白名单）';
+        var max = isImg ? imgMax : fileMax;
+        if (file.size > max) return '大小 ' + fmtSize(file.size) + ' 超过上限 ' + fmtSize(max);
+        return '';
+      }
+      function upload(file) {
+        if (!file) return;
+        /* 剪贴板图片可能没有文件名（部分浏览器）——按 MIME 补一个 */
+        if (!file.name && /^image\//.test(file.type || '') && window.File) {
+          try { file = new File([file], 'image.' + (String(file.type).split('/')[1] || 'png'), { type: file.type }); } catch (e) { /* 老浏览器忽略 */ }
+        }
+        var ext = extOf(file.name);
+        var isImg = IMG_EXT.indexOf(ext) >= 0;
+        var blob = null;
+        if (isImg && window.URL && URL.createObjectURL) { try { blob = URL.createObjectURL(file); } catch (e) { blob = null; } }
+        var chip = makeChip(file, isImg && !blob ? ['图片', 'img'] : iconOf(ext), blob, '等待上传');
+        var c = chip.el, stEl = chip.st;
+        chip.x.addEventListener('click', function () {
+          if (c.classList.contains('is-ok')) { okCount = Math.max(0, okCount - 1); updCap(); }
+          dropChip(c, blob);
+        });
+        var err = preCheck(file);
+        if (err) {
+          c.classList.remove('is-wait'); c.classList.add('is-err');
+          stEl.textContent = err;
+          toast('上传失败：' + err);
+          return;
+        }
+        var fd = new FormData();
+        var csrfInput = form ? form.querySelector('input[name=csrf]') : null;
+        fd.append('csrf', csrfInput ? csrfInput.value : '');
+        fd.append('file', file, file.name || 'file');
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', apiUrl('a=upload'), true);
+        xhr.setRequestHeader('X-Requested-With', 'fetch');
+        c.classList.remove('is-wait'); c.classList.add('is-up');
+        xhr.upload.onprogress = function (ev) {
+          if (ev.lengthComputable) stEl.textContent = '上传中 ' + Math.round(ev.loaded / ev.total * 100) + '%';
+        };
+        function fail(m) {
+          c.classList.remove('is-up'); c.classList.add('is-err');
+          stEl.textContent = m;
+          toast('上传失败：' + m);
+        }
+        xhr.onload = function () {
+          var j = null;
+          try { j = JSON.parse(xhr.responseText); } catch (e) { j = null; }
+          if (j && j.ok && j.md) {
+            c.classList.remove('is-up'); c.classList.add('is-ok');
+            stEl.textContent = '已上传';
+            insertMd(ta, j.md);
+            okCount++; updCap();
+          } else {
+            fail(diag(xhr, j));
+          }
+        };
+        xhr.onerror = function () { fail(diag(xhr, null)); };
+        xhr.send(fd);
+      }
+      function handle(files) {
+        Array.prototype.slice.call(files || []).forEach(upload);
+      }
+
       btn.addEventListener('click', function () { input.click(); });
       input.addEventListener('change', function () {
         var files = Array.prototype.slice.call(input.files || []);
         input.value = '';
-        var sel = input.getAttribute('data-upload-target');
-        var ta = (form && sel ? form.querySelector(sel) : null) || document.querySelector(sel);
-        if (!files.length || !ta) return;
-        files.forEach(function (file) {
-          var fd = new FormData();
-          fd.append('csrf', csrfOf(form));
-          fd.append('file', file);
-          var xhr = new XMLHttpRequest();
-          xhr.open('POST', apiUrl('a=upload'), true);
-          xhr.setRequestHeader('X-Requested-With', 'fetch');
-          xhr.onload = function () {
-            try {
-              var j = JSON.parse(xhr.responseText);
-              if (j && j.ok && j.md) { insertMd(ta, j.md); }
-              else { popMsg('asr-empty', (j && j.msg) || '上传失败'); }
-            } catch (e) { popMsg('asr-empty', '上传失败'); }
-          };
-          xhr.onerror = function () { popMsg('asr-empty', '上传失败（网络错误）'); };
-          xhr.send(fd);
+        handle(files);
+      });
+      /* v1.42.0 粘贴直传：剪贴板里有文件（截图 / 复制的文件）时拦截并上传；纯文本粘贴照常 */
+      ta.addEventListener('paste', function (ev) {
+        var dt = ev.clipboardData;
+        if (!dt || !dt.items) return;
+        var files = [];
+        for (var i = 0; i < dt.items.length; i++) {
+          var it = dt.items[i];
+          if (it.kind === 'file') {
+            var f = null;
+            try { f = it.getAsFile(); } catch (e) { f = null; }
+            if (f) files.push(f);
+          }
+        }
+        if (!files.length) return;
+        ev.preventDefault();
+        handle(files);
+      });
+      /* v1.42.0 拖拽直传：拖到输入框 / 表单卡片上松手即上传 */
+      var zone = form || ta;
+      ['dragenter', 'dragover'].forEach(function (t) {
+        zone.addEventListener(t, function (ev) {
+          if (!ev.dataTransfer || Array.prototype.indexOf.call(ev.dataTransfer.types || [], 'Files') < 0) return;
+          ev.preventDefault();
+          zone.classList.add('is-drag');
         });
+      });
+      ['dragleave', 'dragend', 'drop'].forEach(function (t) {
+        zone.addEventListener(t, function () { zone.classList.remove('is-drag'); });
+      });
+      zone.addEventListener('drop', function (ev) {
+        var fs = ev.dataTransfer && ev.dataTransfer.files;
+        if (!fs || !fs.length) return;
+        ev.preventDefault();
+        handle(fs);
       });
     });
   })();

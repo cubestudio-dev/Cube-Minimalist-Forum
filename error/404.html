@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>404 · 页面不存在</title>
+<style>
+:root { --bg:#f6f6f7; --card:#ffffff; --text:#1c1c1f; --muted:#75757e; --line:#e5e5ea; --accent:#0f766e; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#131316; --card:#1b1b20; --text:#ececf0; --muted:#9b9ba4; --line:#2b2b32; }
+}
+* { box-sizing: border-box; }
+body {
+  margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+  background:var(--bg); color:var(--text);
+  font:15px/1.8 system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  padding:24px;
+}
+.box { width:100%; max-width:440px; background:var(--card); border-radius:14px; padding:42px 34px 30px;
+  box-shadow:0 10px 40px -18px rgba(0,0,0,.25); text-align:center; }
+.code { font-size:60px; font-weight:800; letter-spacing:.04em; line-height:1.1; color:var(--accent); }
+.art { color:var(--accent); margin:8px 0 2px; opacity:.9; }
+h1 { font-size:19px; margin:8px 0 8px; }
+.sub { color:var(--muted); font-size:14px; margin:0 0 6px; }
+.tip { color:var(--muted); font-size:12.5px; margin:0 0 20px; }
+.acts { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-bottom:20px; }
+.acts a { display:inline-block; padding:8px 22px; border-radius:8px; font-size:14px; text-decoration:none; }
+.acts .pri { background:var(--accent); color:#fff; }
+.acts .pri:hover { filter:brightness(1.08); }
+.acts .gh { border:1px solid var(--line); color:var(--text); }
+.acts .gh:hover { border-color:var(--accent); color:var(--accent); }
+.brand { color:var(--muted); font-size:12px; opacity:.75; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="code">404</div>
+  <svg class="art" width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true"><circle cx="29" cy="27" r="13" stroke="#0f766e" stroke-width="3"/><path d="M39 37l15 15" stroke="#0f766e" stroke-width="3" stroke-linecap="round"/><path d="M23 27h12M24 21c1.8-2.6 4.4-3.8 7-3.8" stroke="#0f766e" stroke-width="2.4" stroke-linecap="round"/></svg>
+  <h1>页面不存在</h1>
+  <p class="sub">内容可能已被删除、改名，或链接本来就有误。</p>
+  <p class="tip">可以回首页逛逛，或在站内搜索想找的内容。</p>
+  <div class="acts">
+    <a class="pri" href="/">返回首页</a>
+    <a class="gh" href="javascript:location.reload()">刷新重试</a>
+  </div>
+  <p class="brand">Cube Minimalist Forum</p>
+</div>
+</body>
+</html>

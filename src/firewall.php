@@ -2069,7 +2069,7 @@ function fw_geo_lookup(array $ips): array
 
 /* ================= 拦截页面 ================= */
 
-/** 拒绝访问页（自带内联样式，不依赖站点资源） */
+/** 拒绝访问页（自带内联样式，不依赖站点资源；v1.42.0 与 error/*.html 自制错误页同一套视觉） */
 function fw_deny_page(int $code, string $msg, string $detail = ''): void
 {
     if (!headers_sent()) {
@@ -2080,21 +2080,28 @@ function fw_deny_page(int $code, string $msg, string $detail = ''): void
         header('Content-Type: text/html; charset=utf-8');
     }
     $site = cut_str((string)cfg('site_name', '本站'), 30);
+    $is429 = $code === 429;
+    $icon = $is429
+        ? '<circle cx="32" cy="32" r="26" stroke="#0f766e" stroke-width="3"/><path d="M32 18v15l10 6" stroke="#0f766e" stroke-width="3" stroke-linecap="round"/>'
+        : '<path d="M32 8l19 8v14c0 12-8 20-19 26C21 50 13 42 13 30V16l19-8z" stroke="#0f766e" stroke-width="3" stroke-linejoin="round"/><path d="M24 31l6 6 11-12" stroke="#0f766e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>';
     echo '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">';
-    echo '<meta name="robots" content="noindex"><title>' . ($code === 429 ? '请求过于频繁' : '访问受限') . '</title></head>';
+    echo '<meta name="robots" content="noindex"><title>' . ($is429 ? '请求过于频繁' : '访问受限') . '</title></head>';
     echo '<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f6f6f7;font:15px/1.8 system-ui,-apple-system,\'Segoe UI\',Roboto,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1c1c1f">';
-    echo '<div style="max-width:420px;margin:24px;padding:36px 32px;background:#fff;border-radius:14px;box-shadow:0 10px 40px -18px rgba(0,0,0,.25);text-align:center">';
-    echo '<div style="font-size:44px;line-height:1">' . ($code === 429 ? '⏳' : '⛔') . '</div>';
-    echo '<h1 style="font-size:18px;margin:14px 0 8px">' . e($msg) . '</h1>';
+    echo '<div style="max-width:440px;margin:24px;padding:40px 34px;background:#fff;border-radius:14px;box-shadow:0 10px 40px -18px rgba(0,0,0,.25);text-align:center">';
+    echo '<svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true">' . $icon . '</svg>';
+    echo '<div style="font-size:38px;font-weight:700;letter-spacing:.04em;color:#0f766e;margin-top:10px">' . (int)$code . '</div>';
+    echo '<h1 style="font-size:18px;margin:10px 0 8px">' . e($msg) . '</h1>';
     if ($detail !== '') {
-        echo '<p style="color:#75757e;margin:0 0 6px">' . e($detail) . '</p>';
+        echo '<p style="color:#75757e;margin:0 0 6px;font-size:14px">' . e($detail) . '</p>';
     }
-    if ($code === 403) {
-        echo '<p style="color:#75757e;font-size:13px;margin:0">如果你是本站管理员，请通过服务器后台检查并解除封禁（后台 → 安全防护），或把你的 IP 加入防火墙白名单。</p>';
+    if (!$is429) {
+        echo '<p style="color:#75757e;font-size:13px;margin:0 0 18px">如果你是本站管理员，请通过服务器后台检查并解除封禁（后台 → 安全防护），或把你的 IP 加入防火墙白名单。</p>';
     } else {
-        echo '<p style="color:#75757e;font-size:13px;margin:0">请稍后再试；如持续出现请联系站长。</p>';
+        echo '<p style="color:#75757e;font-size:13px;margin:0 0 18px">请稍后再试；如持续出现请联系站长。</p>';
     }
-    echo '<p style="color:#a0a0a8;font-size:12px;margin:16px 0 0">' . e($site) . ' · Cube Minimalist Forum</p>';
+    echo '<p style="margin:0 0 18px"><a href="/" style="display:inline-block;padding:8px 22px;border-radius:8px;background:#0f766e;color:#fff;font-size:14px;text-decoration:none">返回首页</a>'
+        . ' <a href="javascript:location.reload()" style="display:inline-block;padding:8px 22px;border-radius:8px;border:1px solid #e5e5ea;color:#1c1c1f;font-size:14px;text-decoration:none">刷新重试</a></p>';
+    echo '<p style="color:#a0a0a8;font-size:12px;margin:0">' . e($site) . ' · Cube Minimalist Forum</p>';
     echo '</div></body></html>';
     exit;
 }

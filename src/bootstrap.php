@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.41.2');
+    define('MF_VERSION', '1.42.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -233,6 +233,12 @@ function mf_header_sent(string $name): bool
  *     高延迟链路上省掉整页字节数，是“部分设备打不开”场景里最直接的减负手段。
  * 仅当正文为完整 HTML（doctype/<html 开头）且本次请求无致命错误时才参与协商缓存；
  * JSON / 重定向 / 资源出站（自带 Content-Length / Content-Encoding）自动透传不受影响。
+ * v1.42.0 修复「图片 / 附件上传成功却无法查看」：此前 gzip 分支不检查调用方是否已
+ * 手工声明 Content-Length——page_media() / page_asset() 等字节精确出站先设了定长，
+ * 碰上可压缩字节流（GIF 图片、txt / md / csv 附件等）时被压缩发送，实际字节数小于
+ * 已声明的 Content-Length → 浏览器按声明长度等待剩余字节直至超时 / 截断，表现正好是
+ * 「部分图片（GIF）与文本附件传上去却打不开」。现在：调用方显式声明 Content-Length
+ * 即视为字节精确响应，绝不 gzip（定长与压缩在语义上互斥）。
  * 调用方：index.php 最外层 ob_start('mf_http_out')；内层所有页面输出先收齐再统一终结。
  */
 function mf_http_out(string $chunk, int $ph): string
@@ -273,7 +279,10 @@ function mf_http_out(string $chunk, int $ph): string
     }
     $body = $raw;
     $zlibOn = (bool)@ini_get('zlib.output_compression');
-    if (!$zlibOn && !mf_header_sent('Content-Encoding')
+    /* v1.42.0：调用方已手工声明 Content-Length（媒体 / 资源 / 下载出站）= 字节精确响应，
+       绝不 gzip——定长声明与压缩改写在语义上互斥，强行压缩必然造成 Content-Length 与
+       实际发送字节不一致（浏览器挂起等待 / 响应被截断，附件图片「传上去却打不开」） */
+    if (!$zlibOn && !mf_header_sent('Content-Encoding') && !mf_header_sent('Content-Length')
         && stripos((string)($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''), 'gzip') !== false) {
         $gz = @gzencode($body, 6);
         if ($gz !== false && strlen($gz) < strlen($body)) {
@@ -396,4 +405,57 @@ function bind_domain_list(string $raw): array
         }
     }
     return array_values(array_unique($out));
+}
+
+/**
+ * v1.42.0 自制错误页 · 致命错误兜底：致命错误（E_ERROR / E_PARSE / E_CORE / E_COMPILE）
+ * 发生时渲染与全站一致的 500 错误页，替代 PHP 白屏 / 服务器默认错误页。
+ * 安全边界：仅在「尚未向浏览器发出任何字节」时接管（否则状态码不可改，静默让位避免二次破坏）；
+ * CLI / 普通警告 / 已有输出一律不介入。残页缓冲先丢弃，保证输出就是完整的错误页。
+ */
+register_shutdown_function('mf_fatal_page');
+
+function mf_fatal_page(): void
+{
+    $e = error_get_last();
+    if (!is_array($e) || !in_array((int)($e['type'] ?? 0), [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        return;
+    }
+    if (PHP_SAPI === 'cli' || defined('MF_FATAL_PAGE_SENT')) {
+        return;
+    }
+    /* 丢弃可能残留的半截页面（ob_end_clean 不触发 mf_http_out 的 FINAL 阶段，安全） */
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    if (headers_sent()) {
+        return; // 字节已出站（极端场景），接管只会更糟
+    }
+    define('MF_FATAL_PAGE_SENT', 1);
+    @http_response_code(500);
+    @header('Content-Type: text/html; charset=utf-8');
+    @header('Cache-Control: no-store');
+    $ver = MF_VERSION;
+    $msg = htmlspecialchars((string)($e['message'] ?? ''), ENT_QUOTES, 'UTF-8');
+    echo '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        . '<meta name="robots" content="noindex"><title>500 · 服务器开小差了</title></head>'
+        . '<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;'
+        . 'background:#f6f6f7;font:15px/1.8 system-ui,-apple-system,\'Segoe UI\',Roboto,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1c1c1f">'
+        . '<div style="max-width:460px;margin:24px;padding:40px 36px;background:#fff;border-radius:14px;'
+        . 'box-shadow:0 10px 40px -18px rgba(0,0,0,.25);text-align:center">'
+        . '<svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true">'
+        . '<circle cx="32" cy="32" r="27" stroke="#0f766e" stroke-width="3"/>'
+        . '<path d="M20 40c3-7 8-10 12-10s9 3 12 10" stroke="#0f766e" stroke-width="3" stroke-linecap="round"/>'
+        . '<circle cx="24" cy="25" r="2.6" fill="#0f766e"/><circle cx="40" cy="25" r="2.6" fill="#0f766e"/></svg>'
+        . '<div style="font-size:38px;font-weight:700;letter-spacing:.04em;color:#0f766e;margin-top:10px">500</div>'
+        . '<h1 style="font-size:18px;margin:10px 0 8px">服务器开小差了</h1>'
+        . '<p style="color:#75757e;font-size:13px;margin:0 0 4px">页面处理时遇到程序错误，请稍后刷新重试。</p>'
+        . '<p style="color:#a0a0a8;font-size:12px;margin:0 0 18px;word-break:break-all">错误信息：' . $msg . '</p>'
+        . '<p style="color:#75757e;font-size:13px;margin:0 0 18px">若反复出现，请联系站长检查服务器错误日志（data/logs/error.log）。</p>'
+        . '<a href="/" style="display:inline-block;padding:8px 22px;border-radius:8px;background:#0f766e;color:#fff;'
+        . 'font-size:14px;text-decoration:none">返回首页</a> '
+        . '<a href="javascript:location.reload()" style="display:inline-block;padding:8px 22px;border-radius:8px;'
+        . 'border:1px solid #e5e5ea;color:#1c1c1f;font-size:14px;text-decoration:none">刷新重试</a>'
+        . '<p style="color:#a0a0a8;font-size:12px;margin:18px 0 0">Cube Minimalist Forum · v' . $ver . '</p>'
+        . '</div></body></html>';
 }

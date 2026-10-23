@@ -261,7 +261,9 @@ function page_thread(): void
 /* ---------------- 发帖页 ---------------- */
 
 /* v1.32.0 附件上传工具条（发帖 / 回复 / 编辑表单共用；「允许上传图片 / 附件」关闭时不渲染）
-   交互由 app.js 接管：选文件 → 逐个上传 → 在目标输入框光标处插入 Markdown */
+   交互由 app.js 接管：选文件 / 粘贴 / 拖拽 → 逐个上传 → 在目标输入框光标处插入 Markdown；
+   v1.42.0：带上限 / 白名单 / 每帖附件数为 data 属性，客户端预检（类型 / 大小即时报错）
+   + 粘贴与拖拽直接进附件预览条（图片本地缩略 / 文件图标 + 名称 + 大小 + 进度） */
 function upload_toolbar(string $targetSel): string
 {
     if (!feat_on('upload')) {
@@ -277,10 +279,11 @@ function upload_toolbar(string $targetSel): string
             $accept .= ',.' . $x;
         }
     }
-    return '<div class="upload-bar">' .
+    return '<div class="upload-bar" data-upbar data-img-max="' . $imgMb . '" data-file-max="' . $fileMb . '"'
+        . ' data-exts="' . e(strtolower($ext)) . '" data-cap="' . (int)cfg('upload_per_post', 4) . '" data-ta="' . e($targetSel) . '">' .
         '<button type="button" class="btn btn-ghost btn-sm" data-upload-btn>📎 ' . t('图片 / 附件') . '</button>' .
         '<input type="file" multiple data-upload-input data-upload-target="' . e($targetSel) . '" accept="' . e($accept) . '" hidden>' .
-        '<span class="hint">' . t('图片') . ' ≤' . $imgMb . 'MB · ' . t('附件') . ' ≤' . $fileMb . 'MB' . ($ext !== '' ? '（' . e($ext) . '）' : '') . '</span>' .
+        '<span class="hint">' . t('图片') . ' ≤' . $imgMb . 'MB · ' . t('附件') . ' ≤' . $fileMb . 'MB' . ($ext !== '' ? '（' . e($ext) . '）' : '') . ' · ' . t('支持直接粘贴 / 拖拽') . '</span>' .
         '</div>';
 }
 
@@ -1110,15 +1113,27 @@ function page_media(): void
     if (!is_file($p)) {
         $notFound();
     }
+    $bin = @file_get_contents($p);
+    if ($bin === false || $bin === '') {
+        /* v1.42.0：文件存在但读不出（权限 / 属主异常 / 介质抖动读空）——明确 500 而非输出
+           空图片体（此前 200 + 空体让浏览器把「读不出」也当图片渲染，表观就是「图片打不开」） */
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo 'media unreadable (permission?)';
+        exit;
+    }
     header('X-Content-Type-Options: nosniff');
     header('Cache-Control: public, max-age=31536000, immutable');
     header('Content-Type: ' . $mimes[$ext]);
-    header('Content-Length: ' . (string)(int)@filesize($p));
-    echo (string)@file_get_contents($p);
+    header('Content-Length: ' . (string)strlen($bin));
+    echo $bin;
     exit;
 }
 
 /* ---------------- 404 ---------------- */
+/* v1.42.0 自制错误页：404 与 error/*.html 静态页同一套视觉（大号状态码 + 线条插画 + 行动按钮），
+   站内 404 保留全站导航（比纯静态页多「搜索一下」出路）；防火墙高频 404 计数不变 */
 function page_404(): void
 {
     http_response_code(404);
@@ -1127,8 +1142,18 @@ function page_404(): void
         fw_bump_404();
     }
     layout_header('页面不存在', 0);
-    echo '<div class="card notice-card"><b>404 · 页面不存在</b><p>内容可能已被删除，或链接有误。</p>' .
-        '<a class="btn btn-primary btn-sm" href="' . e(u('p=home')) . '">返回首页</a></div>';
+    echo '<div class="card notice-card errpage"><div class="errpage-code">404</div>'
+        . '<svg class="errpage-art" width="96" height="64" viewBox="0 0 96 64" fill="none" aria-hidden="true">'
+        . '<circle cx="40" cy="26" r="15" stroke="currentColor" stroke-width="3"/>'
+        . '<path d="M51 37l14 14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>'
+        . '<path d="M34 26h12M32 20c2-3 5-4 8-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+        . '<h1 class="errpage-title">404 · 页面不存在</h1>'
+        . '<p class="errpage-sub">内容可能已被删除，或链接有误。</p>'
+        . '<div class="errpage-actions">'
+        . '<a class="btn btn-primary btn-sm" href="' . e(u('p=home')) . '">返回首页</a>'
+        . '<a class="btn btn-ghost btn-sm" href="javascript:history.back()">返回上一页</a>'
+        . '<a class="btn btn-ghost btn-sm" href="' . e(u('p=search')) . '">搜索一下</a>'
+        . '</div></div>';
     layout_footer();
 }
 

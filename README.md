@@ -89,6 +89,19 @@ Apache 用户已内置 `.htaccess` 保护，nginx 用户需在站点配置中手
 location ~ ^/(data|src)/ { deny all; }
 ```
 
+v1.42.0 起自带自制错误页（`error/403.html` 等，Apache 已由 `.htaccess` 自动接管），nginx 用户建议追加：
+
+```nginx
+error_page 403 /error/403.html;
+error_page 404 /error/404.html;
+error_page 413 /error/413.html;
+error_page 500 /error/500.html;
+error_page 502 /error/502.html;
+error_page 503 /error/503.html;
+```
+
+同时请确认 `client_max_body_size` 不小于后台「内容与限制」里的附件上限（默认 10MB）——nginx 默认仅 1MB，会让「规定范围内的文件」在上传时被直接拒为 413（错误页已自带说明）；Apache + mod_fcgid 用户同理检查 `FcgidMaxRequestLen`（默认仅 128KB）。
+
 ### 安装完成后
 
 - 安装向导会在 `data/lock/install.lock` 留下安装锁，重复访问 install.php 会被拒绝；
