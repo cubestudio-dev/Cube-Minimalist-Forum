@@ -532,5 +532,13 @@ function update_apply(string $zipPath, array &$res): void
     if (function_exists('opcache_reset')) {
         @opcache_reset();
     }
+    /* v1.43.0：程序更新后清除静态快照——旧版本号页面快照（data/static/g/）会让游客
+     * 看到旧版页脚与旧标记，直到 TTL 过期；更新属程序级变更，全部快照一律重建 */
+    if (function_exists('mfs_clear_all')) {
+        $mfsN = @mfs_clear_all();
+        if (function_exists('log_action')) {
+            log_action('update_apply', '静态快照已清除 ' . (int)$mfsN . ' 张');
+        }
+    }
     $res = ['version' => $new, 'from' => $cur, 'files' => $applied, 'backup' => $bkName, 'migrate' => $migMsg, 'notes' => $notes];
 }

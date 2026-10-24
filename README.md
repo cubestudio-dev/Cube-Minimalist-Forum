@@ -139,6 +139,17 @@ error_page 503 /error/503.html;
 
 163 邮箱：`smtp.163.com:465`；Gmail：`smtp.gmail.com:465`（需应用专用密码）。
 
+### 发信 DNS 故障免疫（v1.43.0）
+
+服务器报 `php_network_getaddresses: getaddrinfo ... failed` 属**服务器本机域名解析组件故障**（resolv.conf 权限 / nsswitch 顺序 / 按 UID 出站拦截等），与邮箱服务商无关。v1.43.0 起发信连接内置**四层回退**：后台直连 IP → 标准域名解析 → 手工读 `/etc/hosts` → 纯 PHP UDP 公共 DNS，任何一层拿到 IP 即可发信（IP 直连经 `peer_name` 钉住证书校验，安全不变）。
+
+后台「邮件」页新增**「直连 IP（可选）」**兜底字段，一般无需填写。排查可一键完成：
+
+```bash
+sudo php tools/smtp-doctor.php /论坛目录 --fix --set-ip   # 体检 + 自动修复 + 自动配置
+sudo bash update.sh /论坛目录                             # 或者：一键更新 + 体检全套
+```
+
 ---
 
 ## 四、AI 配置（内容与用户名自动审核）

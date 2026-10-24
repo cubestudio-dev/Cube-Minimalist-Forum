@@ -1613,13 +1613,23 @@ function act_admin_icon_del(): void
 function act_admin_save_mail(): void
 {
     post_guard('csrf', 'smtp_host', 'smtp_from');
+    /* v1.43.0：直连 IP 按「提交了才更新」处理（与 ai 页同款纪律，避免任何旧表单误重置）；
+       非空时必须是合法 IP，否则拒绝保存 */
+    if (array_key_exists('smtp_direct_ip', $_POST)) {
+        $directIp = cut_str(trim((string)$_POST['smtp_direct_ip']), 45);
+        if ($directIp !== '' && !filter_var($directIp, FILTER_VALIDATE_IP)) {
+            act_err('直连 IP 格式不正确（应如 120.232.69.34，留空表示不使用）');
+        }
+        cfg_update(['smtp_direct_ip' => $directIp]);
+    }
     cfg_update([
         'smtp_host' => cut_str(post_str('smtp_host', 100), 100),
         'smtp_port' => max(1, min(65535, (int)($_POST['smtp_port'] ?? 465))),
         'smtp_from' => cut_str(post_str('smtp_from', 60), 60),
         'smtp_pass' => cut_str(post_str('smtp_pass', 100), 100),
     ]);
-    log_action('admin_save_mail', 'SMTP：' . (string)cfg('smtp_host') . ':' . (int)cfg('smtp_port'));
+    $dip = (string)cfg('smtp_direct_ip', '');
+    log_action('admin_save_mail', 'SMTP：' . (string)cfg('smtp_host') . ':' . (int)cfg('smtp_port') . ($dip !== '' ? '（直连 ' . $dip . '）' : ''));
     act_ok('邮件设置已保存', u('p=admin&tab=mail'));
 }
 
@@ -1628,6 +1638,7 @@ function act_admin_test_mail(): void
     $ov = [
         'host' => post_str('smtp_host', 100),
         'port' => max(1, min(65535, (int)($_POST['smtp_port'] ?? 465))),
+        'direct_ip' => trim((string)($_POST['smtp_direct_ip'] ?? (string)cfg('smtp_direct_ip', ''))),
         'from' => post_str('smtp_from', 60),
         'pass' => post_str('smtp_pass', 100),
     ];

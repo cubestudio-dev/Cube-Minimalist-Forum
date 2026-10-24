@@ -420,6 +420,7 @@ function admin_tab_mail(): void
         '<label class="field"><span class="field-l">' . t('SMTP 主机') . '</span><input class="input" name="smtp_host" required placeholder="smtp.qq.com" value="' . e((string)cfg('smtp_host')) . '"></label>' .
         '<label class="field"><span class="field-l">' . t('SMTP 端口') . '</span><input class="input" name="smtp_port" type="number" min="1" max="65535" value="' . (int)cfg('smtp_port', 465) . '"><span class="hint">465 为 SSL；587 / 25 自动尝试 STARTTLS</span></label>' .
         '</div>' .
+        '<label class="field"><span class="field-l">' . t('直连 IP（可选）') . '</span><input class="input" name="smtp_direct_ip" placeholder="留空即可；服务器域名解析故障时填写，如 120.232.69.34" value="' . e((string)cfg('smtp_direct_ip', '')) . '"><span class="hint">DNS 故障兜底开关：填写后跳过域名解析直接连该 IP，证书校验仍按 SMTP 主机名进行，安全性不变。v1.43.0 起解析层已内置四层回退（域名 → hosts → 公共 DNS → 此字段），一般无需填写；IP 变化时请更新（tools/smtp-doctor.php 可自动获取）</span></label>' .
         '<label class="field"><span class="field-l">' . t('发信邮箱') . '</span><input class="input" name="smtp_from" type="email" required value="' . e((string)cfg('smtp_from')) . '"></label>' .
         '<label class="field"><span class="field-l">' . t('授权码') . '</span><input class="input" name="smtp_pass" value="' . e((string)cfg('smtp_pass')) . '" placeholder="邮箱服务商提供的 SMTP 授权码（非登录密码）"></label>' .
         '<div class="form-foot">' .
@@ -429,7 +430,7 @@ function admin_tab_mail(): void
         '<div class="field"><span class="field-l">' . t('测试收件邮箱') . '</span><div class="code-row"><input class="input" id="mail-test-to" type="email" placeholder="填写一个收件邮箱，当场发一封测试邮件">' .
         '<button class="btn btn-ghost" type="button" data-admin-test="mail" data-to="#mail-test-to">发送测试邮件</button></div>' .
         '<span class="test-msg muted"></span></div>' .
-        admin_restore_btn('smtp_host,smtp_port,smtp_from,smtp_pass') . '</div>';
+        admin_restore_btn('smtp_host,smtp_port,smtp_direct_ip,smtp_from,smtp_pass') . '</div>';
 }
 
 /* ---------------- AI ---------------- */
