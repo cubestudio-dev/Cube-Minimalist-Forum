@@ -1067,65 +1067,335 @@
     }
   }
 
-  /* ---------- v1.44.0 功能一键自检（后台·监控）：一次跑完全站测试 + 一键修复 ---------- */
+  /* ---------- v1.45.0 功能一键自检（后台·监控）：逐项步进实时进度版 ----------
+     检查进度 / 修复进度 / 具体清单 / 运行日志全程可视：
+     · 清单 11 项常驻，状态六态实时点亮（待检测 / 检测中 / 通过 / 警告 / 失败 / 跳过）
+     · 「检查进度」条逐项推进；远程项（真实发信 + AI 真调用）不再黑盒转圈
+     · 「停止」可随时中断，「继续检测」从断点续跑（远程项不重复执行）
+     · 「一键修复（N）」逐项修复，「修复进度」条同步推进，修完自动复检受影响项
+     · 终端式日志区逐行滚动输出，支持自动滚动 / 复制 / 下载 .txt */
   (function () {
+    var CAT = window.SC_CATALOG || [];
     var scRun = document.getElementById('scRun');
-    if (!scRun) return;
-    var scOut = document.getElementById('scOut');
+    var scRows = document.getElementById('scRows');
+    if (!CAT.length || !scRun || !scRows) return;
+    var scStop = document.getElementById('scStop');
     var scFix = document.getElementById('scFix');
     var scRemote = document.getElementById('scRemote');
-    var scKeys = [];
-    var SC_MARK = {
-      pass: ['✔', 'var(--ok, #15803d)'],
-      warn: ['▲', '#b45309'],
-      fail: ['✘', 'var(--danger, #dc2626)'],
-      skip: ['—', 'inherit']
+    var scProg = document.getElementById('scProg');
+    var scProgTx = document.getElementById('scProgTx');
+    var scCur = document.getElementById('scCur');
+    var scSum = document.getElementById('scSum');
+    var scLog = document.getElementById('scLog');
+    var scLogN = document.getElementById('scLogN');
+    var scAuto = document.getElementById('scAuto');
+    var sfProgRow = document.getElementById('sfProgRow');
+    var sfProg = document.getElementById('sfProg');
+    var sfProgTx = document.getElementById('sfProgTx');
+    var logCopy = document.getElementById('scLogCopy');
+    var logDl = document.getElementById('scLogDl');
+
+    var KEYS = CAT.map(function (c) { return c.key; });
+    var NAME = {};
+    var TOTAL = KEYS.length;
+    CAT.forEach(function (c) { NAME[c.key] = c.name; });
+    var FIX_NAME = {
+      repair_dirs: '修复目录权限', rebuild_index: '重建帖子索引', clear_snapshot: '清除静态快照',
+      clean_temp: '清理陈旧锁与探针残留', backup_damaged: '备份损坏数据文件'
     };
-    function renderItems(items) {
-      scKeys = [];
-      var html = '<div class="mon-grid">';
-      items.forEach(function (x) {
-        var m = SC_MARK[x.state] || SC_MARK.warn;
-        if (x.fixable && x.fixkey && scKeys.indexOf(x.fixkey) < 0) scKeys.push(x.fixkey);
-        html += '<div class="mon-cell' + (x.state === 'fail' ? ' cell-bad' : '') + '" style="grid-column:1/-1;text-align:left;display:block">'
-          + '<b style="color:' + m[1] + ';display:block;margin-bottom:2px">' + m[0] + ' ' + escHtml(x.name || '') + '</b>'
-          + '<span style="white-space:normal;word-break:break-word">' + escHtml(x.detail || '')
-          + (x.fixable ? ' <i style="font-style:normal;color:#15803d">〔可自动修复〕</i>' : '') + '</span></div>';
+    var FIX2CHECK = { repair_dirs: 'rw', rebuild_index: 'store', clear_snapshot: 'snapshot', clean_temp: 'temp', backup_damaged: 'store' };
+    var IC = {
+      pass: ['✔', 'sc-pass'],
+      warn: ['▲', 'sc-warn'],
+      fail: ['✘', 'sc-fail'],
+      skip: ['—', 'sc-skip'],
+      run:  ['◐', 'sc-run'],
+      pend: ['○', 'sc-pend']
+    };
+    var results = {};   /* key -> item（服务端返回的原样结果） */
+    var logs = [];      /* 日志行（随报告落盘，回看可见） */
+    var stopReq = false;
+    var running = false;
+    var phase = 'fresh'; /* fresh | running | paused | done */
+
+    function nowT() {
+      var d = new Date();
+      var p = function (n) { return ('0' + n).slice(-2); };
+      return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+    }
+    function logLine(txt) {
+      logs.push(txt);
+      if (logs.length > 400) { logs.splice(0, logs.length - 400); }
+      var line = document.createElement('div');
+      line.textContent = '[' + nowT() + '] ' + txt;
+      scLog.appendChild(line);
+      if (scLogN) scLogN.textContent = logs.length + ' 行';
+      if (scAuto && scAuto.checked) scLog.scrollTop = scLog.scrollHeight;
+    }
+    function setIc(key, st) {
+      var el = document.getElementById('scIc-' + key);
+      var m = IC[st] || IC.pend;
+      if (el) { el.textContent = m[0]; el.className = 'sc-ic ' + m[1]; }
+    }
+    function setDt(key, html) {
+      var el = document.getElementById('scDt-' + key);
+      if (el) el.innerHTML = html;
+    }
+    function setCur(txt) { if (scCur) scCur.textContent = txt; }
+    function progSet(el, tx, done, total, label) {
+      if (tx) tx.textContent = label + ' ' + done + '/' + total;
+      if (el) el.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
+    }
+    function orderedItems() {
+      return KEYS.map(function (k) { return results[k]; }).filter(Boolean);
+    }
+    function fixables() {
+      var out = [];
+      orderedItems().forEach(function (x) {
+        if (x.fixable && x.fixkey && out.indexOf(x.fixkey) < 0) out.push(x.fixkey);
       });
-      html += '</div>';
-      scOut.innerHTML = html;
-      scOut.hidden = false;
-      scFix.hidden = scKeys.length === 0;
-      scFix.textContent = scKeys.length ? '一键修复可修复项（' + scKeys.length + '）' : '一键修复可修复项';
+      return out;
+    }
+    function nextPending() {
+      for (var i = 0; i < KEYS.length; i++) { if (!results[KEYS[i]]) return KEYS[i]; }
+      return null;
+    }
+    function doneCount() {
+      var n = 0; KEYS.forEach(function (k) { if (results[k]) n++; });
+      return n;
+    }
+    function sumOf(items) {
+      var s = { pass: 0, warn: 0, fail: 0, skip: 0 };
+      items.forEach(function (x) { s[x.state] = (s[x.state] || 0) + 1; });
+      return s;
+    }
+    function renderSum(s) {
+      if (!scSum) return;
+      if (!s) { scSum.innerHTML = ''; return; }
+      scSum.innerHTML =
+        '<span class="sc-ok">通过 ' + (s.pass || 0) + '</span> · ' +
+        '<span class="sc-warn-tx">警告 ' + (s.warn || 0) + '</span> · ' +
+        '<span class="sc-fail-tx">失败 ' + (s.fail || 0) + '</span> · ' +
+        '<span class="sc-skip-tx">跳过 ' + (s.skip || 0) + '</span>';
+    }
+    function applyItem(key, x, ms, tag) {
+      results[key] = x;
+      var m = IC[x.state] || IC.warn;
+      setIc(key, x.state);
+      setDt(key, escHtml(x.detail || '') + (x.fixable ? ' <i style="font-style:normal;color:var(--ok)" class="sc-fixtag">〔可自动修复〕</i>' : '') +
+        ' <span class="sc-ms">' + (tag ? tag + ' · ' : '') + (ms || 0) + ' ms</span>');
+      var row = document.getElementById('scRow-' + key);
+      if (row) row.className = x.state === 'fail' ? 'sc-row-bad' : '';
+      logLine(m[0] + (tag ? ' ' + tag + ' ' : ' ') + NAME[key] + '（' + (ms || 0) + ' ms）：' + (x.detail || ''));
+    }
+    function showFixBtn() {
+      var fk = fixables();
+      if (scFix) {
+        scFix.hidden = fk.length === 0;
+        scFix.disabled = false;
+        scFix.textContent = fk.length ? '一键修复（' + fk.length + '）' : '一键修复';
+      }
+    }
+    /* 收尾：落盘报告（含日志）→ 汇总点亮 → 决定是否亮出修复按钮 */
+    function finishRun(after) {
+      var items = orderedItems();
+      if (!items.length) { if (after) after(); return; }
+      var s = sumOf(items);
+      postForm(apiUrl('a=admin_sc_finish'), {
+        items: JSON.stringify(items),
+        logs: JSON.stringify(logs.slice(-200)),
+        remote: scRemote && scRemote.checked ? 1 : 0
+      }, function (res) {
+        renderSum((res && res.ok && res.sum) ? res.sum : s);
+        var tail = '—— 自检完成：通过 ' + (s.pass || 0) + ' / 警告 ' + (s.warn || 0) + ' / 失败 ' + (s.fail || 0) + ' / 跳过 ' + (s.skip || 0) + ' ——';
+        logLine(tail);
+        toast('自检完成：通过 ' + (s.pass || 0) + ' / 警告 ' + (s.warn || 0) + ' / 失败 ' + (s.fail || 0) + ' / 跳过 ' + (s.skip || 0));
+        if (res && !res.ok) logLine('⚠ 报告落盘失败：' + (res.msg || '未知原因') + '（本地结果仍可见）');
+        showFixBtn();
+        if (after) after();
+      });
+    }
+    function setBtn(mode) {
+      if (mode === 'running') {
+        scRun.disabled = true;
+        scRun.textContent = scRemote && scRemote.checked ? '自检中…（含真实发信与 AI 调用）' : '自检中…';
+        if (scStop) { scStop.hidden = false; scStop.disabled = false; }
+        return;
+      }
+      if (scStop) scStop.hidden = true;
+      scRun.disabled = false;
+      if (mode === 'resume') { scRun.textContent = '继续检测'; phase = 'paused'; }
+      else if (mode === 'rerun') { scRun.textContent = '重新自检'; phase = 'done'; }
+      else { scRun.textContent = '开始自检'; phase = 'fresh'; }
+    }
+    function resetRun() {
+      results = {};
+      logs = [];
+      scLog.innerHTML = '';
+      if (scLogN) scLogN.textContent = '';
+      KEYS.forEach(function (k) {
+        setIc(k, 'pend');
+        setDt(k, '<span class="muted">待检测</span>');
+        var row = document.getElementById('scRow-' + k);
+        if (row) row.className = '';
+      });
+      progSet(scProg, scProgTx, 0, TOTAL, '检查进度');
+      if (sfProgRow) sfProgRow.hidden = true;
+      progSet(sfProg, sfProgTx, 0, 0, '修复进度');
+      renderSum(null);
+      if (scFix) scFix.hidden = true;
+    }
+    function runLoop() {
+      if (stopReq) {
+        running = false;
+        setBtn('resume');
+        setCur('已停止：完成 ' + doneCount() + '/' + TOTAL + '——点「继续检测」从断点接着跑（已完成项不重复）');
+        logLine('⏸ 已停止（完成 ' + doneCount() + '/' + TOTAL + '）');
+        return;
+      }
+      var key = nextPending();
+      if (!key) {
+        running = false;
+        progSet(scProg, scProgTx, TOTAL, TOTAL, '检查进度');
+        setCur('全部 ' + TOTAL + ' 项检测完毕。');
+        setBtn('rerun');
+        finishRun();
+        return;
+      }
+      var idx = doneCount();
+      var c = CAT[KEYS.indexOf(key)];
+      progSet(scProg, scProgTx, idx, TOTAL, '检查进度');
+      setCur('正在检测（' + (idx + 1) + '/' + TOTAL + '）：' + c.name + (c.remote ? '（远程真实测试，可能需要数秒到数十秒）' : '') + '…');
+      setIc(key, 'run');
+      logLine('▶ ' + c.name + (c.remote ? '〔远程〕' : '') + '…');
+      postForm(apiUrl('a=admin_sc_step'), { key: key, remote: scRemote && scRemote.checked ? 1 : 0 }, function (res) {
+        if (!res || !res.ok || !res.item) {
+          var why = (res && res.msg) ? res.msg : '网络错误，请重试';
+          applyItem(key, { key: key, state: 'fail', detail: '通信失败：' + why }, 0);
+        } else {
+          applyItem(key, res.item, res.ms || 0);
+        }
+        progSet(scProg, scProgTx, doneCount(), TOTAL, '检查进度');
+        setTimeout(runLoop, 280); /* 轻微步进间隔，让进度可见（远程项本身耗时，不受影响） */
+      });
     }
     scRun.addEventListener('click', function () {
-      scRun.disabled = true;
-      var remote = scRemote && scRemote.checked ? 1 : 0;
-      scRun.textContent = remote ? '自检中…（含真实发信与 AI 调用，最长约 3 分钟）' : '自检中…';
-      scOut.hidden = true;
-      scFix.hidden = true;
-      postForm(apiUrl('a=admin_selfcheck'), { remote: remote }, function (res) {
-        scRun.disabled = false;
-        scRun.textContent = '重新自检';
-        if (!res.ok || !res.items) { toast(res.msg || '自检失败，请重试'); return; }
-        renderItems(res.items);
-        var s = res.sum || {};
-        toast('自检完成：通过 ' + (s.pass || 0) + ' / 警告 ' + (s.warn || 0) + ' / 失败 ' + (s.fail || 0) + ' / 跳过 ' + (s.skip || 0) + '（' + (res.ms || 0) + ' ms）');
-      });
+      if (running || phase === 'running') return;
+      if (phase === 'done' || phase === 'fresh' && nextPending() === null) resetRun();
+      running = true;
+      stopReq = false;
+      setBtn('running');
+      logLine('—— 开始自检（共 ' + TOTAL + ' 项，' + (scRemote && scRemote.checked ? '含远程真实测试' : '仅本地项') + '）——');
+      runLoop();
     });
-    scFix.addEventListener('click', function () {
-      if (!scKeys.length) return;
+    if (scStop) scStop.addEventListener('click', function () {
+      stopReq = true;
+      scStop.disabled = true;
+      setCur('正在停止…（当前项跑完后中断）');
+    });
+    /* 一键修复：逐项修复 → 修复进度推进 → 修完自动复检受影响项 → 再落盘 */
+    if (scFix) scFix.addEventListener('click', function () {
+      var fks = fixables();
+      if (!fks.length || running) return;
+      running = true;
+      stopReq = false;
       scFix.disabled = true;
-      scFix.textContent = '修复中…';
-      postForm(apiUrl('a=admin_selffix'), { keys: scKeys.join(',') }, function (res) {
-        scFix.disabled = false;
-        scFix.textContent = scKeys.length ? '一键修复可修复项（' + scKeys.length + '）' : '一键修复可修复项';
-        if (!res.ok && !res.log) { toast(res.msg || '修复失败，请重试'); return; }
-        var lines = (res.log || []).map(function (l) { return (l.ok ? '✔ ' : '✘ ') + l.name + '：' + l.msg; });
-        scOut.innerHTML = '<details class="err-box" open style="margin-bottom:10px"><summary>修复日志（' + lines.length + ' 项）</summary><pre>' + escHtml(lines.join('\n')) + '</pre></details>' + scOut.innerHTML;
-        toast(res.ok ? '修复完成，建议重新自检确认' : '修复完成（部分失败，见日志）');
-      });
+      scRun.disabled = true;
+      if (scStop) scStop.hidden = true;
+      if (sfProgRow) sfProgRow.hidden = false;
+      progSet(sfProg, sfProgTx, 0, fks.length, '修复进度');
+      logLine('—— 开始一键修复（' + fks.length + ' 项 · 保守修复：先备份，绝不自动删数据）——');
+      var i = 0;
+      var step = function () {
+        if (i >= fks.length) {
+          /* 修复完成：自动复检受影响项（本地模式，不重复远程调用） */
+          var cks = [];
+          fks.forEach(function (f) { var ck = FIX2CHECK[f]; if (ck && cks.indexOf(ck) < 0) cks.push(ck); });
+          setCur('修复完成，自动复检受影响项（' + cks.map(function (k) { return NAME[k]; }).join('、') + '）…');
+          logLine('—— 修复完成，自动复检受影响项 ——');
+          var j = 0;
+          var recheck = function () {
+            if (j >= cks.length) {
+              running = false;
+              scFix.disabled = false;
+              scRun.disabled = false;
+              setBtn('rerun');
+              progSet(sfProg, sfProgTx, fks.length, fks.length, '修复进度');
+              finishRun();
+              return;
+            }
+            var ck = cks[j++];
+            delete results[ck];
+            setIc(ck, 'run');
+            setCur('复检（' + j + '/' + cks.length + '）：' + NAME[ck] + '…');
+            logLine('▶ 〔复检〕' + NAME[ck] + '…');
+            postForm(apiUrl('a=admin_sc_step'), { key: ck, remote: 0 }, function (res) {
+              if (res && res.ok && res.item) applyItem(ck, res.item, res.ms || 0, '〔复检〕');
+              else logLine('⚠ 〔复检〕' + NAME[ck] + '：通信失败，保持原状态');
+              setTimeout(recheck, 280);
+            });
+          };
+          recheck();
+          return;
+        }
+        var fk = fks[i++];
+        setCur('正在修复（' + i + '/' + fks.length + '）：' + (FIX_NAME[fk] || fk) + '…');
+        logLine('▶ 〔修复〕' + (FIX_NAME[fk] || fk) + '…');
+        postForm(apiUrl('a=admin_sf_step'), { key: fk }, function (res) {
+          var entries = (res && res.log) || [];
+          entries.forEach(function (l) {
+            logLine((l.ok ? '✔ 〔修复〕' : '✘ 〔修复〕') + l.name + '：' + l.msg);
+          });
+          if (!res || !res.ok) logLine('⚠ 〔修复〕' + (FIX_NAME[fk] || fk) + '：执行异常' + ((res && res.msg) ? '——' + res.msg : ''));
+          progSet(sfProg, sfProgTx, i, fks.length, '修复进度');
+          setTimeout(step, 280);
+        });
+      };
+      step();
     });
+    /* 日志复制 / 下载 */
+    function logText() { return logs.join('\n'); }
+    if (logCopy) logCopy.addEventListener('click', function () {
+      var txt = logText();
+      if (!txt) { toast('暂无日志——先跑一次自检'); return; }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(function () { toast('日志已复制到剪贴板'); }, function () { fallbackCopy(txt, function () { toast('日志已复制到剪贴板'); }); });
+      } else {
+        fallbackCopy(txt, function () { toast('日志已复制到剪贴板'); });
+      }
+    });
+    if (logDl) logDl.addEventListener('click', function () {
+      var txt = logText();
+      if (!txt) { toast('暂无日志——先跑一次自检'); return; }
+      var d = new Date();
+      var p = function (n) { return ('0' + n).slice(-2); };
+      var name = 'selfcheck-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '.txt';
+      var blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); if (a.parentNode) a.parentNode.removeChild(a); }, 800);
+      toast('日志已下载：' + name);
+    });
+    /* 进页回看：上次自检的运行日志（服务端存档）预填日志区 */
+    (function () {
+      var last = window.SC_LAST_LOGS || [];
+      if (!last.length || !scLog) return;
+      var head = document.createElement('div');
+      head.className = 'sc-log-head';
+      head.textContent = '— — — 上次自检日志（存档，点「开始自检」开始新一轮）— — —';
+      scLog.appendChild(head);
+      last.forEach(function (l) {
+        var line = document.createElement('div');
+        line.textContent = String(l);
+        scLog.appendChild(line);
+      });
+      if (scLogN) scLogN.textContent = last.length + ' 行（存档）';
+      logs = last.map(String);
+      scLog.scrollTop = scLog.scrollHeight;
+    })();
   })();
 
   /* ---------- v1.25.0 板块发帖权限面板：类型切换时联动显示白名单输入（v1.27.0 三选） ---------- */

@@ -117,9 +117,12 @@ function route_action(string $a): void
         case 'admin_test_mail':  admin_tab_guard(); act_admin_test_mail(); return;
         case 'admin_save_ai':    admin_tab_guard(); act_admin_save_ai(); return;
         case 'admin_test_ai':    admin_tab_guard(); act_admin_test_ai(); return;
-        /* v1.44.0 功能一键自检 + 自动修复（后台「监控」标签页） */
+        /* v1.44.0 功能一键自检 + 自动修复（后台「监控」标签页）；v1.45.0 增加逐项步进实时进度动作 */
         case 'admin_selfcheck':  admin_tab_guard(); act_admin_selfcheck(); return;
         case 'admin_selffix':    admin_tab_guard(); act_admin_selffix(); return;
+        case 'admin_sc_step':    admin_tab_guard(); act_admin_sc_step(); return;
+        case 'admin_sc_finish':  admin_tab_guard(); act_admin_sc_finish(); return;
+        case 'admin_sf_step':    admin_tab_guard(); act_admin_sf_step(); return;
         case 'admin_patrol_now': admin_tab_guard(); act_admin_patrol_now(); return;
         case 'admin_model_new':   admin_tab_guard(); act_admin_model_new(); return;
         case 'admin_model_save':  admin_tab_guard(); act_admin_model_save(); return;
@@ -1797,6 +1800,97 @@ function act_admin_selffix(): void
         }
     }
     log_action('admin_selffix', '自检一键修复：' . implode('；', array_map(static fn (array $l): string => $l['name'] . '——' . $l['msg'], $log)));
+    json_response(['ok' => $okAll, 'log' => $log]);
+}
+
+/** v1.45.0 自检实时进度 · 逐项执行：前端每跑一项请求一次，进度条 / 清单 / 日志实时点亮 */
+function act_admin_sc_step(): void
+{
+    $key = trim((string)($_POST['key'] ?? ''));
+    if (!in_array($key, selfcheck_item_keys(), true)) {
+        json_response(['ok' => false, 'msg' => '未知自检项']);
+    }
+    $remote = !empty($_POST['remote']);
+    $t0 = microtime(true);
+    try {
+        $item = selfcheck_run_item($key, $remote);
+    } catch (Throwable $e) {
+        /* 单项异常不拖垮整场：按 fail 项返回，原因给到前端日志 */
+        $item = ['key' => $key, 'name' => $key, 'state' => 'fail', 'detail' => '该项执行异常：' . cut_str($e->getMessage(), 160)];
+    }
+    json_response(['ok' => true, 'item' => $item, 'ms' => (int)round((microtime(true) - $t0) * 1000)]);
+}
+
+/** v1.45.0 自检实时进度 · 收尾落盘：前端汇总逐项结果提交（服务端按目录白名单重整，日志随报告存档可回看） */
+function act_admin_sc_finish(): void
+{
+    $names = [];
+    foreach (selfcheck_catalog() as $c) {
+        $names[(string)$c['key']] = (string)$c['name'];
+    }
+    $fixKeys = ['repair_dirs', 'rebuild_index', 'clear_snapshot', 'clean_temp', 'backup_damaged'];
+    $in = json_decode((string)($_POST['items'] ?? '[]'), true);
+    if (!is_array($in)) {
+        json_response(['ok' => false, 'msg' => '报告数据无效']);
+    }
+    $items = [];
+    $seen = [];
+    foreach ($in as $x) {
+        if (!is_array($x)) {
+            continue;
+        }
+        $k = (string)($x['key'] ?? '');
+        if (!isset($names[$k]) || isset($seen[$k])) {
+            continue;
+        }
+        $seen[$k] = true;
+        $st = (string)($x['state'] ?? 'warn');
+        if (!in_array($st, ['pass', 'warn', 'fail', 'skip'], true)) {
+            $st = 'warn';
+        }
+        $fk = (string)($x['fixkey'] ?? '');
+        $items[] = [
+            'key'     => $k,
+            'name'    => $names[$k],
+            'state'   => $st,
+            'detail'  => cut_str(trim((string)($x['detail'] ?? '')), 600),
+            'fixable' => !empty($x['fixable']) && in_array($fk, $fixKeys, true),
+            'fixkey'  => in_array($fk, $fixKeys, true) ? $fk : '',
+        ];
+    }
+    if (!$items) {
+        json_response(['ok' => false, 'msg' => '报告为空']);
+    }
+    $sum = ['pass' => 0, 'warn' => 0, 'fail' => 0, 'skip' => 0];
+    foreach ($items as $x) {
+        $sum[$x['state']]++;
+    }
+    $logs = json_decode((string)($_POST['logs'] ?? '[]'), true);
+    if (!is_array($logs)) {
+        $logs = [];
+    }
+    $logs = array_slice(array_map(static fn ($l): string => cut_str((string)$l, 300), $logs), -200);
+    selfcheck_last_write(['ts' => time(), 'remote' => !empty($_POST['remote']), 'items' => $items, 'sum' => $sum, 'logs' => $logs]);
+    log_action('admin_selfcheck', '功能一键自检（实时模式）：通过 ' . $sum['pass'] . ' / 警告 ' . $sum['warn'] . ' / 失败 ' . $sum['fail'] . ' / 跳过 ' . $sum['skip'] . (!empty($_POST['remote']) ? '（含远程真实测试）' : ''));
+    json_response(['ok' => true, 'sum' => $sum]);
+}
+
+/** v1.45.0 修复实时进度 · 逐项修复：一次只修一项，前端逐项推进「修复进度」并即时落日志 */
+function act_admin_sf_step(): void
+{
+    $allowed = ['repair_dirs', 'rebuild_index', 'clear_snapshot', 'clean_temp', 'backup_damaged'];
+    $k = trim((string)($_POST['key'] ?? ''));
+    if (!in_array($k, $allowed, true)) {
+        json_response(['ok' => false, 'msg' => '未知修复项']);
+    }
+    $log = selffix_run([$k]);
+    $okAll = true;
+    foreach ($log as $l) {
+        if (empty($l['ok'])) {
+            $okAll = false;
+        }
+    }
+    log_action('admin_selffix', '自检一键修复（单项 ' . $k . '）：' . implode('；', array_map(static fn (array $l): string => $l['name'] . '——' . $l['msg'], $log)));
     json_response(['ok' => $okAll, 'log' => $log]);
 }
 

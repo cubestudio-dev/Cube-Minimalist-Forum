@@ -1291,21 +1291,62 @@ function admin_tab_monitor(): void
     }
     echo '</div>';
 
-    /* v1.44.0 功能一键自检：一次跑完全站功能测试 + 可自动修复（邮箱 / AI / 搜索 / 读写 / 文件完整性等） */
+    /* v1.44.0 功能一键自检 · v1.45.0 实时进度升级：
+       检测清单 11 项常驻（六态实时点亮）+「检查进度」条 +「修复进度」条 + 终端式运行日志（复制 / 下载 / 自动滚动）
+       ——检查与修复全程逐项步进，不再黑盒转圈；报告与日志落盘 data/selfcheck.php 可回看。 */
     $scLast = selfcheck_last_read();
     $scSum = is_array($scLast['sum'] ?? null) ? $scLast['sum'] : [];
+    $scLastItems = [];
+    foreach ((is_array($scLast['items'] ?? null) ? $scLast['items'] : []) as $sx) {
+        if (is_array($sx) && isset($sx['key'])) {
+            $scLastItems[(string)$sx['key']] = $sx;
+        }
+    }
+    $scCat = selfcheck_catalog();
+    $scN = count($scCat);
+    echo '<script>window.SC_CATALOG=' . json_encode($scCat, JSON_UNESCAPED_UNICODE) . ';window.SC_LAST_LOGS=' . json_encode(is_array($scLast['logs'] ?? null) ? array_slice(array_map('strval', $scLast['logs']), -200) : [], JSON_UNESCAPED_UNICODE) . ';</script>';
     echo '<div class="card form-card"><h2 class="card-title">' . t('功能一键自检') . '</h2>';
-    echo '<p class="hint">一次跑完：环境基线 / 读写 / 存储完整性与帖子索引 / 会话 / 程序文件完整性（manifest 校验，专抓「升级不完整、文件缺失、Call to undefined function」类故障）/ 站内搜索 / AI 审核队列 / 静态快照。勾选远程项还会<b>用管理员注册邮箱真实发一封测试邮件</b>、<b>真实调用一次 AI 审核</b>（较慢，数秒到数十秒）。发现的问题逐项给出结论与修复办法，可自动修复项支持一键修复（保守修复：先备份，绝不自动删数据）。</p>';
+    echo '<p class="hint">一次跑完：环境基线 / 读写 / 存储完整性与帖子索引 / 会话 / 程序文件完整性（manifest 校验，专抓「升级不完整、文件缺失、Call to undefined function」类故障）/ 站内搜索 / AI 审核队列 / 静态快照。<b>逐项实时执行</b>：清单逐项点亮「检查进度」，可自动修复项支持「一键修复（修复进度逐项可视，修完自动复检）」，全过程日志随时复制 / 下载。远程项会<b>用管理员注册邮箱真实发一封测试邮件</b>、<b>真实调用一次 AI 审核</b>（较慢，数秒到数十秒）。</p>';
     if (!empty($scLast['ts'])) {
         echo '<p class="hint">上次自检：' . e(date('Y-m-d H:i', (int)$scLast['ts']))
             . ($scSum ? ' —— 通过 ' . (int)($scSum['pass'] ?? 0) . ' / 警告 ' . (int)($scSum['warn'] ?? 0) . ' / 失败 ' . (int)($scSum['fail'] ?? 0) . ' / 跳过 ' . (int)($scSum['skip'] ?? 0) : '')
-            . '</p>';
+            . '（结果已预填到下方清单，重新自检将覆盖）</p>';
     }
-    echo '<label class="hint" style="display:block;margin:0 0 10px"><input type="checkbox" id="scRemote" checked> ' . t('包含远程真实测试（真实发一封测试邮件到管理员邮箱 + 真实调用一次 AI 审核）') . '</label>';
-    echo '<div class="form-foot" style="gap:10px">' .
+    /* 具体清单：11 项常驻，状态列随检测实时点亮 */
+    echo '<table class="log-table sc-table"><thead><tr><th style="width:46px">' . t('状态') . '</th><th style="width:172px">' . t('检测项') . '</th><th class="sc-desc-col">' . t('检测内容') . '</th><th style="width:40%">' . t('结果') . '</th></tr></thead><tbody id="scRows">';
+    foreach ($scCat as $c) {
+        $k = (string)$c['key'];
+        $last = $scLastItems[$k] ?? null;
+        $st = is_array($last) ? (string)($last['state'] ?? '') : '';
+        $map = ['pass' => ['✔', 'sc-pass', '通过'], 'warn' => ['▲', 'sc-warn', '警告'], 'fail' => ['✘', 'sc-fail', '失败'], 'skip' => ['—', 'sc-skip', '跳过']];
+        if ($st !== '' && isset($map[$st])) {
+            $ic = '<span id="scIc-' . $k . '" class="sc-ic ' . $map[$st][1] . '">' . $map[$st][0] . '</span>';
+            $dt = e(cut_str((string)($last['detail'] ?? ''), 260));
+        } else {
+            $ic = '<span id="scIc-' . $k . '" class="sc-ic sc-pend">○</span>';
+            $dt = '<span class="muted">' . t('待检测') . '</span>';
+        }
+        echo '<tr id="scRow-' . $k . '"><td>' . $ic . '</td><td><b>' . e((string)$c['name']) . '</b>' . (!empty($c['remote']) ? ' <i class="sc-remote">' . t('远程') . '</i>' : '') . '</td>'
+            . '<td class="muted sc-desc">' . e((string)$c['desc']) . '</td>'
+            . '<td class="sc-detail" id="scDt-' . $k . '">' . $dt . '</td></tr>';
+    }
+    echo '</tbody></table>';
+    /* 检查进度 + 修复进度 双进度条 */
+    echo '<div class="sc-prog-row"><span class="sc-prog-tx" id="scProgTx">' . t('检查进度') . ' 0/' . $scN . '</span><div class="sc-prog"><i id="scProg"></i></div></div>';
+    echo '<div class="sc-prog-row" id="sfProgRow" hidden><span class="sc-prog-tx" id="sfProgTx">' . t('修复进度') . ' 0/0</span><div class="sc-prog sc-prog-fix"><i id="sfProg"></i></div></div>';
+    echo '<div class="sc-cur" id="scCur">' . t('就绪——点「开始自检」逐项实时检测，全过程在下方日志区可视。') . '</div>';
+    /* 终端式运行日志：自动滚动 / 复制 / 下载 */
+    echo '<div class="sc-console"><div class="sc-console-head"><b>' . t('运行日志') . '</b><span id="scLogN" class="muted"></span>'
+        . '<span class="sc-console-btns"><label class="sc-auto"><input type="checkbox" id="scAuto" checked> ' . t('自动滚动') . '</label>'
+        . '<button type="button" class="btn btn-ghost btn-sm" id="scLogCopy">' . t('复制日志') . '</button>'
+        . '<button type="button" class="btn btn-ghost btn-sm" id="scLogDl">' . t('下载日志') . '</button></span></div>'
+        . '<div class="sc-log" id="scLog"></div></div>';
+    echo '<label class="hint" style="display:block;margin:10px 0 8px"><input type="checkbox" id="scRemote" checked> ' . t('包含远程真实测试（真实发一封测试邮件到管理员邮箱 + 真实调用一次 AI 审核）') . '</label>';
+    echo '<div class="form-foot" style="gap:10px;align-items:center;flex-wrap:wrap">' .
         '<button class="btn btn-primary" type="button" id="scRun">' . t('开始自检') . '</button>' .
-        '<button class="btn btn-ghost" type="button" id="scFix" hidden>' . t('一键修复可修复项') . '</button></div>';
-    echo '<div id="scOut" hidden></div>';
+        '<button class="btn btn-ghost" type="button" id="scStop" hidden>' . t('停止') . '</button>' .
+        '<button class="btn btn-primary" type="button" id="scFix" hidden>' . t('一键修复') . '</button>' .
+        '<span id="scSum" class="sc-sum"></span></div>';
     echo '</div>';
 
     /* v1.38.0 运行环境 · PHP 扩展：自动区分 Windows / Linux 与主机面板（小皮面板 phpStudy / 宝塔 / XAMPP…），
