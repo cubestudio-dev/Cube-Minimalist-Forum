@@ -1291,6 +1291,23 @@ function admin_tab_monitor(): void
     }
     echo '</div>';
 
+    /* v1.44.0 功能一键自检：一次跑完全站功能测试 + 可自动修复（邮箱 / AI / 搜索 / 读写 / 文件完整性等） */
+    $scLast = selfcheck_last_read();
+    $scSum = is_array($scLast['sum'] ?? null) ? $scLast['sum'] : [];
+    echo '<div class="card form-card"><h2 class="card-title">' . t('功能一键自检') . '</h2>';
+    echo '<p class="hint">一次跑完：环境基线 / 读写 / 存储完整性与帖子索引 / 会话 / 程序文件完整性（manifest 校验，专抓「升级不完整、文件缺失、Call to undefined function」类故障）/ 站内搜索 / AI 审核队列 / 静态快照。勾选远程项还会<b>用管理员注册邮箱真实发一封测试邮件</b>、<b>真实调用一次 AI 审核</b>（较慢，数秒到数十秒）。发现的问题逐项给出结论与修复办法，可自动修复项支持一键修复（保守修复：先备份，绝不自动删数据）。</p>';
+    if (!empty($scLast['ts'])) {
+        echo '<p class="hint">上次自检：' . e(date('Y-m-d H:i', (int)$scLast['ts']))
+            . ($scSum ? ' —— 通过 ' . (int)($scSum['pass'] ?? 0) . ' / 警告 ' . (int)($scSum['warn'] ?? 0) . ' / 失败 ' . (int)($scSum['fail'] ?? 0) . ' / 跳过 ' . (int)($scSum['skip'] ?? 0) : '')
+            . '</p>';
+    }
+    echo '<label class="hint" style="display:block;margin:0 0 10px"><input type="checkbox" id="scRemote" checked> ' . t('包含远程真实测试（真实发一封测试邮件到管理员邮箱 + 真实调用一次 AI 审核）') . '</label>';
+    echo '<div class="form-foot" style="gap:10px">' .
+        '<button class="btn btn-primary" type="button" id="scRun">' . t('开始自检') . '</button>' .
+        '<button class="btn btn-ghost" type="button" id="scFix" hidden>' . t('一键修复可修复项') . '</button></div>';
+    echo '<div id="scOut" hidden></div>';
+    echo '</div>';
+
     /* v1.38.0 运行环境 · PHP 扩展：自动区分 Windows / Linux 与主机面板（小皮面板 phpStudy / 宝塔 / XAMPP…），
        推荐扩展一键开启（同意式：先备份 php.ini；取消注释 / 追加标记块）+ 上传限制体检 + 面板专用指引 */
     $efx = efx_plan();

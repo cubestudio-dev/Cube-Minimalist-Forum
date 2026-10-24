@@ -117,6 +117,9 @@ function route_action(string $a): void
         case 'admin_test_mail':  admin_tab_guard(); act_admin_test_mail(); return;
         case 'admin_save_ai':    admin_tab_guard(); act_admin_save_ai(); return;
         case 'admin_test_ai':    admin_tab_guard(); act_admin_test_ai(); return;
+        /* v1.44.0 功能一键自检 + 自动修复（后台「监控」标签页） */
+        case 'admin_selfcheck':  admin_tab_guard(); act_admin_selfcheck(); return;
+        case 'admin_selffix':    admin_tab_guard(); act_admin_selffix(); return;
         case 'admin_patrol_now': admin_tab_guard(); act_admin_patrol_now(); return;
         case 'admin_model_new':   admin_tab_guard(); act_admin_model_new(); return;
         case 'admin_model_save':  admin_tab_guard(); act_admin_model_save(); return;
@@ -1755,6 +1758,46 @@ function act_admin_test_ai(): void
         log_action('admin_test_ai', 'AI 测试通过：' . ai_model_label($m) . '（' . $m['model'] . '）');
     }
     json_response(['ok' => $ok, 'msg' => $msg]);
+}
+
+/** v1.44.0 功能一键自检：跑全部测试项（remote=1 时含真实发信与 AI 真调用），返回 JSON 报告 */
+function act_admin_selfcheck(): void
+{
+    $remote = !empty($_POST['remote']);
+    $t0 = microtime(true);
+    $items = selfcheck_run($remote); /* 引擎内已自动落盘 data/selfcheck.php */
+    $n = ['pass' => 0, 'warn' => 0, 'fail' => 0, 'skip' => 0];
+    foreach ($items as $x) {
+        $st = (string)($x['state'] ?? 'warn');
+        $n[$st] = ($n[$st] ?? 0) + 1;
+    }
+    log_action('admin_selfcheck', '功能一键自检：通过 ' . $n['pass'] . ' / 警告 ' . $n['warn'] . ' / 失败 ' . $n['fail'] . ' / 跳过 ' . $n['skip'] . ($remote ? '（含远程真实测试）' : ''));
+    json_response(['ok' => true, 'items' => $items, 'sum' => $n, 'ms' => (int)round((microtime(true) - $t0) * 1000)]);
+}
+
+/** v1.44.0 自检报告一键修复：按提交的 keys 执行保守修复（先备份，绝不自动删数据） */
+function act_admin_selffix(): void
+{
+    $allowed = ['repair_dirs', 'rebuild_index', 'clear_snapshot', 'clean_temp', 'backup_damaged'];
+    $keys = [];
+    foreach (explode(',', (string)($_POST['keys'] ?? '')) as $k) {
+        $k = trim($k);
+        if (in_array($k, $allowed, true)) {
+            $keys[] = $k;
+        }
+    }
+    if (!$keys) {
+        json_response(['ok' => false, 'msg' => '没有可执行的修复项']);
+    }
+    $log = selffix_run($keys);
+    $okAll = true;
+    foreach ($log as $l) {
+        if (empty($l['ok'])) {
+            $okAll = false;
+        }
+    }
+    log_action('admin_selffix', '自检一键修复：' . implode('；', array_map(static fn (array $l): string => $l['name'] . '——' . $l['msg'], $log)));
+    json_response(['ok' => $okAll, 'log' => $log]);
 }
 
 /* ---------------- 管理员：AI 自主管理（严全面） ---------------- */

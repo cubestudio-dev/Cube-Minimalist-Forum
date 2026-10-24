@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.43.0');
+    define('MF_VERSION', '1.44.0');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -45,6 +45,7 @@ require_once __DIR__ . '/logs.php';
 require_once __DIR__ . '/stats.php';
 require_once __DIR__ . '/firewall.php';
 require_once __DIR__ . '/update.php';
+require_once __DIR__ . '/selfcheck.php'; /* v1.44.0 功能一键自检 + 自动修复（后台监控页与自检动作共用） */
 require_once __DIR__ . '/migrate.php';
 require_once __DIR__ . '/sysmon.php';
 require_once __DIR__ . '/envfix.php'; /* v1.38.0 运行环境：OS / 面板自动识别 + PHP 扩展一键开启 */

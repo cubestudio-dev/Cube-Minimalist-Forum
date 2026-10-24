@@ -1067,6 +1067,67 @@
     }
   }
 
+  /* ---------- v1.44.0 功能一键自检（后台·监控）：一次跑完全站测试 + 一键修复 ---------- */
+  (function () {
+    var scRun = document.getElementById('scRun');
+    if (!scRun) return;
+    var scOut = document.getElementById('scOut');
+    var scFix = document.getElementById('scFix');
+    var scRemote = document.getElementById('scRemote');
+    var scKeys = [];
+    var SC_MARK = {
+      pass: ['✔', 'var(--ok, #15803d)'],
+      warn: ['▲', '#b45309'],
+      fail: ['✘', 'var(--danger, #dc2626)'],
+      skip: ['—', 'inherit']
+    };
+    function renderItems(items) {
+      scKeys = [];
+      var html = '<div class="mon-grid">';
+      items.forEach(function (x) {
+        var m = SC_MARK[x.state] || SC_MARK.warn;
+        if (x.fixable && x.fixkey && scKeys.indexOf(x.fixkey) < 0) scKeys.push(x.fixkey);
+        html += '<div class="mon-cell' + (x.state === 'fail' ? ' cell-bad' : '') + '" style="grid-column:1/-1;text-align:left;display:block">'
+          + '<b style="color:' + m[1] + ';display:block;margin-bottom:2px">' + m[0] + ' ' + escHtml(x.name || '') + '</b>'
+          + '<span style="white-space:normal;word-break:break-word">' + escHtml(x.detail || '')
+          + (x.fixable ? ' <i style="font-style:normal;color:#15803d">〔可自动修复〕</i>' : '') + '</span></div>';
+      });
+      html += '</div>';
+      scOut.innerHTML = html;
+      scOut.hidden = false;
+      scFix.hidden = scKeys.length === 0;
+      scFix.textContent = scKeys.length ? '一键修复可修复项（' + scKeys.length + '）' : '一键修复可修复项';
+    }
+    scRun.addEventListener('click', function () {
+      scRun.disabled = true;
+      var remote = scRemote && scRemote.checked ? 1 : 0;
+      scRun.textContent = remote ? '自检中…（含真实发信与 AI 调用，最长约 3 分钟）' : '自检中…';
+      scOut.hidden = true;
+      scFix.hidden = true;
+      postForm(apiUrl('a=admin_selfcheck'), { remote: remote }, function (res) {
+        scRun.disabled = false;
+        scRun.textContent = '重新自检';
+        if (!res.ok || !res.items) { toast(res.msg || '自检失败，请重试'); return; }
+        renderItems(res.items);
+        var s = res.sum || {};
+        toast('自检完成：通过 ' + (s.pass || 0) + ' / 警告 ' + (s.warn || 0) + ' / 失败 ' + (s.fail || 0) + ' / 跳过 ' + (s.skip || 0) + '（' + (res.ms || 0) + ' ms）');
+      });
+    });
+    scFix.addEventListener('click', function () {
+      if (!scKeys.length) return;
+      scFix.disabled = true;
+      scFix.textContent = '修复中…';
+      postForm(apiUrl('a=admin_selffix'), { keys: scKeys.join(',') }, function (res) {
+        scFix.disabled = false;
+        scFix.textContent = scKeys.length ? '一键修复可修复项（' + scKeys.length + '）' : '一键修复可修复项';
+        if (!res.ok && !res.log) { toast(res.msg || '修复失败，请重试'); return; }
+        var lines = (res.log || []).map(function (l) { return (l.ok ? '✔ ' : '✘ ') + l.name + '：' + l.msg; });
+        scOut.innerHTML = '<details class="err-box" open style="margin-bottom:10px"><summary>修复日志（' + lines.length + ' 项）</summary><pre>' + escHtml(lines.join('\n')) + '</pre></details>' + scOut.innerHTML;
+        toast(res.ok ? '修复完成，建议重新自检确认' : '修复完成（部分失败，见日志）');
+      });
+    });
+  })();
+
   /* ---------- v1.25.0 板块发帖权限面板：类型切换时联动显示白名单输入（v1.27.0 三选） ---------- */
   $$('[data-perm-form]').forEach(function (form) {
     var type = form.querySelector('[data-perm-type]');
