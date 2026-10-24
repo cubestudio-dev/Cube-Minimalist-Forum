@@ -1,16 +1,19 @@
 <?php
 /**
- * 极简论坛 · 功能一键自检 + 自动修复（v1.44.0 引擎 / v1.45.0 实时进度升级）
+ * 极简论坛 · 功能一键自检 + 自动修复（v1.44.0 引擎 / v1.45.0 实时进度升级 / v1.46.0 端到端测试）
  *
  * 把「后台一个个点测试、一条条敲命令排查」变成一次跑完：
  *   环境基线 / 读写 / 存储完整性与帖子索引 / 会话 / 程序文件完整性（manifest 校验）/
- *   搜索 / AI 队列 / 静态快照；勾选远程项还会用管理员邮箱真实发一封测试邮件、
- *   真实调用一次 AI 审核（较慢）。
+ *   注册端到端 / 登录端到端 / 发帖互动端到端 / 搜索 / AI 队列 / 静态快照；
+ *   勾选远程项还会用管理员邮箱真实发一封测试邮件、真实调用一次 AI 审核（较慢）。
  * 发现的问题逐项给出结论与修复办法；可自动修复项支持一键修复（保守修复：先备份，绝不自动删数据）。
  *
  * v1.45.0：拆分为「目录（selfcheck_catalog）+ 逐项执行（selfcheck_run_item）」——
  *   前端逐项请求后端，检查进度 / 修复进度 / 清单 / 日志全程实时可视；
  *   selfcheck_run() 整跑接口保持不变（CLI / 旧调用方零改动），逐项失败不再拖垮整场。
+ * v1.46.0：新增三个端到端（E2E）探针测试——注册 / 登录 / 发帖互动，
+ *   用一次性探针账号真实走完用户旅程（即建即删不留痕，失败自动清理）;
+ *   新增修复项 clean_probes（清理中断残留的探针账号与探针帖）。
  *
  * 报告落盘 data/selfcheck.php（后台「监控」标签页可回看上次结果与运行日志）。
  */
@@ -44,6 +47,12 @@ function selfcheck_catalog(): array
             'desc' => '核心数据文件可解析、抽样校验帖子可读、索引与 threads/ 目录一致性（帖子「消失」的常见根因）'],
         ['key' => 'sess', 'name' => '会话', 'remote' => false,
             'desc' => 'PHP 会话激活状态（登录态基础）'],
+        ['key' => 'reg', 'name' => '注册端到端', 'remote' => false,
+            'desc' => '探针账号真实走注册链路：用户名 / 邮箱校验 → 查重 → 创建 → 哈希核验 → 重名拦截反转 → 即时清理（注册开关关闭时自动跳过）'],
+        ['key' => 'login', 'name' => '登录端到端', 'remote' => false,
+            'desc' => '真实校验登录门闩：错误密码拒绝 → 正确密码通过 → 封禁标记生效 → 会话机制可用（不触碰管理员当前登录态）'],
+        ['key' => 'post', 'name' => '发帖互动端到端', 'remote' => false,
+            'desc' => '两个探针账号真实走发帖全流程：板块权限 → 发帖 → 索引同步 → 搜索命中 → 回帖 → 帖子 / 回复点赞 → 编辑 → 删帖，即建即删不留痕（无可用板块或功能关闭时自动跳过）'],
         ['key' => 'manifest', 'name' => '程序文件完整性', 'remote' => false,
             'desc' => 'manifest.txt 逐文件 sha256 校验，专抓升级包没传全 / 文件被改 / 版本混合（Call to undefined function 类故障多半源于此）'],
         ['key' => 'search', 'name' => '站内搜索', 'remote' => false,
@@ -69,6 +78,246 @@ function selfcheck_item_keys(): array
         $out[] = (string)$c['key'];
     }
     return $out;
+}
+
+/* ================= v1.46.0 端到端探针（注册 / 登录 / 发帖互动） =================
+   原则：一次性探针账号即建即删、失败也要清理（try/catch + 显式清理）；
+   探针带三重识别标记——用户名前缀 sc_e2e_、bio=selfcheck-probe、探针帖标题前缀【自检探针帖】，
+   三重标记同时供 clean_probes 修复项兜底清理中断残留。 */
+
+/**
+ * 创建探针账号（bio 打标记；返回 id / name / email / pass 供链路校验）
+ * $create=false 时仅生成凭据不建号（注册端到端专用：创建动作必须在链路内验证）
+ */
+function selfcheck_probe_spawn(string $tag, bool $create = true): array
+{
+    $name = 'sc_e2e_' . substr($tag, 0, 1) . bin2hex(random_bytes(3));
+    $email = $name . '@selfcheck.local';
+    $pass = 'Sc!' . bin2hex(random_bytes(8));
+    $id = 0;
+    if ($create) {
+        $id = user_create($name, $email, password_hash($pass, PASSWORD_DEFAULT), false);
+        user_update($id, ['bio' => 'selfcheck-probe']);
+    }
+    return ['id' => $id, 'name' => $name, 'email' => $email, 'pass' => $pass];
+}
+
+/** 硬移除探针账号行（user_delete 是软注销会留「已注销」条目，探针必须彻底移除不留痕） */
+function selfcheck_probe_remove(int $id): void
+{
+    if ($id <= 0) {
+        return;
+    }
+    $lk = Store::lock('users');
+    $us = user_all();
+    $n = count($us);
+    $us = array_values(array_filter($us, static function ($u) use ($id): bool {
+        return (int)($u['id'] ?? 0) !== $id;
+    }));
+    if (count($us) !== $n) {
+        Store::write('users.php', $us);
+    }
+    Store::unlock($lk);
+}
+
+/** 注册链路（镜像 act_register 的数据层门闩；创建动作在本链路内完成，失败抛 RuntimeException，消息即步骤名） */
+function selfcheck_reg_flow(array &$probe): void
+{
+    /* 1. 校验链：用户名规则 / 邮箱格式（act_register 同款 valid_name / valid_email） */
+    if (!valid_name((string)$probe['name'])) {
+        throw new RuntimeException('用户名校验');
+    }
+    if (!valid_email((string)$probe['email'])) {
+        throw new RuntimeException('邮箱格式校验');
+    }
+    if (valid_email('not-an-email')) {
+        throw new RuntimeException('非法邮箱拦截');
+    }
+    /* 2. 查重：创建前不应存在（act_register 拦「用户名已被占用 / 该邮箱已被注册」的依据） */
+    if (user_by_name((string)$probe['name'])) {
+        throw new RuntimeException('创建前重名探测');
+    }
+    if (user_by_email((string)$probe['email'])) {
+        throw new RuntimeException('创建前邮箱查重');
+    }
+    /* 3. 真实创建（同 act_register：password_hash 入库）+ 探针标记（中断后 clean_probes 可兜底） */
+    $uid = user_create((string)$probe['name'], (string)$probe['email'], password_hash((string)$probe['pass'], PASSWORD_DEFAULT), false);
+    user_update($uid, ['bio' => 'selfcheck-probe']);
+    $probe['id'] = $uid;
+    $u = user_by_id($uid);
+    if (!$u) {
+        throw new RuntimeException('账号创建回读');
+    }
+    if ((string)($u['name'] ?? '') !== (string)$probe['name'] || str_lower((string)($u['email'] ?? '')) !== (string)$probe['email']) {
+        throw new RuntimeException('回读字段比对');
+    }
+    /* 4. 密码哈希：必须可校验通过，且绝不是明文 */
+    if (!password_verify((string)$probe['pass'], (string)($u['pass'] ?? ''))) {
+        throw new RuntimeException('密码哈希校验');
+    }
+    if ((string)($u['pass'] ?? '') === (string)$probe['pass']) {
+        throw new RuntimeException('密码明文存储检测');
+    }
+    /* 5. 查重反转：创建后必须能被查到（重名 / 邮箱注册从此被拦） */
+    if (!user_by_name((string)$probe['name']) || !user_by_email((string)$probe['email'])) {
+        throw new RuntimeException('创建后查重反转');
+    }
+}
+
+/** 登录链路（镜像 act_login 的数据层门闩；刻意不调用 auth_login——它会 session_regenerate_id 重建管理员当前会话） */
+function selfcheck_login_flow(array $probe): void
+{
+    /* 1. 凭据查找（act_login 同款：用户名优先，邮箱兜底） */
+    $u = user_by_name((string)$probe['name'], true) ?? user_by_email((string)$probe['email']);
+    if (!$u) {
+        throw new RuntimeException('凭据查找');
+    }
+    /* 2. 错误密码必须拒绝（登录门闩 password_verify） */
+    if (password_verify('wrong-' . bin2hex(random_bytes(6)), (string)($u['pass'] ?? ''))) {
+        throw new RuntimeException('错误密码拒绝');
+    }
+    /* 3. 正确密码必须通过 */
+    if (!password_verify((string)$probe['pass'], (string)($u['pass'] ?? ''))) {
+        throw new RuntimeException('正确密码校验');
+    }
+    /* 4. 封禁门闩数据链路（act_login 拒绝 banned 账号的依据） */
+    user_update((int)$u['id'], ['banned' => 1]);
+    if (empty(user_by_id((int)$u['id'])['banned'])) {
+        throw new RuntimeException('封禁标记生效');
+    }
+    user_update((int)$u['id'], ['banned' => 0]);
+    if (!empty(user_by_id((int)$u['id'])['banned'])) {
+        throw new RuntimeException('解封标记生效');
+    }
+    /* 5. 会话机制可用性（登录建立会话的基础；session_regenerate_id 为 auth_login 所用） */
+    if (!function_exists('session_regenerate_id')) {
+        throw new RuntimeException('会话机制（session_regenerate_id）');
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        $k = 'sc_e2e_sess_' . bin2hex(random_bytes(2));
+        $_SESSION[$k] = 'ok';
+        if (($_SESSION[$k] ?? '') !== 'ok') {
+            throw new RuntimeException('会话写入');
+        }
+        unset($_SESSION[$k]);
+    }
+}
+
+/** 发帖互动链路（镜像 act_thread_new / act_reply_new / act_like 的数据层；探针 A 发帖，探针 B 回帖 / 点赞） */
+function selfcheck_post_flow(array $a, array $b, array &$steps): int
+{
+    /* 1. 板块权限（act_thread_new 同款 board_can_post） */
+    $bid = 0;
+    $ua = user_by_id((int)$a['id']) ?: [];
+    foreach (board_all() as $bd) {
+        if (board_can_post((int)($bd['id'] ?? 0), $ua)) {
+            $bid = (int)($bd['id'] ?? 0);
+            break;
+        }
+    }
+    if ($bid <= 0) {
+        throw new RuntimeException('可用板块（板块权限均不允许普通用户发帖）');
+    }
+    $steps[] = '板块「' . board_name($bid) . '」权限通过';
+    /* 2. 发帖 → 回读 → 索引同步 */
+    $token = 'E2E' . strtoupper(bin2hex(random_bytes(3)));
+    $title = '【自检探针帖】' . $token;
+    $content = '这是功能一键自检的端到端探针帖（发帖 → 回帖 → 点赞 → 编辑 → 删除 全链路实测），将在数秒内自动删除。识别码 ' . $token;
+    $tid = thread_create($bid, $title, $content, (int)$a['id']);
+    if ($tid <= 0) {
+        throw new RuntimeException('发帖创建');
+    }
+    $t = thread_get($tid);
+    if (!$t || (string)($t['title'] ?? '') !== $title || (int)($t['author'] ?? 0) !== (int)$a['id']
+        || strpos((string)($t['content'] ?? ''), $token) === false) {
+        throw new RuntimeException('帖子回读比对');
+    }
+    $inIdx = false;
+    foreach (thread_index() as $x) {
+        if ((int)($x['id'] ?? 0) === $tid) {
+            $inIdx = (int)($x['replies'] ?? -1) === 0;
+            break;
+        }
+    }
+    if (!$inIdx) {
+        throw new RuntimeException('索引同步（replies=0）');
+    }
+    $steps[] = '发帖 #' . $tid . ' → 回读 → 索引同步';
+    /* 3. 搜索命中（真实新数据进搜索窗口，act_thread_new 之后用户可搜到的依据） */
+    $hit = false;
+    foreach (search_threads($token) as $h) {
+        if ((int)($h['t']['id'] ?? 0) === $tid) {
+            $hit = true;
+            break;
+        }
+    }
+    if (!$hit) {
+        throw new RuntimeException('搜索命中');
+    }
+    $steps[] = '搜索「' . $token . '」命中';
+    /* 4. 回帖（act_reply_new 同款 reply_add）→ 计数与最后回复人同步 */
+    $rid = reply_add($tid, '探针回复——' . $token, (int)$b['id']);
+    if ($rid === null || $rid <= 0) {
+        throw new RuntimeException('回帖创建');
+    }
+    if (count(reply_list($tid)) !== 1) {
+        throw new RuntimeException('回帖列表回读');
+    }
+    $inIdx = null;
+    foreach (thread_index() as $x) {
+        if ((int)($x['id'] ?? 0) === $tid) {
+            $inIdx = [(int)($x['replies'] ?? -1), (int)($x['last_reply_by'] ?? 0)];
+            break;
+        }
+    }
+    if (!$inIdx || $inIdx[0] !== 1 || $inIdx[1] !== (int)$b['id']) {
+        throw new RuntimeException('回帖索引同步');
+    }
+    $steps[] = '回帖 #' . $rid . ' → 计数 / 最后回复人同步';
+    /* 5. 点赞：B 赞帖 + A 赞回复（act_like 同款 like_toggle，双向各测一次） */
+    [$okT, $nT] = like_toggle('t', $tid, 0, (int)$b['id']);
+    if (!$okT || $nT !== 1) {
+        throw new RuntimeException('帖子点赞');
+    }
+    [$okR, $nR] = like_toggle('r', $tid, $rid, (int)$a['id']);
+    if (!$okR || $nR !== 1) {
+        throw new RuntimeException('回复点赞');
+    }
+    if ((int)(thread_get($tid)['likes'] ?? [])[0] !== (int)$b['id']) {
+        throw new RuntimeException('点赞数据回读');
+    }
+    $steps[] = '帖子 / 回复点赞 → 计数回读';
+    /* 6. 编辑（act_thread_edit 同款 thread_save，标题与索引同步） */
+    $title2 = $title . '（已编辑）';
+    thread_save($tid, ['title' => $title2]);
+    if ((string)(thread_get($tid)['title'] ?? '') !== $title2) {
+        throw new RuntimeException('编辑回读');
+    }
+    $idxTitle = '';
+    foreach (thread_index() as $x) {
+        if ((int)($x['id'] ?? 0) === $tid) {
+            $idxTitle = (string)($x['title'] ?? '');
+            break;
+        }
+    }
+    if ($idxTitle !== $title2) {
+        throw new RuntimeException('编辑索引同步');
+    }
+    $steps[] = '编辑 → 正文 / 索引同步';
+    /* 7. 删帖 → 正文 / 回复 / 索引三处全清（thread_delete 同款） */
+    if (!thread_delete($tid)) {
+        throw new RuntimeException('删帖');
+    }
+    if (thread_get($tid) !== null || is_file(Store::path('replies/t' . $tid . '.php'))) {
+        throw new RuntimeException('删帖残留检查');
+    }
+    foreach (thread_index() as $x) {
+        if ((int)($x['id'] ?? 0) === $tid) {
+            throw new RuntimeException('删帖索引残留');
+        }
+    }
+    $steps[] = '删帖 → 正文 / 回复 / 索引全清';
+    return $tid;
 }
 
 /**
@@ -162,8 +411,79 @@ function selfcheck_run_item(string $key, bool $remote): array
             /* 4. 会话 */
             return ['key' => 'sess', 'name' => '会话', 'state' => session_status() === PHP_SESSION_ACTIVE ? 'pass' : 'warn', 'detail' => session_status() === PHP_SESSION_ACTIVE ? '会话已激活，登录态正常' : '会话未激活（当前请求无需会话即通过，一般无碍）'];
 
+        case 'reg':
+            /* 5. 注册端到端（探针账号真实走注册链路，结束即清理） */
+            if (!feat_on('register')) {
+                return ['key' => 'reg', 'name' => '注册端到端', 'state' => 'skip', 'detail' => '注册功能当前为关（后台「功能开关」）——真实注册链路无从测起，开启后可再测'];
+            }
+            $probe = selfcheck_probe_spawn('r', false);
+            $err = '';
+            try {
+                selfcheck_reg_flow($probe);
+            } catch (Throwable $e) {
+                $err = $e->getMessage();
+            }
+            selfcheck_probe_remove((int)$probe['id']);
+            if ($err !== '') {
+                return ['key' => 'reg', 'name' => '注册端到端', 'state' => 'fail', 'detail' => '注册链路在「' . $err . '」一步中断（探针账号已即时清理，未留痕）。用户名 / 邮箱校验、查重、账号创建、密码哈希中至少一环失效——新用户将无法注册', 'fixkey' => 'clean_probes', 'fixable' => true];
+            }
+            if (user_by_name((string)$probe['name'])) {
+                return ['key' => 'reg', 'name' => '注册端到端', 'state' => 'warn', 'detail' => '注册链路本身通过，但探针账号清理失败（可能 data/users.php 权限问题）。可「一键修复 → 清理自检探针残留」兜底', 'fixkey' => 'clean_probes', 'fixable' => true];
+            }
+            return ['key' => 'reg', 'name' => '注册端到端', 'state' => 'pass', 'detail' => '注册链路走通：用户名 / 邮箱校验 → 查重 → 创建 → 回读比对 → 哈希核验（非明文）→ 重名拦截反转，探针账号已即时清理'];
+
+        case 'login':
+            /* 6. 登录端到端（真实校验门闩；刻意不动管理员当前会话） */
+            $probe = selfcheck_probe_spawn('l');
+            $err = '';
+            try {
+                selfcheck_login_flow($probe);
+            } catch (Throwable $e) {
+                $err = $e->getMessage();
+            }
+            selfcheck_probe_remove((int)$probe['id']);
+            if ($err !== '') {
+                return ['key' => 'login', 'name' => '登录端到端', 'state' => 'fail', 'detail' => '登录链路在「' . $err . '」一步中断（探针账号已即时清理）。凭据查找 / 密码哈希 / 封禁门闩 / 会话机制中至少一环失效——用户将「登录不上」或「谁都登录得上」', 'fixkey' => 'clean_probes', 'fixable' => true];
+            }
+            return ['key' => 'login', 'name' => '登录端到端', 'state' => 'pass', 'detail' => '登录门闩全部有效：凭据查找（用户名 / 邮箱）→ 错误密码拒绝 → 正确密码通过 → 封禁标记生效可恢复 → 会话机制可用（本项刻意不重建会话，不触碰管理员当前登录态）'];
+
+        case 'post':
+            /* 7. 发帖互动端到端（探针 A 发帖 / 探针 B 回帖点赞，即建即删） */
+            if (!feat_on('post')) {
+                return ['key' => 'post', 'name' => '发帖互动端到端', 'state' => 'skip', 'detail' => '发帖功能当前为关（后台「功能开关」）——发帖链路无从测起，开启后可再测'];
+            }
+            $pa = selfcheck_probe_spawn('a');
+            $pb = selfcheck_probe_spawn('b');
+            $err = '';
+            $steps = [];
+            $tid = 0;
+            try {
+                $tid = selfcheck_post_flow($pa, $pb, $steps);
+            } catch (Throwable $e) {
+                $err = $e->getMessage();
+            } finally {
+                if ($tid > 0) {
+                    thread_delete($tid); /* 幂等兜底：链路中断时也绝不让探针帖留痕 */
+                }
+                selfcheck_probe_remove((int)$pa['id']);
+                selfcheck_probe_remove((int)$pb['id']);
+            }
+            if ($err !== '') {
+                return ['key' => 'post', 'name' => '发帖互动端到端', 'state' => 'fail', 'detail' => '发帖全流程在「' . $err . '」一步中断（探针帖与探针账号已即时清理）。已完成：' . ($steps ? implode('；', $steps) . '；' : '') . '——发帖 / 回帖 / 点赞 / 编辑 / 删帖中至少一环失效，用户操作会在该步报错', 'fixkey' => 'clean_probes', 'fixable' => true];
+            }
+            $left = 0;
+            foreach (thread_index() as $x) {
+                if (strpos((string)($x['title'] ?? ''), '【自检探针帖】') === 0) {
+                    $left++;
+                }
+            }
+            if ($left > 0) {
+                return ['key' => 'post', 'name' => '发帖互动端到端', 'state' => 'warn', 'detail' => '发帖全流程本身走通，但发现 ' . $left . ' 个探针帖残留（多为上次中断所致，对访客可见）。可「一键修复 → 清理自检探针残留」兜底', 'fixkey' => 'clean_probes', 'fixable' => true];
+            }
+            return ['key' => 'post', 'name' => '发帖互动端到端', 'state' => 'pass', 'detail' => '发帖全流程走通（真实数据）：' . implode('；', $steps) . '；2 个探针账号与探针帖已即时清理，全程不留痕'];
+
         case 'manifest':
-            /* 5. 程序文件完整性（manifest sha256 校验）——专抓「升级不完整 / 文件被改 / 版本混合」 */
+            /* 8. 程序文件完整性（manifest sha256 校验）——专抓「升级不完整 / 文件被改 / 版本混合」 */
             $mf = dirname(DATA_DIR) . '/manifest.txt';
             if (!is_file($mf)) {
                 return ['key' => 'manifest', 'name' => '程序文件完整性', 'state' => 'skip', 'detail' => '未找到 manifest.txt（v1.43.0 起随包附带）——升级到 v1.44.0+ 后此项可逐文件校验官方 sha256'];
@@ -206,7 +526,7 @@ function selfcheck_run_item(string $key, bool $remote): array
             return ['key' => 'manifest', 'name' => '程序文件完整性', 'state' => 'pass', 'detail' => 'manifest.txt 全部 ' . $n . ' 个程序文件 sha256 与官方包逐一相符'];
 
         case 'search':
-            /* 6. 搜索（内部真实跑一次检索与联想） */
+            /* 9. 搜索（内部真实跑一次检索与联想） */
             if (!feat_on('search')) {
                 return ['key' => 'search', 'name' => '站内搜索', 'state' => 'skip', 'detail' => '「站内搜索」功能开关当前为关（后台「功能开关」可开启）——若前台找不到搜索栏，多半是这个开关关了'];
             }
@@ -219,7 +539,7 @@ function selfcheck_run_item(string $key, bool $remote): array
             }
 
         case 'queue':
-            /* 7. AI 队列 / 自主管理 */
+            /* 10. AI 队列 / 自主管理 */
             $q = Store::read('queue.php', []);
             $qn = is_array($q) ? count($q) : -1;
             if ($qn < 0) {
@@ -231,7 +551,7 @@ function selfcheck_run_item(string $key, bool $remote): array
             return ['key' => 'queue', 'name' => 'AI 审核队列', 'state' => 'pass', 'detail' => '队列为空；AI 自主管理' . (!empty(cfg('ai_autopilot', 0)) ? '已开启（守护' . (ai_daemon_alive() ? '存活' : '未随请求运行，访问时会自动拉起') . '）' : '未开启（举报内容进队列后等待 AI 或人工处理）')];
 
         case 'snapshot':
-            /* 8. 静态快照 */
+            /* 11. 静态快照 */
             if (mfs_enabled()) {
                 $st = mfs_stats();
                 return ['key' => 'snapshot', 'name' => '静态快照', 'state' => 'pass', 'detail' => '快照开启，缓存 ' . (int)($st[0] ?? 0) . ' 页。若升级后游客仍看到旧版页脚/旧内容，可「一键修复 → 清除快照」强制刷新', 'fixkey' => 'clear_snapshot', 'fixable' => (int)($st[0] ?? 0) > 0];
@@ -239,7 +559,7 @@ function selfcheck_run_item(string $key, bool $remote): array
             return ['key' => 'snapshot', 'name' => '静态快照', 'state' => 'skip', 'detail' => '未开启（纯动态直出，无缓存一致性问题）'];
 
         case 'temp':
-            /* 9. 临时文件与陈旧锁 */
+            /* 12. 临时文件与陈旧锁 */
             $stale = 0;
             foreach (glob(Store::path('locks/*')) ?: [] as $lf) {
                 if (@filemtime((string)$lf) !== false && (time() - (int)@filemtime((string)$lf)) > 3600) {
@@ -249,7 +569,7 @@ function selfcheck_run_item(string $key, bool $remote): array
             return ['key' => 'temp', 'name' => '临时文件与锁', 'state' => $stale > 20 ? 'warn' : 'pass', 'detail' => $stale > 20 ? '发现 ' . $stale . ' 个超过 1 小时的陈旧锁文件（通常为进程中断残留，可能拖慢写入）。可「一键修复 → 清理」' : '锁目录健康' . ($stale ? "（{$stale} 个近期锁，属正常）" : ''), 'fixkey' => $stale > 20 ? 'clean_temp' : '', 'fixable' => $stale > 20];
 
         case 'mail':
-            /* 11. SMTP 邮箱全链路（远程项：真实发信到管理员注册邮箱） */
+            /* 13. SMTP 邮箱全链路（远程项：真实发信到管理员注册邮箱） */
             if (!$remote) {
                 $cfgOk = trim((string)cfg('smtp_host', '')) !== '' && trim((string)cfg('smtp_from', '')) !== '';
                 return ['key' => 'mail', 'name' => 'SMTP 邮箱（远程项）', 'state' => 'skip', 'detail' => $cfgOk ? '本次未勾选远程项，未实际发信。SMTP 已配置（' . cfg('smtp_host') . '）' : 'SMTP 未配置（后台「邮件设置」填写主机 / 发信邮箱 / 授权码后可用）'];
@@ -283,7 +603,7 @@ function selfcheck_run_item(string $key, bool $remote): array
             return ['key' => 'mail', 'name' => 'SMTP 邮箱全链路', 'state' => 'fail', 'detail' => '发信失败（' . $ms . ' ms）：' . $err . ' —— 报错含 getaddrinfo / 解析等字样时，属服务器 DNS 故障，v1.43.0+ 会自动四层回退；仍失败可在后台「邮件设置 → 直连 IP」填 SMTP 服务器 IP 兜底，或运行 tools/smtp-doctor.php 体检'];
 
         case 'ai':
-            /* 12. AI 审核真实调用（远程项） */
+            /* 14. AI 审核真实调用（远程项） */
             if (!$remote) {
                 return ['key' => 'ai', 'name' => 'AI 审核（远程项）', 'state' => 'skip', 'detail' => ai_ready() ? '本次未勾选远程项，未实际调用 AI' : 'AI 模型未配置 / 未启用（后台「AI 审核」添加模型并启用后可用）'];
             }
@@ -440,6 +760,35 @@ function selffix_run(array $keys): array
             }
         }
         $log[] = ['name' => '备份损坏数据文件', 'ok' => true, 'msg' => $n ? "已将 {$n} 个损坏文件备份到 data/backup/damaged-*，请比对手工恢复" : '未发现需要备份的损坏文件'];
+    }
+
+    /* v1.46.0 清理自检探针残留（E2E 中断遗留的探针账号 / 探针帖；三重标记兜底定位） */
+    if (in_array('clean_probes', $keys, true)) {
+        $pids = [];
+        foreach (user_all() as $u) {
+            if (strpos((string)($u['bio'] ?? ''), 'selfcheck-probe') !== false
+                || strpos((string)($u['name'] ?? ''), 'sc_e2e_') === 0) {
+                $pids[] = (int)($u['id'] ?? 0);
+            }
+        }
+        $tn = 0;
+        foreach (thread_index() as $x) {
+            $tid = (int)($x['id'] ?? 0);
+            if ($tid <= 0) {
+                continue;
+            }
+            $bad = strpos((string)($x['title'] ?? ''), '【自检探针帖】') === 0
+                || in_array((int)($x['author'] ?? 0), $pids, true);
+            if ($bad && thread_delete($tid)) {
+                $tn++;
+            }
+        }
+        foreach ($pids as $pid) {
+            selfcheck_probe_remove($pid);
+        }
+        $log[] = ['name' => '清理自检探针残留', 'ok' => true, 'msg' => ($pids || $tn)
+            ? '已删除 ' . $tn . ' 个探针帖与 ' . count($pids) . ' 个探针账号（上次自检中断的残留）'
+            : '未发现探针残留（一切干净）'];
     }
 
     return $log;

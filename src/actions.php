@@ -1781,7 +1781,7 @@ function act_admin_selfcheck(): void
 /** v1.44.0 自检报告一键修复：按提交的 keys 执行保守修复（先备份，绝不自动删数据） */
 function act_admin_selffix(): void
 {
-    $allowed = ['repair_dirs', 'rebuild_index', 'clear_snapshot', 'clean_temp', 'backup_damaged'];
+    $allowed = ['repair_dirs', 'rebuild_index', 'clear_snapshot', 'clean_temp', 'backup_damaged', 'clean_probes'];
     $keys = [];
     foreach (explode(',', (string)($_POST['keys'] ?? '')) as $k) {
         $k = trim($k);
@@ -1878,7 +1878,7 @@ function act_admin_sc_finish(): void
 /** v1.45.0 修复实时进度 · 逐项修复：一次只修一项，前端逐项推进「修复进度」并即时落日志 */
 function act_admin_sf_step(): void
 {
-    $allowed = ['repair_dirs', 'rebuild_index', 'clear_snapshot', 'clean_temp', 'backup_damaged'];
+    $allowed = ['repair_dirs', 'rebuild_index', 'clear_snapshot', 'clean_temp', 'backup_damaged', 'clean_probes'];
     $k = trim((string)($_POST['key'] ?? ''));
     if (!in_array($k, $allowed, true)) {
         json_response(['ok' => false, 'msg' => '未知修复项']);

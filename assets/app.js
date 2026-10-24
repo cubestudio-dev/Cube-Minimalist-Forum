@@ -1067,9 +1067,9 @@
     }
   }
 
-  /* ---------- v1.45.0 功能一键自检（后台·监控）：逐项步进实时进度版 ----------
+  /* ---------- v1.45.0 功能一键自检（后台·监控）：逐项步进实时进度版（v1.46.0 扩至 14 项含端到端） ----------
      检查进度 / 修复进度 / 具体清单 / 运行日志全程可视：
-     · 清单 11 项常驻，状态六态实时点亮（待检测 / 检测中 / 通过 / 警告 / 失败 / 跳过）
+     · 清单 14 项常驻，状态六态实时点亮（待检测 / 检测中 / 通过 / 警告 / 失败 / 跳过）
      · 「检查进度」条逐项推进；远程项（真实发信 + AI 真调用）不再黑盒转圈
      · 「停止」可随时中断，「继续检测」从断点续跑（远程项不重复执行）
      · 「一键修复（N）」逐项修复，「修复进度」条同步推进，修完自动复检受影响项
@@ -1101,9 +1101,10 @@
     CAT.forEach(function (c) { NAME[c.key] = c.name; });
     var FIX_NAME = {
       repair_dirs: '修复目录权限', rebuild_index: '重建帖子索引', clear_snapshot: '清除静态快照',
-      clean_temp: '清理陈旧锁与探针残留', backup_damaged: '备份损坏数据文件'
+      clean_temp: '清理陈旧锁与探针残留', backup_damaged: '备份损坏数据文件', clean_probes: '清理自检探针残留'
     };
-    var FIX2CHECK = { repair_dirs: 'rw', rebuild_index: 'store', clear_snapshot: 'snapshot', clean_temp: 'temp', backup_damaged: 'store' };
+    /* 值可为单个 key 或数组（clean_probes 影响三个端到端项，修后全部复检） */
+    var FIX2CHECK = { repair_dirs: 'rw', rebuild_index: 'store', clear_snapshot: 'snapshot', clean_temp: 'temp', backup_damaged: 'store', clean_probes: ['reg', 'login', 'post'] };
     var IC = {
       pass: ['✔', 'sc-pass'],
       warn: ['▲', 'sc-warn'],
@@ -1310,7 +1311,12 @@
         if (i >= fks.length) {
           /* 修复完成：自动复检受影响项（本地模式，不重复远程调用） */
           var cks = [];
-          fks.forEach(function (f) { var ck = FIX2CHECK[f]; if (ck && cks.indexOf(ck) < 0) cks.push(ck); });
+          fks.forEach(function (f) {
+            var ck = FIX2CHECK[f];
+            if (!ck) return;
+            if (typeof ck === 'string') ck = [ck];
+            ck.forEach(function (k) { if (cks.indexOf(k) < 0) cks.push(k); });
+          });
           setCur('修复完成，自动复检受影响项（' + cks.map(function (k) { return NAME[k]; }).join('、') + '）…');
           logLine('—— 修复完成，自动复检受影响项 ——');
           var j = 0;

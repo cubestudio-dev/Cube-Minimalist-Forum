@@ -1,6 +1,10 @@
 /* 极简论坛 · 手写样式（零依赖）
    设计：现代极简 / 响应式 / 深色模式 / 主题色由 --accent 注入 */
 
+/* v1.46.0：hidden 属性必须永远生效——class 的 display:flex/grid 会覆盖浏览器默认的
+   [h[hidden]{display:none}，导致「停止 / 一键修复 / 红点 / 弹层」等隐藏元素照样可见可点（本轮浏览器实测实抓） */
+[hidden] { display: none !important; }
+
 :root {
   --accent: #0f766e;
   --accent-ink: #ffffff;
@@ -102,8 +106,6 @@ button { font: inherit; cursor: pointer; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 2.4s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .side-mask { display: none; }
-/* 关键：hidden 属性必须永远生效（否则小屏下遮罩常驻，整站变灰不可点） */
-.side-mask[hidden] { display: none !important; }
 
 /* ---------- 卡片与页头 ---------- */
 .card {
@@ -334,7 +336,7 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .admin-body { flex: 1; min-width: 0; }
 @media (max-width: 880px) {
-  .admin-shell { flex-direction: column; }
+  .admin-shell { flex-direction: column; align-items: stretch; /* v1.46.0：column 后取消 flex-start 的收缩适配——内容区恢复撑满容器宽，stats-table 等宽表不再把整页撑出横向滚动 */ }
   /* 横排模式下取消独立滚动（自然流撑开，桌面才有 max-height 滚动） */
   .admin-nav { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; gap: 10px 18px; max-height: none; overflow: visible; padding: 0; margin: 0; }
   .admin-nav .nav-group { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
@@ -510,8 +512,6 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 
 /* ================= v1.3 实时刷新与动态监控 ================= */
-/* 未读红点：JS 实时开关，hidden 必须永远生效 */
-.dot[hidden] { display: none !important; }
 
 /* 新帖 / 新回复悬浮提示条（点击整条刷新页面） */
 .live-bar {
@@ -977,7 +977,6 @@ a .mention, .mention a { text-decoration: none; }
 /* ---- 顶部导航进度条：先快后慢两段节奏，模拟真实加载进度 ----
    0→1.7s 冲到 62%（响应心理预期），随后极慢爬行表达「长等待也在工作」 */
 .mf-nprog { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 200; pointer-events: none; }
-.mf-nprog[hidden] { display: none !important; }
 .mf-nprog i {
   display: block; height: 100%; width: 0; border-radius: 0 999px 999px 0;
   /* 兼容回退（v1.32.0）：先声明纯色主题色，再声明渐变——不支持 color-mix 的旧浏览器
@@ -1213,4 +1212,6 @@ html.mf-leaving .main .flash { opacity: 1; } /* 提示条保持醒目 */
   .sc-prog-tx { min-width: 0; font-size: 12px; }
   .sc-desc-col, .sc-desc { display: none; }
   .sc-table { font-size: 12px; }
+  /* v1.46.0：窄屏后台卡片成为滚动容器——stats-table 等宽数据表不再撑破页面（旧版遗留溢出根治） */
+  .card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
