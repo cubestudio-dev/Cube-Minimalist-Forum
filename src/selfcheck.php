@@ -53,6 +53,10 @@ function selfcheck_catalog(): array
             'desc' => '真实校验登录门闩：错误密码拒绝 → 正确密码通过 → 封禁标记生效 → 会话机制可用（不触碰管理员当前登录态）'],
         ['key' => 'post', 'name' => '发帖互动端到端', 'remote' => false,
             'desc' => '两个探针账号真实走发帖全流程：板块权限 → 发帖 → 索引同步 → 搜索命中 → 回帖 → 帖子 / 回复点赞 → 编辑 → 删帖，即建即删不留痕（无可用板块或功能关闭时自动跳过）'],
+        ['key' => 'chunkup', 'name' => '分块上传端到端', 'remote' => false,
+            'desc' => 'v1.47.0 大文件分块直传真实走一遍：预检 → 建会话 → 逐块上送（缺块拦截 / 大小逐字核对）→ 合并落位 → 内容 MD5 比对 → meta 边车 → 越权拒绝 → 中止清理 → 陈旧会话回收，即测即清（上传功能关闭时自动跳过）'],
+        ['key' => 'media', 'name' => '附件出站与限速下载', 'remote' => false,
+            'desc' => 'v1.47.0 附件点击交互与多线程下载的服务端链路：出站 MIME 白名单（文本类预览扩展名全覆盖，防「能传不能出」404）→ 点击形态（图片内联 / pdf 仅预览内联 / 其余直下）→ Range 边界（206 分段 / 越界 416）→ 带宽换算（Mbps→B/s、线程份额钳制）→ meta 边车还原真实文件名'],
         ['key' => 'manifest', 'name' => '程序文件完整性', 'remote' => false,
             'desc' => 'manifest.txt 逐文件 sha256 校验，专抓升级包没传全 / 文件被改 / 版本混合（Call to undefined function 类故障多半源于此）'],
         ['key' => 'search', 'name' => '站内搜索', 'remote' => false,
@@ -481,6 +485,230 @@ function selfcheck_run_item(string $key, bool $remote): array
                 return ['key' => 'post', 'name' => '发帖互动端到端', 'state' => 'warn', 'detail' => '发帖全流程本身走通，但发现 ' . $left . ' 个探针帖残留（多为上次中断所致，对访客可见）。可「一键修复 → 清理自检探针残留」兜底', 'fixkey' => 'clean_probes', 'fixable' => true];
             }
             return ['key' => 'post', 'name' => '发帖互动端到端', 'state' => 'pass', 'detail' => '发帖全流程走通（真实数据）：' . implode('；', $steps) . '；2 个探针账号与探针帖已即时清理，全程不留痕'];
+
+        case 'chunkup':
+            /* v1.48.0 · 8. 分块上传端到端（与线上 act_* 同源的核心函数真实走全链路，即测即清） */
+            if (!feat_on('upload')) {
+                return ['key' => 'chunkup', 'name' => '分块上传端到端', 'state' => 'skip', 'detail' => '上传功能当前为关（后台「功能开关」）——分块链路无从测起，开启后可再测'];
+            }
+            $allow = array_values(array_filter(array_map(fn ($x) => strtolower(trim(ltrim((string)$x, '.'))), preg_split('/[\s,，;；]+/u', trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'))) ?: [])));
+            $pext = '';
+            foreach (['txt', 'md', 'csv', 'zip', 'pdf', 'doc'] as $x) {
+                if (in_array($x, $allow, true)) {
+                    $pext = $x;
+                    break;
+                }
+            }
+            if ($pext === '') {
+                return ['key' => 'chunkup', 'name' => '分块上传端到端', 'state' => 'skip', 'detail' => '当前上传白名单不含文本 / 压缩类扩展名，探针无从上传——白名单加回 txt 等类型后可再测'];
+            }
+            $CH = 65536;
+            $SIZE = $CH * 2 + 1234;
+            $tag = bin2hex(random_bytes(3));
+            $problems = [];
+            $clean = [];
+            $doneSteps = [];
+            try {
+                $s = mf_chunk_session_create(0, 'selfcheck-chunk-' . $tag . '.' . $pext, $SIZE, $CH);
+                $clean[] = ['dir', $s['dir']];
+                if ((int)$s['total'] !== 3) {
+                    $problems[] = '分块总数计算不符（应为 3 块，实得 ' . $s['total'] . '）';
+                }
+                $doneSteps[] = '建会话（64KB×3 块）';
+                $data = random_bytes($SIZE);
+                mf_chunk_session_store($s['token'], 0, 0, substr($data, 0, $CH));
+                mf_chunk_session_store($s['token'], 0, 1, substr($data, $CH, $CH));
+                $doneSteps[] = '逐块上送 2/3';
+                $okErr = false;
+                try {
+                    mf_chunk_session_finish($s['token'], 0);
+                } catch (RuntimeException $e) {
+                    $okErr = strpos($e->getMessage(), '块') !== false;
+                }
+                if (!$okErr) {
+                    $problems[] = '缺块时合并未被拦截（断点续传保护失效——半成品文件会直接落位）';
+                }
+                $doneSteps[] = '缺块拦截';
+                $rejected = false;
+                try {
+                    mf_chunk_session_store($s['token'], 0, 2, 'short');
+                } catch (RuntimeException $e) {
+                    $rejected = true;
+                }
+                if (!$rejected) {
+                    $problems[] = '分块大小不符未被逐字核对（错块会静默混入合并）';
+                }
+                mf_chunk_session_store($s['token'], 0, 2, substr($data, $CH * 2));
+                $fin = mf_chunk_session_finish($s['token'], 0);
+                $clean[] = ['file', (string)$fin['path']];
+                $clean[] = ['file', (string)$fin['path'] . '.meta.json'];
+                $doneSteps[] = '合并落位';
+                if (!is_file((string)$fin['path'])) {
+                    $problems[] = '合并后文件不存在于 uploads 目录';
+                } else {
+                    if ((int)@filesize((string)$fin['path']) !== $SIZE) {
+                        $problems[] = '落位文件大小不符（' . (int)@filesize((string)$fin['path']) . ' / ' . $SIZE . ' B）';
+                    }
+                    if (md5_file((string)$fin['path']) !== md5($data)) {
+                        $problems[] = '合并内容 MD5 与逐块上送内容不一致（分块顺序 / 内容在链路中被破坏）';
+                    }
+                }
+                $scMeta = mf_upload_meta_read((string)$fin['path']);
+                if (!isset($scMeta['n']) || strpos((string)$scMeta['n'], 'selfcheck-chunk') !== 0) {
+                    $problems[] = 'meta 边车缺失或原始文件名未落盘（下载将无法还原真实文件名）';
+                }
+                if (is_dir($s['dir'])) {
+                    $problems[] = '完成后会话临时目录未清理（tmp 会话垃圾将堆积）';
+                }
+                $doneSteps[] = '内容 MD5 比对 + meta 边车';
+                $s2 = mf_chunk_session_create(0, 'selfcheck-abort-' . $tag . '.' . $pext, $CH, $CH);
+                $clean[] = ['dir', $s2['dir']];
+                mf_chunk_session_store($s2['token'], 0, 0, str_repeat('A', $CH));
+                mf_chunk_session_abort($s2['token'], 0);
+                if (is_dir($s2['dir'])) {
+                    $problems[] = '中止上传后会话目录未即时清理';
+                }
+                $doneSteps[] = '中止清理';
+                $s3 = mf_chunk_session_create(0, 'selfcheck-x-' . $tag . '.' . $pext, $CH, $CH);
+                $clean[] = ['dir', $s3['dir']];
+                $denied = false;
+                try {
+                    mf_chunk_session_store($s3['token'], 999999, 0, str_repeat('A', $CH));
+                } catch (RuntimeException $e) {
+                    $denied = true;
+                }
+                if (!$denied) {
+                    $problems[] = '越权 token 操作未被拒绝（会话归属校验失效——他人可接管 / 污染会话）';
+                }
+                $doneSteps[] = '越权拒绝';
+                $old = mf_upload_tmp_dir() . '/scold' . $tag;
+                @mkdir($old, 0755, true);
+                @touch($old . '/0000.chunk', time() - 90000);
+                @touch($old, time() - 90000);
+                mf_upload_tmp_gc();
+                if (is_dir($old)) {
+                    $problems[] = '24 小时陈旧会话回收未生效（GC 失灵后 tmp 只进不出）';
+                }
+                $doneSteps[] = '陈旧会话回收';
+            } catch (Throwable $e) {
+                $problems[] = '链路异常中断：' . $e->getMessage();
+            } finally {
+                foreach ($clean as $c) {
+                    $p = (string)$c[1];
+                    if ($c[0] === 'file') {
+                        @unlink($p);
+                    } elseif (is_dir($p)) {
+                        foreach ((@scandir($p) ?: []) as $f) {
+                            if ($f !== '.' && $f !== '..') {
+                                @unlink($p . '/' . $f);
+                            }
+                        }
+                        @rmdir($p);
+                    }
+                }
+            }
+            if ($problems) {
+                return ['key' => 'chunkup', 'name' => '分块上传端到端', 'state' => 'fail', 'detail' => implode('；', $problems) . '。已走通：' . ($doneSteps ? implode(' → ', $doneSteps) : '（无）') . '（探针文件已即时清理）'];
+            }
+            return ['key' => 'chunkup', 'name' => '分块上传端到端', 'state' => 'pass', 'detail' => '分块直传全链路走通（' . implode(' → ', $doneSteps) . '），合并内容 MD5 一致，探针文件已即时清理'];
+
+        case 'media':
+            /* v1.48.0 · 9. 附件出站与限速下载（服务端决策层全断言，探针即建即删） */
+            $problems = [];
+            $m = mf_media_mimes();
+            $doneSteps = [];
+            foreach (['png', 'jpg', 'jpeg', 'gif', 'webp'] as $x) {
+                if (!isset($m[$x])) {
+                    $problems[] = '图片类型 .' . $x . ' 不在出站 MIME 白名单（帖子内嵌图将 404）';
+                }
+            }
+            foreach (['txt', 'md', 'csv', 'log', 'json', 'xml', 'yml', 'yaml', 'sql', 'srt', 'vtt', 'ics'] as $x) {
+                if (!isset($m[$x])) {
+                    $problems[] = '前端可预览扩展名 .' . $x . ' 不在服务端出站白名单（管理员加入上传白名单后会「能传不能出」——点击即 404）';
+                }
+            }
+            foreach (['svg', 'html', 'htm', 'php', 'js'] as $x) {
+                if (isset($m[$x])) {
+                    $problems[] = '危险扩展名 .' . $x . ' 竟在出站白名单（可注入类型一律不得出站）';
+                }
+            }
+            $doneSteps[] = '出站白名单';
+            if (!mf_media_inline('png', false) || !mf_media_inline('jpg', true)) {
+                $problems[] = '图片应始终内联渲染（<img> 直接显示）';
+            }
+            if (mf_media_inline('txt', false) || mf_media_inline('txt', true) || mf_media_inline('csv', false) || mf_media_inline('zip', false)) {
+                $problems[] = '文本 / 压缩类附件应强制 attachment（点击直接下载，而不是跳到浏览器查看）';
+            }
+            if (!mf_media_inline('pdf', true) || mf_media_inline('pdf', false)) {
+                $problems[] = 'pdf 应仅站内预览（pv=1）时内联，其余场景直接下载';
+            }
+            $doneSteps[] = '点击形态';
+            $r = mf_media_range('bytes=0-0', 1000);
+            if ($r['status'] !== 206 || $r['start'] !== 0 || $r['end'] !== 0) {
+                $problems[] = 'Range 0-0 探测（多线程下载第一步）解析异常';
+            }
+            $r = mf_media_range('bytes=100-999', 1000);
+            if ($r['status'] !== 206 || $r['start'] !== 100 || $r['end'] !== 999) {
+                $problems[] = 'Range 中段解析异常（多线程分段将错位）';
+            }
+            $r = mf_media_range('bytes=-3', 1000);
+            if ($r['status'] !== 206 || $r['start'] !== 997) {
+                $problems[] = 'Range 末 N 字节（bytes=-N）解析异常';
+            }
+            $r = mf_media_range('bytes=0-99999', 1000);
+            if ($r['status'] !== 206 || $r['end'] !== 999) {
+                $problems[] = 'Range 越长截断异常（end 应钳到 size-1）';
+            }
+            $r = mf_media_range('bytes=1000-', 1000);
+            if ($r['status'] !== 416) {
+                $problems[] = 'Range 起点越界未返回 416';
+            }
+            $r = mf_media_range('', 1000);
+            if ($r['status'] !== 200) {
+                $problems[] = '无 Range 头应整文件 200 出站';
+            }
+            $doneSteps[] = 'Range 边界';
+            if (mf_media_throttle_bps(0, null) !== 0) {
+                $problems[] = '带宽 0 应为不限速';
+            }
+            if (mf_media_throttle_bps(2, null) !== 250000) {
+                $problems[] = '2 Mbps 应换算为 250,000 B/s（1 Mbps = 125,000 B/s，兆比特 ≠ 兆字节）';
+            }
+            if (mf_media_throttle_bps(8, 2.0) !== 250000) {
+                $problems[] = '多线程份额 th= 应把每连接钳到份额内（总带宽 ÷ 线程数双保险）';
+            }
+            if (mf_media_throttle_bps(0, 3.5) !== 437500) {
+                $problems[] = '不限带宽时 th= 份额应生效';
+            }
+            if (mf_media_throttle_bps(2, 5.0) !== 250000) {
+                $problems[] = '份额超过总上限时应仍按配置上限钳制';
+            }
+            $doneSteps[] = '带宽换算';
+            $sub = date('Ym');
+            $dirU = DATA_DIR . '/uploads/' . $sub;
+            if (!is_dir($dirU) && !@mkdir($dirU, 0755, true)) {
+                $problems[] = 'uploads 目录创建失败（附件上传功能将不可用）';
+            } else {
+                $hex = bin2hex(random_bytes(8));
+                $pp = $dirU . '/' . $hex . '.txt';
+                @file_put_contents($pp, 'selfcheck-media-probe-' . bin2hex(random_bytes(3)));
+                $probeName = '自检探针附件-' . bin2hex(random_bytes(3)) . '.txt';
+                mf_upload_meta_write($pp, $probeName, 26, 0);
+                $pm = mf_upload_meta_read($pp);
+                if (!is_array($pm) || (string)($pm['n'] ?? '') !== $probeName) {
+                    $problems[] = 'meta 边车写读不一致（下载时无法还原中文等真实文件名）';
+                }
+                if (mf_upload_meta_read($pp . '.nonexistent') !== []) {
+                    $problems[] = 'meta 边车缺失时应静默降级（返回空数组），而不是报错';
+                }
+                @unlink($pp);
+                @unlink($pp . '.meta.json');
+                $doneSteps[] = 'meta 边车（中文文件名还原）';
+            }
+            if ($problems) {
+                return ['key' => 'media', 'name' => '附件出站与限速下载', 'state' => 'fail', 'detail' => implode('；', $problems) . '。已验证：' . implode(' → ', $doneSteps)];
+            }
+            return ['key' => 'media', 'name' => '附件出站与限速下载', 'state' => 'pass', 'detail' => '附件出站链路全部有效（' . implode(' → ', $doneSteps) . '）：点击即下载 / 预览、多线程分段、按 Mbps 限速、真实文件名还原均正常'];
 
         case 'manifest':
             /* 8. 程序文件完整性（manifest sha256 校验）——专抓「升级不完整 / 文件被改 / 版本混合」 */

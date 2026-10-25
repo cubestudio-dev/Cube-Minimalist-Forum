@@ -2228,8 +2228,12 @@
       cx.addEventListener('click', function () {
         clearInterval(timer);
         it.remove();
-        if (!panelList.children.length && panelEl && panelEl.parentNode) panelEl.parentNode.removeChild(panelEl);
-        panelEl = null; panelList = null;
+        /* v1.48.0 修复：仅在面板确实被移除时才清引用——此前无条件置 null，
+           并行下载中取消其一会让剩余下载与新下载落到第二个面板（面板堆叠） */
+        if (panelList && !panelList.children.length && panelEl && panelEl.parentNode) {
+          panelEl.parentNode.removeChild(panelEl);
+          panelEl = null; panelList = null;
+        }
         if (onCancel) onCancel();
       });
       state.bytes = 0; state.pct = 0;

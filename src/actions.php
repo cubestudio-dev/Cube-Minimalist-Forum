@@ -1138,20 +1138,21 @@ function mf_upload_session_dir(string $token): string
     return mf_upload_tmp_dir() . '/' . $token;
 }
 
-/** 校验分块会话存在且属于当前用户；失败直接 act_err 出站 */
+/** 校验分块会话存在且属于当前用户；失败抛 RuntimeException
+ *  （HTTP 薄壳统一转 act_err 出站；自检端到端直接捕获断言） */
 function mf_upload_session_guard(string $token, int $uid): array
 {
     if (!preg_match('/^[a-f0-9]{24}$/', $token)) {
-        act_err('上传会话无效（token 格式不对），请重新发起上传');
+        throw new RuntimeException('上传会话无效（token 格式不对），请重新发起上传');
     }
     $dir = mf_upload_session_dir($token);
     $raw = @file_get_contents($dir . '/meta.json');
     $m = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
     if (!is_array($m) || !is_dir($dir)) {
-        act_err('上传会话不存在或已过期（可能超过 24 小时被清理），请重新发起上传');
+        throw new RuntimeException('上传会话不存在或已过期（可能超过 24 小时被清理），请重新发起上传');
     }
     if ((int)($m['u'] ?? 0) !== (int)$uid) {
-        act_err('无权操作该上传会话');
+        throw new RuntimeException('无权操作该上传会话');
     }
     return ['dir' => $dir, 'meta' => $m];
 }
@@ -1181,74 +1182,63 @@ function mf_upload_tmp_gc(): void
     }
 }
 
-function act_upload_init(): void
+/* ================= v1.48.0 分块会话核心（与 HTTP 解耦，供 act_* 薄壳与自检端到端复用） =================
+   v1.47.0 的 init / chunk / finish / abort 逻辑直连 act_*（依赖登录态与 CSRF），自检无法在
+   数据层复现链路——v1.48.0 把核心抽成 mf_chunk_*（参数化、错误抛异常），act_* 退化为
+   「登录 + CSRF + 调核心 + 异常转 act_err」薄壳；自检「分块上传端到端」项直接调用同一套
+   核心函数真实建会话 / 逐块上送 / 合并落位，与线上行为同源。 */
+
+/** 发起分块会话：预检（扩展名白名单 / 大小上限）→ GC 陈旧会话 → token 目录 + meta
+ *  $chunkBytes=0 用后台「分块大小」配置；自检传小值（如 64KB）避免探针写出大文件。
+ *  @return array{token:string,dir:string,chunk:int,conc:int,total:int,ext:string,img:bool} */
+function mf_chunk_session_create(int $uid, string $name, int $size, int $chunkBytes = 0): array
 {
-    $u = require_login();
-    feat_guard('upload', '上传功能已关闭');
-    $name = trim((string)($_POST['name'] ?? ''));
-    $size = (int)($_POST['size'] ?? 0);
-    if ($name === '' || $size <= 0) {
-        act_err('缺少文件名或大小');
-    }
     $pf = mf_upload_preflight($name, $size);
     mf_upload_tmp_gc();
     if (!is_dir(mf_upload_tmp_dir()) && !@mkdir(mf_upload_tmp_dir(), 0755, true)) {
-        act_err('临时目录创建失败：data/uploads/tmp/ 不可写');
+        throw new RuntimeException('临时目录创建失败：data/uploads/tmp/ 不可写');
     }
     $token = bin2hex(random_bytes(12));
     $dir = mf_upload_session_dir($token);
     if (!@mkdir($dir, 0755, true)) {
-        act_err('上传会话目录创建失败，请重试');
+        throw new RuntimeException('上传会话目录创建失败，请重试');
     }
-    $chunk = max(1, min(16, (int)cfg('upload_chunk_mb', 4))) * 1048576;
+    $chunk = $chunkBytes > 0 ? max(1, $chunkBytes) : max(1, min(16, (int)cfg('upload_chunk_mb', 4))) * 1048576;
     $conc = max(1, min(6, (int)cfg('upload_conc', 2)));
     $total = (int)ceil($size / $chunk);
     file_put_contents($dir . '/meta.json', json_encode([
         'name' => cut_str($name, 200), 'size' => $size, 'ext' => $pf['ext'], 'img' => $pf['img'] ? 1 : 0,
-        'u' => (int)$u['id'], 't' => time(), 'chunk' => $chunk, 'total' => $total,
+        'u' => (int)$uid, 't' => time(), 'chunk' => $chunk, 'total' => $total,
     ], JSON_UNESCAPED_UNICODE), LOCK_EX);
-    log_action('media_upload', '发起分块上传：' . cut_str($name, 40) . '（' . fmt_bytes($size) . '，' . $total . ' 块）');
-    json_response(['ok' => true, 'token' => $token, 'chunk' => $chunk, 'conc' => $conc, 'total' => $total]);
+    return ['token' => $token, 'dir' => $dir, 'chunk' => $chunk, 'conc' => $conc, 'total' => $total, 'ext' => $pf['ext'], 'img' => $pf['img']];
 }
 
-function act_upload_chunk(): void
+/** 逐块接收：索引命名原子落盘（.w 临时 + rename），支持并发乱序；大小逐字节核对 */
+function mf_chunk_session_store(string $token, int $uid, int $idx, string $body): void
 {
-    $u = require_login();
-    $token = (string)($_GET['token'] ?? '');
-    $idx = (int)($_GET['idx'] ?? -1);
-    if (!csrf_ok()) {
-        act_err('CSRF 校验失败，请刷新页面后重试');
-    }
-    $s = mf_upload_session_guard($token, (int)$u['id']);
+    $s = mf_upload_session_guard($token, $uid);
     $total = (int)($s['meta']['total'] ?? 0);
     $chunk = (int)($s['meta']['chunk'] ?? 0);
     if ($idx < 0 || $idx >= $total) {
-        act_err('分块序号越界（' . $idx . ' / 共 ' . $total . ' 块）');
-    }
-    $body = @file_get_contents('php://input');
-    if ($body === false || $body === '') {
-        act_err('分块内容为空');
+        throw new RuntimeException('分块序号越界（' . $idx . ' / 共 ' . $total . ' 块）');
     }
     $expect = ($idx === $total - 1) ? ($s['meta']['size'] - $chunk * ($total - 1)) : $chunk;
     if (strlen($body) !== $expect) {
-        act_err('分块大小不符（收到 ' . strlen($body) . ' B，应为 ' . $expect . ' B），请重试该块');
+        throw new RuntimeException('分块大小不符（收到 ' . strlen($body) . ' B，应为 ' . $expect . ' B），请重试该块');
     }
     $target = $s['dir'] . '/' . sprintf('%04d', $idx) . '.chunk';
     $tmp = $target . '.w';
     if (@file_put_contents($tmp, $body) !== strlen($body) || !@rename($tmp, $target)) {
-        act_err('分块写入失败：磁盘不可写或已满');
+        throw new RuntimeException('分块写入失败：磁盘不可写或已满');
     }
-    json_response(['ok' => true, 'idx' => $idx]);
 }
 
-function act_upload_finish(): void
+/** 合并落位：逐块核对（缺块明确报错可续传）→ 流式合并 → 复用单发同款图片嗅探 →
+ *  原子落位 + meta 边车（原始文件名）→ 清理会话目录
+ *  @return array{url:string,md:string,img:bool,name:string,size:int,path:string} */
+function mf_chunk_session_finish(string $token, int $uid): array
 {
-    $u = require_login();
-    $token = (string)($_POST['token'] ?? '');
-    if (!csrf_ok()) {
-        act_err('CSRF 校验失败，请刷新页面后重试');
-    }
-    $s = mf_upload_session_guard($token, (int)$u['id']);
+    $s = mf_upload_session_guard($token, $uid);
     $m = $s['meta'];
     $dir = $s['dir'];
     $total = (int)($m['total'] ?? 0);
@@ -1267,20 +1257,20 @@ function act_upload_finish(): void
         }
     }
     if ($missing) {
-        act_err('还有 ' . count($missing) . ' 块未传完（第 ' . implode('、', array_slice($missing, 0, 8)) . ' 块'
+        throw new RuntimeException('还有 ' . count($missing) . ' 块未传完（第 ' . implode('、', array_slice($missing, 0, 8)) . ' 块'
             . (count($missing) > 8 ? ' 等' : '') . '），请重试 missing 提示对应的分块后重新完成');
     }
     /* 合并（流式，避免大文件二次进内存） */
     $assembled = $dir . '/assembled.bin';
     $out = @fopen($assembled, 'wb');
     if (!$out) {
-        act_err('合并临时文件创建失败');
+        throw new RuntimeException('合并临时文件创建失败');
     }
     for ($i = 0; $i < $total; $i++) {
         $in = @fopen($dir . '/' . sprintf('%04d', $i) . '.chunk', 'rb');
         if (!$in) {
             fclose($out);
-            act_err('读取第 ' . $i . ' 块失败');
+            throw new RuntimeException('读取第 ' . $i . ' 块失败');
         }
         while (!feof($in)) {
             $buf = fread($in, 262144);
@@ -1295,27 +1285,27 @@ function act_upload_finish(): void
     clearstatcache(true, $assembled);
     if ((int)@filesize($assembled) !== $size) {
         @unlink($assembled);
-        act_err('合并后大小与声明不符（' . (int)@filesize($assembled) . ' / ' . $size . ' B），请重新上传');
+        throw new RuntimeException('合并后大小与声明不符（' . (int)@filesize($assembled) . ' / ' . $size . ' B），请重新上传');
     }
     if ($isImg) {
         $info = @getimagesize($assembled);
         if ($info === false || empty($info[2])) {
             @unlink($assembled);
-            act_err('图片内容校验失败：文件不是有效图片');
+            throw new RuntimeException('图片内容校验失败：文件不是有效图片');
         }
     }
     $sub = date('Ym');
     $finalDir = DATA_DIR . '/uploads/' . $sub;
     if (!is_dir($finalDir) && !@mkdir($finalDir, 0755, true)) {
-        act_err('存储目录创建失败：data/uploads/ 不可写');
+        throw new RuntimeException('存储目录创建失败：data/uploads/ 不可写');
     }
     $hex = bin2hex(random_bytes(8));
     $target = $finalDir . '/' . $hex . '.' . $ext;
     if (!@rename($assembled, $target)) {
-        act_err('文件落位失败：' . $finalDir . ' 不可写');
+        throw new RuntimeException('文件落位失败：' . $finalDir . ' 不可写');
     }
     @chmod($target, 0644);
-    mf_upload_meta_write($target, (string)($m['name'] ?? ('file.' . $ext)), $size, (int)$u['id']);
+    mf_upload_meta_write($target, (string)($m['name'] ?? ('file.' . $ext)), $size, (int)$uid);
     /* 清理会话目录（块文件 + meta） */
     foreach ((@scandir($dir) ?: []) as $f) {
         if ($f !== '.' && $f !== '..') {
@@ -1328,25 +1318,20 @@ function act_upload_finish(): void
     $md = $isImg
         ? '![' . cut_str((string)pathinfo($name, PATHINFO_FILENAME), 40) . '](' . $url . ')'
         : '[' . cut_str($name, 60) . '](' . $url . ')';
-    log_action('media_upload', '分块上传完成：' . cut_str($name, 40) . '（' . fmt_bytes($size) . '，' . $total . ' 块）');
-    json_response(['ok' => true, 'msg' => '上传成功', 'url' => $url, 'md' => $md, 'img' => $isImg]);
+    return ['url' => $url, 'md' => $md, 'img' => $isImg, 'name' => $name, 'size' => $size, 'path' => $target];
 }
 
-function act_upload_abort(): void
+/** 中止清理：删除会话目录全部内容；无效 token 幂等视为已清理；越权抛异常 */
+function mf_chunk_session_abort(string $token, int $uid): void
 {
-    $u = require_login();
-    $token = (string)($_POST['token'] ?? '');
-    if (!csrf_ok()) {
-        act_err('CSRF 校验失败');
-    }
     if (!preg_match('/^[a-f0-9]{24}$/', $token)) {
-        json_response(['ok' => true]); /* 幂等：无效 token 视为已清理 */
+        return; /* 幂等：无效 token 视为已清理 */
     }
     $dir = mf_upload_session_dir($token);
     $raw = @file_get_contents($dir . '/meta.json');
     $m = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
-    if (is_array($m) && (int)($m['u'] ?? 0) !== (int)$u['id']) {
-        act_err('无权操作该上传会话');
+    if (is_array($m) && (int)($m['u'] ?? 0) !== (int)$uid) {
+        throw new RuntimeException('无权操作该上传会话');
     }
     if (is_dir($dir)) {
         foreach ((@scandir($dir) ?: []) as $f) {
@@ -1355,6 +1340,72 @@ function act_upload_abort(): void
             }
         }
         @rmdir($dir);
+    }
+}
+
+/* ---------------- act_* 薄壳（登录 + CSRF + 核心 + 异常出站；HTTP 契约与 v1.47.0 完全一致） ---------------- */
+
+function act_upload_init(): void
+{
+    $u = require_login();
+    feat_guard('upload', '上传功能已关闭');
+    $name = trim((string)($_POST['name'] ?? ''));
+    $size = (int)($_POST['size'] ?? 0);
+    if ($name === '' || $size <= 0) {
+        act_err('缺少文件名或大小');
+    }
+    try {
+        $s = mf_chunk_session_create((int)$u['id'], $name, $size);
+    } catch (RuntimeException $e) {
+        act_err($e->getMessage());
+    }
+    log_action('media_upload', '发起分块上传：' . cut_str($name, 40) . '（' . fmt_bytes($size) . '，' . $s['total'] . ' 块）');
+    json_response(['ok' => true, 'token' => $s['token'], 'chunk' => $s['chunk'], 'conc' => $s['conc'], 'total' => $s['total']]);
+}
+
+function act_upload_chunk(): void
+{
+    $u = require_login();
+    if (!csrf_ok()) {
+        act_err('CSRF 校验失败，请刷新页面后重试');
+    }
+    $body = @file_get_contents('php://input');
+    if ($body === false || $body === '') {
+        act_err('分块内容为空');
+    }
+    try {
+        mf_chunk_session_store((string)($_GET['token'] ?? ''), (int)$u['id'], (int)($_GET['idx'] ?? -1), $body);
+    } catch (RuntimeException $e) {
+        act_err($e->getMessage());
+    }
+    json_response(['ok' => true, 'idx' => (int)($_GET['idx'] ?? -1)]);
+}
+
+function act_upload_finish(): void
+{
+    $u = require_login();
+    if (!csrf_ok()) {
+        act_err('CSRF 校验失败，请刷新页面后重试');
+    }
+    try {
+        $r = mf_chunk_session_finish((string)($_POST['token'] ?? ''), (int)$u['id']);
+    } catch (RuntimeException $e) {
+        act_err($e->getMessage());
+    }
+    log_action('media_upload', '分块上传完成：' . cut_str((string)$r['name'], 40) . '（' . fmt_bytes((int)$r['size']) . '）');
+    json_response(['ok' => true, 'msg' => '上传成功', 'url' => $r['url'], 'md' => $r['md'], 'img' => $r['img']]);
+}
+
+function act_upload_abort(): void
+{
+    $u = require_login();
+    if (!csrf_ok()) {
+        act_err('CSRF 校验失败');
+    }
+    try {
+        mf_chunk_session_abort((string)($_POST['token'] ?? ''), (int)$u['id']);
+    } catch (RuntimeException $e) {
+        act_err($e->getMessage());
     }
     json_response(['ok' => true]);
 }

@@ -1083,12 +1083,14 @@ function page_asset(): void
 
 /* ---------------- v1.32.0 附件 / 图片出站 ---------------- */
 
-/** 上传文件出站：uploads/年月/16位随机hex.扩展名（文件名不可猜测）；
- *  扩展名白名单 + MIME 映射 + 目录防逃逸；资源级端点先于私密模式与协议门禁出站
- *  （帖子内嵌图片必须能加载；文件名随机不可枚举，公开可读不构成目录遍历风险） */
-function page_media(): void
+/** v1.48.0 附件出站 MIME 白名单（供 page_media 与自检复用；不在表内的扩展名一律 404 不出站）
+ *  v1.47.0 缺口修复：前端预览扩展名（log / json / xml / yml / yaml / sql / srt / vtt / ics）
+ *  曾不在服务端白名单——管理员把它们加进上传白名单后能传不能出站（点击即 404）。
+ *  文本类统一 text/plain + X-Content-Type-Options: nosniff（不设 application/json 等可执行 MIME，
+ *  出站又是 attachment，无注入面）。 */
+function mf_media_mimes(): array
 {
-    static $mimes = [
+    return [
         'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp',
         'pdf' => 'application/pdf', 'txt' => 'text/plain; charset=UTF-8', 'md' => 'text/plain; charset=UTF-8',
         'csv' => 'text/csv', 'zip' => 'application/zip', 'doc' => 'application/msword',
@@ -1097,7 +1099,77 @@ function page_media(): void
         'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'ppt' => 'application/vnd.ms-powerpoint',
         'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        /* v1.48.0 文本类补齐（与前端预览列表 TEXT_EXT 对齐） */
+        'log' => 'text/plain; charset=UTF-8', 'json' => 'text/plain; charset=UTF-8',
+        'xml' => 'text/plain; charset=UTF-8', 'yml' => 'text/plain; charset=UTF-8',
+        'yaml' => 'text/plain; charset=UTF-8', 'sql' => 'text/plain; charset=UTF-8',
+        'srt' => 'text/plain; charset=UTF-8', 'vtt' => 'text/plain; charset=UTF-8',
+        'ics' => 'text/plain; charset=UTF-8',
     ];
+}
+
+/** v1.48.0 出站形态决策（供 page_media 与自检断言复用）：
+ *  图片始终内联（<img> 直接渲染）；pdf 仅站内预览（pv=1）时内联；其余一律 attachment。
+ *  （v1.47.0 行为原样抽出，末改变任何线上行为） */
+function mf_media_inline(string $ext, bool $pv): bool
+{
+    $ext = strtolower($ext);
+    if (in_array($ext, ['png', 'jpg', 'jpeg', 'gif', 'webp'], true)) {
+        return true;
+    }
+    return $ext === 'pdf' && $pv;
+}
+
+/** v1.48.0 Range 头解析（供 page_media 与自检复用；与 v1.47.0 行为逐字节一致）：
+ *  @return array{start:int,end:int,status:int} status: 200 全量 / 206 分段 / 416 越界 */
+function mf_media_range(string $header, int $size): array
+{
+    $start = 0;
+    $end = $size - 1;
+    $status = 200;
+    $rng = trim($header);
+    if ($rng !== '' && preg_match('/^bytes=(\\d*)-(\\d*)$/i', $rng, $rm)) {
+        if ($rm[1] === '' && $rm[2] === '') {
+            $rng = ''; /* bytes=- 无意义，按 200 全量 */
+        } elseif ($rm[1] === '') {
+            $suffix = (int)$rm[2]; /* bytes=-N：末 N 字节 */
+            if ($suffix > 0) {
+                $start = max(0, $size - $suffix);
+            }
+        } else {
+            $start = (int)$rm[1];
+            if ($rm[2] !== '') {
+                $end = min((int)$rm[2], $size - 1);
+            }
+        }
+        if ($rng !== '' && ($start > $end || $start >= $size)) {
+            return ['start' => 0, 'end' => 0, 'status' => 416];
+        }
+        if ($rng !== '') {
+            $status = 206;
+        }
+    }
+    return ['start' => $start, 'end' => $end, 'status' => $status];
+}
+
+/** v1.48.0 限速换算（供 page_media 与自检复用）：1 Mbps = 125,000 B/s（兆比特 ≠ 兆字节）。
+ *  $cfgMbps=后台「最大带宽」；$th=客户端分线程下载回传的单线程份额（null=未传）。
+ *  双保险：配置>0 时取 min(配置, 份额)；配置=0（不限）且传了份额时限到份额。返回每连接字节配额，0=不限。 */
+function mf_media_throttle_bps(float $cfgMbps, ?float $th): int
+{
+    $mbps = max(0.0, $cfgMbps);
+    if ($th !== null) {
+        $mbps = $mbps > 0 ? min($mbps, max(0.0, $th)) : max(0.0, $th);
+    }
+    return $mbps > 0 ? (int)ceil($mbps * 125000) : 0;
+}
+
+/** 上传文件出站：uploads/年月/16位随机hex.扩展名（文件名不可猜测）；
+ *  扩展名白名单 + MIME 映射 + 目录防逃逸；资源级端点先于私密模式与协议门禁出站
+ *  （帖子内嵌图片必须能加载；文件名随机不可枚举，公开可读不构成目录遍历风险） */
+function page_media(): void
+{
+    $mimes = mf_media_mimes();
     $f = (string)($_GET['f'] ?? '');
     $notFound = function (): void {
         header('Content-Type: text/plain; charset=utf-8');
@@ -1128,13 +1200,12 @@ function page_media(): void
         exit;
     }
 
-    /* v1.47.0 出站形态：点击文本不再「跳到浏览器查看」——
+    /* v1.47.0 出站形态（v1.48.0 决策抽为 mf_media_inline，行为不变）：点击文本不再「跳到浏览器查看」——
        · 图片：始终内联（<img> 直接渲染）；
        · pdf：仅 pv=1（站内预览 iframe）时内联，否则直接下载；
        · 其余一律 attachment（浏览器点击即下载；站内预览走 fetch 读内容，不受影响）。
        真实文件名：读 meta 边车（v1.47.0 随上传落盘），旧附件 / 边车缺失回退「attachment-<hex>.ext」。 */
-    $isImg = in_array($ext, ['png', 'jpg', 'jpeg', 'gif', 'webp'], true);
-    $inline = $isImg || ($ext === 'pdf' && isset($_GET['pv']));
+    $inline = mf_media_inline($ext, isset($_GET['pv']));
     $meta = mf_upload_meta_read($p);
     $origName = trim((string)($meta['n'] ?? ''));
     if ($origName === '') {
@@ -1158,32 +1229,15 @@ function page_media(): void
     while (ob_get_level() > 0) {
         @ob_end_clean();
     }
-    $start = 0;
-    $end = $size - 1;
-    $status = 200;
-    $rng = (string)($_SERVER['HTTP_RANGE'] ?? '');
-    if ($rng !== '' && preg_match('/^bytes=(\d*)-(\d*)$/i', trim($rng), $rm)) {
-        if ($rm[1] === '' && $rm[2] === '') {
-            $rng = ''; /* bytes=- 无意义，按 200 全量 */
-        } elseif ($rm[1] === '') {
-            $suffix = (int)$rm[2]; /* bytes=-N：末 N 字节 */
-            if ($suffix > 0) {
-                $start = max(0, $size - $suffix);
-            }
-        } else {
-            $start = (int)$rm[1];
-            if ($rm[2] !== '') {
-                $end = min((int)$rm[2], $size - 1);
-            }
-        }
-        if ($rng !== '' && ($start > $end || $start >= $size)) {
-            header('Content-Range: bytes */' . $size);
-            http_response_code(416);
-            exit;
-        }
-        if ($rng !== '') {
-            $status = 206;
-        }
+    /* v1.48.0：Range 解析抽为 mf_media_range（行为不变，自检可断言边界） */
+    $r = mf_media_range((string)($_SERVER['HTTP_RANGE'] ?? ''), $size);
+    $start = $r['start'];
+    $end = $r['end'];
+    $status = $r['status'];
+    if ($status === 416) {
+        header('Content-Range: bytes */' . $size);
+        http_response_code(416);
+        exit;
     }
     http_response_code($status);
     if ($status === 206) {
@@ -1191,13 +1245,8 @@ function page_media(): void
     }
     header('Content-Length: ' . (string)($end - $start + 1));
 
-    $mbps = max(0.0, (float)cfg('dl_max_mbps', 0));
-    if (isset($_GET['th'])) {
-        $th = (float)$_GET['th'];
-        $mbps = $mbps > 0 ? min($mbps, max(0.0, $th)) : max(0.0, $th);
-    }
-    /* 1 Mbps = 125,000 B/s（兆比特 ≠ 兆字节） */
-    $perSec = $mbps > 0 ? (int)ceil($mbps * 125000) : 0; /* 本连接每秒字节配额 */
+    /* v1.48.0：限速换算抽为 mf_media_throttle_bps（行为不变，自检可断言） */
+    $perSec = mf_media_throttle_bps((float)cfg('dl_max_mbps', 0), isset($_GET['th']) ? (float)$_GET['th'] : null); /* 本连接每秒字节配额 */
     $fh = @fopen($p, 'rb');
     if (!$fh) {
         header('Content-Type: text/plain; charset=utf-8');
