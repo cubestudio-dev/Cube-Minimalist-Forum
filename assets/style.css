@@ -1215,3 +1215,69 @@ html.mf-leaving .main .flash { opacity: 1; } /* 提示条保持醒目 */
   /* v1.46.0：窄屏后台卡片成为滚动容器——stats-table 等宽数据表不再撑破页面（旧版遗留溢出根治） */
   .card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
+
+/* ================= v1.47.0 附件站内预览模态 + 多线程下载面板 ================= */
+.mf-pv-mask {
+  position: fixed; inset: 0; z-index: 210;
+  background: color-mix(in srgb, #000 46%, transparent);
+  display: flex; align-items: center; justify-content: center;
+  padding: 18px; backdrop-filter: blur(2px);
+}
+.mf-pv {
+  width: min(880px, 100%); max-height: min(86vh, 760px);
+  display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 24px 80px -24px rgba(0, 0, 0, .45);
+  overflow: hidden;
+}
+.mf-pv-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.mf-pv-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.mf-pv-x {
+  width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--hover); color: var(--muted); font-size: 17px; line-height: 1;
+  cursor: pointer; flex: none;
+}
+.mf-pv-x:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+.mf-pv-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.mf-pv-pre {
+  margin: 0; padding: 14px 16px; flex: 1;
+  font: 12.5px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word; color: var(--text, inherit);
+  background: var(--hover);
+}
+.mf-pv-pdf { flex: 1; width: 100%; min-height: 56vh; border: 0; background: var(--hover); }
+.mf-pv-foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 10px 14px; border-top: 1px solid var(--border);
+}
+.mf-dl-panel {
+  position: fixed; right: 14px; bottom: 14px; z-index: 205;
+  width: min(320px, calc(100vw - 28px));
+}
+.mf-dl-item {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow); padding: 10px 12px; margin-top: 8px;
+}
+.mf-dl-top { display: flex; align-items: center; gap: 8px; }
+.mf-dl-name {
+  flex: 1; min-width: 0; font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mf-dl-x {
+  width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--hover); color: var(--muted); font-size: 14px; line-height: 1;
+  cursor: pointer; flex: none;
+}
+.mf-dl-x:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+.mf-dl-bar {
+  height: 6px; border-radius: 99px; margin: 8px 0 6px;
+  background: var(--hover); overflow: hidden;
+}
+.mf-dl-bar i {
+  display: block; height: 100%; width: 0; border-radius: 99px;
+  background: var(--accent, #0f766e); transition: width .25s ease;
+}
+.mf-dl-sub { font-size: 12px; color: var(--muted); }

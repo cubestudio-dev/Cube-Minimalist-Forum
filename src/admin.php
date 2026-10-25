@@ -142,8 +142,15 @@ function admin_card_limits(): string
         '<label class="field"><span class="field-l">' . t('允许的附件扩展名') . '</span><input class="input" name="upload_allow_ext" value="' . e((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx')) . '">' .
         '<span class="hint">空格或逗号分隔（保存时自动统一为空格，v1.41.0 前用逗号会被无声吞掉导致白名单粘成一坨、附件上传被拒）；图片（png / jpg / gif / webp）始终允许，svg / 可执行 / 脚本类永远拒绝；上传总开关在「功能」页「允许上传图片 / 附件」</span></label>' .
         '</div>' .
+        '<div class="grid3">' .
+        '<label class="field"><span class="field-l">' . t('分块大小（MB）') . '</span><input class="input" name="upload_chunk_mb" type="number" min="1" max="16" value="' . max(1, min(16, (int)cfg('upload_chunk_mb', 4))) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('上传并发块数') . '</span><input class="input" name="upload_conc" type="number" min="1" max="6" value="' . max(1, min(6, (int)cfg('upload_conc', 2))) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('下载线程数') . '</span><input class="input" name="dl_threads" type="number" min="1" max="8" value="' . max(1, min(8, (int)cfg('dl_threads', 3))) . '"></label>' .
+        '<label class="field"><span class="field-l">' . t('最大带宽（Mbps，0 不限）') . '</span><input class="input" name="dl_max_mbps" type="number" min="0" max="1000" step="0.1" value="' . e((string)max(0, (float)cfg('dl_max_mbps', 0))) . '">' .
+        '<span class="hint">v1.47.0 大文件传输：超过分块大小的文件自动分块直传（绕开 post_max_size 硬顶、断点重试、逐块进度）；点击文本 / 压缩包类附件改为站内预览或多线程下载，不再跳转浏览器查看；最大带宽对每连接生效（多线程下载自动均分配额）</span></label>' .
+        '</div>' .
         '<div class="form-foot"><span></span><button class="btn btn-primary" type="submit">' . t('保存内容与限制') . '</button></div></form>' .
-        admin_restore_btn('thread_title_max,thread_len_max,reply_len_max,name_max,sign_len_max,upload_per_post,upload_img_max_mb,upload_file_max_mb,upload_allow_ext') . '</div>';
+        admin_restore_btn('thread_title_max,thread_len_max,reply_len_max,name_max,sign_len_max,upload_per_post,upload_img_max_mb,upload_file_max_mb,upload_allow_ext,upload_chunk_mb,upload_conc,dl_threads,dl_max_mbps') . '</div>';
 }
 
 /* ---------------- v1.21.0 SEO（搜索引擎展示）卡片 ---------------- */
@@ -2360,6 +2367,11 @@ function admin_cfg_defaults(): array
         'upload_file_max_mb' => [10, '附件大小上限（MB）'],
         'upload_per_post'    => [4, '单帖上传文件数上限'],
         'upload_allow_ext'   => ['zip pdf txt md csv doc docx xls xlsx ppt pptx', '允许的附件扩展名'],
+        /* 大文件传输（v1.47.0） */
+        'upload_chunk_mb'  => [4, '分块大小（MB）'],
+        'upload_conc'      => [2, '上传并发块数'],
+        'dl_threads'       => [3, '下载线程数'],
+        'dl_max_mbps'      => [0, '最大带宽（Mbps，0 不限）'],
         /* SEO */
         'seo_title_tpl'    => ['{page} · {site}', 'SEO 标题模板'],
         'seo_description'  => ['', 'SEO 站点描述'],

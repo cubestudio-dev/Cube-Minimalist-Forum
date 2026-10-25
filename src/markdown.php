@@ -100,6 +100,9 @@ function md_inline(string $s): string
         if (stripos($m[2], 'index.php?p=media') === 0) {
             $q = preg_replace('/^index\.php\?/i', '', str_replace('&amp;', '&', $m[2]));
             $href = e(u($q));
+            /* v1.47.0 站内附件：点击 = 预览 / 多线程直下（JS 拦截），不再新开标签页跳浏览器查看；
+               JS 不可用时 href 出站即 attachment（服务端 1.47.0 起对非内联类型强制下载），同样不导航 */
+            return $keep('<a href="' . $href . '" class="mf-att" data-att="1" rel="nofollow noopener">' . $m[1] . '</a>');
         }
         return $keep('<a href="' . $href . '" target="_blank" rel="nofollow noopener">' . $m[1] . '</a>');
     }, $s) ?? $s;

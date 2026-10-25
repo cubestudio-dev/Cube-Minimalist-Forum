@@ -271,6 +271,8 @@ function upload_toolbar(string $targetSel): string
     }
     $imgMb = max(1, (int)cfg('upload_img_max_mb', 5));
     $fileMb = max(1, (int)cfg('upload_file_max_mb', 10));
+    $chunkMb = max(1, min(16, (int)cfg('upload_chunk_mb', 4)));
+    $conc = max(1, min(6, (int)cfg('upload_conc', 2)));
     $ext = trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'));
     $accept = 'image/*';
     foreach (preg_split('/[\s,，]+/u', $ext) ?: [] as $x) {
@@ -280,10 +282,11 @@ function upload_toolbar(string $targetSel): string
         }
     }
     return '<div class="upload-bar" data-upbar data-img-max="' . $imgMb . '" data-file-max="' . $fileMb . '"'
+        . ' data-chunk="' . ($chunkMb * 1048576) . '" data-conc="' . $conc . '"'
         . ' data-exts="' . e(strtolower($ext)) . '" data-cap="' . (int)cfg('upload_per_post', 4) . '" data-ta="' . e($targetSel) . '">' .
         '<button type="button" class="btn btn-ghost btn-sm" data-upload-btn>📎 ' . t('图片 / 附件') . '</button>' .
         '<input type="file" multiple data-upload-input data-upload-target="' . e($targetSel) . '" accept="' . e($accept) . '" hidden>' .
-        '<span class="hint">' . t('图片') . ' ≤' . $imgMb . 'MB · ' . t('附件') . ' ≤' . $fileMb . 'MB' . ($ext !== '' ? '（' . e($ext) . '）' : '') . ' · ' . t('支持直接粘贴 / 拖拽') . '</span>' .
+        '<span class="hint">' . t('图片') . ' ≤' . $imgMb . 'MB · ' . t('附件') . ' ≤' . $fileMb . 'MB' . ($ext !== '' ? '（' . e($ext) . '）' : '') . ' · ' . t('大文件自动分块') . '（' . $chunkMb . 'MB×' . $conc . ' 并发） · ' . t('支持直接粘贴 / 拖拽') . '</span>' .
         '</div>';
 }
 
@@ -1113,8 +1116,9 @@ function page_media(): void
     if (!is_file($p)) {
         $notFound();
     }
-    $bin = @file_get_contents($p);
-    if ($bin === false || $bin === '') {
+    clearstatcache(true, $p);
+    $size = (int)@filesize($p);
+    if ($size <= 0) {
         /* v1.42.0：文件存在但读不出（权限 / 属主异常 / 介质抖动读空）——明确 500 而非输出
            空图片体（此前 200 + 空体让浏览器把「读不出」也当图片渲染，表观就是「图片打不开」） */
         http_response_code(500);
@@ -1123,11 +1127,117 @@ function page_media(): void
         echo 'media unreadable (permission?)';
         exit;
     }
+
+    /* v1.47.0 出站形态：点击文本不再「跳到浏览器查看」——
+       · 图片：始终内联（<img> 直接渲染）；
+       · pdf：仅 pv=1（站内预览 iframe）时内联，否则直接下载；
+       · 其余一律 attachment（浏览器点击即下载；站内预览走 fetch 读内容，不受影响）。
+       真实文件名：读 meta 边车（v1.47.0 随上传落盘），旧附件 / 边车缺失回退「attachment-<hex>.ext」。 */
+    $isImg = in_array($ext, ['png', 'jpg', 'jpeg', 'gif', 'webp'], true);
+    $inline = $isImg || ($ext === 'pdf' && isset($_GET['pv']));
+    $meta = mf_upload_meta_read($p);
+    $origName = trim((string)($meta['n'] ?? ''));
+    if ($origName === '') {
+        $hexName = preg_match('#/([0-9a-f]{16})\.' . $ext . '$#', $f, $hm) ? $hm[1] : substr((string)md5($f), 0, 16);
+        $origName = 'attachment-' . $hexName . '.' . $ext;
+    }
     header('X-Content-Type-Options: nosniff');
     header('Cache-Control: public, max-age=31536000, immutable');
+    header('Accept-Ranges: bytes');
     header('Content-Type: ' . $mimes[$ext]);
-    header('Content-Length: ' . (string)strlen($bin));
-    echo $bin;
+    if (!$inline) {
+        $ascii = preg_replace('/[^A-Za-z0-9._-]+/', '_', pathinfo($origName, PATHINFO_FILENAME));
+        $ascii = ($ascii === '' || $ascii === null ? 'file' : $ascii) . '.' . $ext;
+        $utf8 = rawurlencode($origName);
+        header('Content-Disposition: attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . $utf8);
+    }
+
+    /* v1.47.0 流式出站 + Range/206 多线程支撑 + 每连接限速：
+       整页缓冲（mf_http_out）必须旁路，否则输出被收齐再 gzip，流式 / 限速 / Range 全部失效；
+       限速令牌按秒结算：dl_max_mbps=0 不限；客户端分线程下载时带 th= 单线程份额，服务端钳到总上限内。 */
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    $start = 0;
+    $end = $size - 1;
+    $status = 200;
+    $rng = (string)($_SERVER['HTTP_RANGE'] ?? '');
+    if ($rng !== '' && preg_match('/^bytes=(\d*)-(\d*)$/i', trim($rng), $rm)) {
+        if ($rm[1] === '' && $rm[2] === '') {
+            $rng = ''; /* bytes=- 无意义，按 200 全量 */
+        } elseif ($rm[1] === '') {
+            $suffix = (int)$rm[2]; /* bytes=-N：末 N 字节 */
+            if ($suffix > 0) {
+                $start = max(0, $size - $suffix);
+            }
+        } else {
+            $start = (int)$rm[1];
+            if ($rm[2] !== '') {
+                $end = min((int)$rm[2], $size - 1);
+            }
+        }
+        if ($rng !== '' && ($start > $end || $start >= $size)) {
+            header('Content-Range: bytes */' . $size);
+            http_response_code(416);
+            exit;
+        }
+        if ($rng !== '') {
+            $status = 206;
+        }
+    }
+    http_response_code($status);
+    if ($status === 206) {
+        header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
+    }
+    header('Content-Length: ' . (string)($end - $start + 1));
+
+    $mbps = max(0.0, (float)cfg('dl_max_mbps', 0));
+    if (isset($_GET['th'])) {
+        $th = (float)$_GET['th'];
+        $mbps = $mbps > 0 ? min($mbps, max(0.0, $th)) : max(0.0, $th);
+    }
+    /* 1 Mbps = 125,000 B/s（兆比特 ≠ 兆字节） */
+    $perSec = $mbps > 0 ? (int)ceil($mbps * 125000) : 0; /* 本连接每秒字节配额 */
+    $fh = @fopen($p, 'rb');
+    if (!$fh) {
+        header('Content-Type: text/plain; charset=utf-8');
+        http_response_code(500);
+        echo 'media unreadable (permission?)';
+        exit;
+    }
+    @fseek($fh, $start);
+    $left = $end - $start + 1;
+    @set_time_limit(0);
+    ignore_user_abort(false);
+    $win = microtime(true);
+    $sent = 0;
+    while ($left > 0 && !feof($fh)) {
+        if (connection_aborted()) {
+            break; /* 客户端断开（多线程下载取消 / 用户停止）立即收手 */
+        }
+        $n = (int)min(65536, $left);
+        $buf = fread($fh, $n);
+        if ($buf === false || $buf === '') {
+            break;
+        }
+        echo $buf;
+        @flush();
+        $len = strlen($buf);
+        $left -= $len;
+        if ($perSec > 0) {
+            $sent += $len;
+            $elapsed = microtime(true) - $win;
+            if ($elapsed >= 1.0) {
+                $win = microtime(true);
+                $sent = $len;
+            } elseif ($sent >= $perSec) {
+                usleep((int)ceil((1.0 - $elapsed) * 1000000));
+                $win = microtime(true);
+                $sent = 0;
+            }
+        }
+    }
+    fclose($fh);
     exit;
 }
 

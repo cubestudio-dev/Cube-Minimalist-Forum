@@ -116,7 +116,7 @@ if ($siteIcon !== '' && strpos($siteIcon, '/') === false && is_file(DATA_DIR . '
 <style>@view-transition{navigation:auto}</style>
 <script>(function(){try{window.addEventListener('pagereveal',function(e){if(!(e.viewTransition&&window.MF_MOTION))return;var r=document.documentElement;r.classList.add('mf-vt-hold');var done=function(){r.classList.remove('mf-vt-hold');try{var b=document.body;if(b&&b.classList.contains('mf-motion')){b.classList.remove('mf-motion');void b.offsetWidth;b.classList.add('mf-motion');}}catch(err){}};if(e.viewTransition.finished&&e.viewTransition.finished.then){e.viewTransition.finished.then(done,done);}else{done();}});}catch(e){}})();</script>
 <?php endif; ?>
-<script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;window.MF_EMOJI=<?= feat_on('emoji') ? 'true' : 'false' ?>;window.MF_MOTION=<?= feat_on('motion') ? 'true' : 'false' ?>;</script>
+<script>window.THEME_DEFAULT=<?= json_encode((string)($c['dark_default'] ?? 'system')) ?>;window.DEMO_PORT=<?= json_encode(demo_port()) ?>;window.MF_EMOJI=<?= feat_on('emoji') ? 'true' : 'false' ?>;window.MF_MOTION=<?= feat_on('motion') ? 'true' : 'false' ?>;window.MF_DL_THREADS=<?= max(1, min(8, (int)cfg('dl_threads', 3))) ?>;window.MF_DL_MBPS=<?= (float)max(0, (float)cfg('dl_max_mbps', 0)) ?>;</script>
 <script>(function(){try{var d=localStorage.getItem('mf-theme')||window.THEME_DEFAULT||'system';if(d==='system'){d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',d);}catch(e){}})();</script>
 <style>:root{--accent:<?= e($accent) ?>;}</style>
 <?php if (!empty($c['custom_css'])): ?>

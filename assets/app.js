@@ -1673,6 +1673,8 @@
       var fileMax = (parseFloat(bar.getAttribute('data-file-max')) || 10) * 1048576;
       var allow = (bar.getAttribute('data-exts') || '').toLowerCase().split(/[\s,，;；]+/).filter(Boolean);
       var cap = parseInt(bar.getAttribute('data-cap'), 10) || 0;
+      var chunkBytes = parseInt(bar.getAttribute('data-chunk'), 10) || 4 * 1048576; /* v1.47.0 大文件分块 */
+      var concN = Math.max(1, Math.min(6, parseInt(bar.getAttribute('data-conc'), 10) || 2));
       var okCount = 0;
 
       /* 附件预览条：动态插在工具条之后（零侵入，老标记兼容） */
@@ -1764,6 +1766,7 @@
         var chip = makeChip(file, isImg && !blob ? ['图片', 'img'] : iconOf(ext), blob, '等待上传');
         var c = chip.el, stEl = chip.st;
         chip.x.addEventListener('click', function () {
+          if (chipAbort) chipAbort(); /* v1.47.0 分块上传中移除即中止 */
           if (c.classList.contains('is-ok')) { okCount = Math.max(0, okCount - 1); updCap(); }
           dropChip(c, blob);
         });
@@ -1774,8 +1777,114 @@
           toast('上传失败：' + err);
           return;
         }
+        var csrfInput = form ? form.querySelector('input[name=csrf]') : null; /* v1.47.0 提前：分块路径也要过 CSRF */
+        var chipAbort = null; /* v1.47.0 分块上传中止钩子（chip × 按钮触发） */
+        function upOk(j) {
+          c.classList.remove('is-up'); c.classList.add('is-ok');
+          stEl.textContent = '已上传';
+          insertMd(ta, j.md);
+          okCount++; updCap();
+        }
+        function upFail(m) {
+          c.classList.remove('is-up'); c.classList.add('is-err');
+          stEl.textContent = m;
+          toast('上传失败：' + m);
+        }
+        /* v1.47.0 大文件分块直传：超过单块大小的非图片文件自动切流（绕开 post_max_size 硬顶）。
+           init 建会话 → 并发逐块上送（每块独立重试 ×3，逐块进度）→ finish 服务端合并落位。
+           中途移除 chip 即中止：剩余块停发 + 服务端会话目录即时清理。 */
+        if (!isImg && file.size > chunkBytes && window.Blob && file.slice) {
+          var chState = { aborted: false, failed: false, token: '' };
+          chipAbort = function () {
+            if (chState.failed || chState.aborted) return;
+            chState.aborted = true;
+            c.classList.remove('is-up'); c.classList.add('is-err');
+            stEl.textContent = '已中止';
+            if (chState.token) {
+              var fda = new FormData();
+              fda.append('csrf', csrfInput ? csrfInput.value : '');
+              fda.append('token', chState.token);
+              var xa = new XMLHttpRequest();
+              xa.open('POST', apiUrl('a=upload_abort'), true);
+              xa.setRequestHeader('X-Requested-With', 'fetch');
+              xa.send(fda);
+            }
+          };
+          c.classList.remove('is-wait'); c.classList.add('is-up');
+          stEl.textContent = '建立分块会话…';
+          var fi = new FormData();
+          fi.append('csrf', csrfInput ? csrfInput.value : '');
+          fi.append('name', file.name || 'file');
+          fi.append('size', String(file.size));
+          var xi = new XMLHttpRequest();
+          xi.open('POST', apiUrl('a=upload_init'), true);
+          xi.setRequestHeader('X-Requested-With', 'fetch');
+          xi.onload = function () {
+            var j = null; try { j = JSON.parse(xi.responseText); } catch (e) { j = null; }
+            if (chState.aborted) return;
+            if (!j || !j.ok || !j.token) { chState.failed = true; upFail(diag(xi, j)); return; }
+            chState.token = j.token;
+            var chSz = (parseInt(j.chunk, 10) || chunkBytes);
+            var total = (parseInt(j.total, 10) || Math.ceil(file.size / chSz));
+            var conc = Math.max(1, Math.min(parseInt(j.conc, 10) || concN, total));
+            var next = 0, done = 0, running = conc;
+            function worker() {
+              if (chState.aborted || chState.failed) { running--; maybeFinish(); return; }
+              var idx = next++;
+              if (idx >= total) { running--; maybeFinish(); return; }
+              sendChunk(idx, 0, worker);
+            }
+            function maybeFinish() {
+              if (running > 0 || chState.aborted || chState.failed) return;
+              stEl.textContent = '合并中…';
+              var ff = new FormData();
+              ff.append('csrf', csrfInput ? csrfInput.value : '');
+              ff.append('token', chState.token);
+              var xf = new XMLHttpRequest();
+              xf.open('POST', apiUrl('a=upload_finish'), true);
+              xf.setRequestHeader('X-Requested-With', 'fetch');
+              xf.onload = function () {
+                var jf = null; try { jf = JSON.parse(xf.responseText); } catch (e) { jf = null; }
+                if (jf && jf.ok) upOk(jf); else { chState.failed = true; upFail(diag(xf, jf)); }
+              };
+              xf.onerror = function () { chState.failed = true; upFail(diag(xf, null)); };
+              xf.send(ff);
+            }
+            function sendChunk(idx, tries, nextCb) {
+              var s0 = idx * chSz;
+              var s1 = Math.min(file.size, s0 + chSz);
+              var blobChunk;
+              try { blobChunk = file.slice(s0, s1); } catch (e) { blobChunk = null; }
+              if (!blobChunk) { chState.failed = true; upFail('文件切片失败，请重试'); return; }
+              var xc = new XMLHttpRequest();
+              xc.open('POST', apiUrl('a=upload_chunk&token=' + encodeURIComponent(chState.token) + '&idx=' + idx), true);
+              xc.setRequestHeader('Content-Type', 'application/octet-stream');
+              xc.setRequestHeader('X-CSRF-Token', csrfInput ? csrfInput.value : '');
+              xc.setRequestHeader('X-Requested-With', 'fetch');
+              xc.onload = function () {
+                var jc = null; try { jc = JSON.parse(xc.responseText); } catch (e) { jc = null; }
+                if (chState.aborted) return;
+                if (jc && jc.ok) {
+                  done++;
+                  stEl.textContent = '上传中 ' + Math.round(done / total * 100) + '%（' + done + '/' + total + ' 块）';
+                  nextCb();
+                } else if (tries < 2) {
+                  setTimeout(function () { if (!chState.aborted) sendChunk(idx, tries + 1, nextCb); }, 600);
+                } else { chState.failed = true; upFail(diag(xc, jc)); }
+              };
+              xc.onerror = function () {
+                if (tries < 2 && !chState.aborted) { setTimeout(function () { sendChunk(idx, tries + 1, nextCb); }, 600); }
+                else { chState.failed = true; upFail(diag(xc, null)); }
+              };
+              xc.send(blobChunk);
+            }
+            for (var w = 0; w < conc; w++) worker();
+          };
+          xi.onerror = function () { chState.failed = true; upFail(diag(xi, null)); };
+          xi.send(fi);
+          return;
+        }
         var fd = new FormData();
-        var csrfInput = form ? form.querySelector('input[name=csrf]') : null;
         fd.append('csrf', csrfInput ? csrfInput.value : '');
         fd.append('file', file, file.name || 'file');
         var xhr = new XMLHttpRequest();
@@ -1963,6 +2072,301 @@
         });
       }
       next();
+    });
+  })();
+
+  /* ================= v1.47.0 附件点击交互：站内预览 / 多线程限速下载 =================
+     点击文本类附件（txt / md / csv / log / json…）→ 站内预览模态（不再跳转浏览器查看）；
+     点击 pdf → 站内 iframe 预览；点击其他附件（zip / docx…）→ 多线程分段下载：
+     · 先 Range 0-0 探测总大小（服务端 v1.47.0 起支持 206）；
+     · N 线程各取一段（N = 后台「下载线程数」，≤1MB 或浏览器不支持流式时回退单连接）；
+     · 每线程令牌桶限速 = 总带宽 Mbps ÷ N（后台「最大带宽」，0 = 不限），同时把份额
+       经 &th= 传给服务端双保险钳制；右下角下载面板显示进度 / 速度，可取消；
+     · 合并 Blob 后以原始文件名落盘；任一线程失败自动回退浏览器单连接下载。 */
+  (function () {
+    var TEXT_EXT = ['txt', 'md', 'csv', 'log', 'json', 'xml', 'yml', 'yaml', 'sql', 'srt', 'vtt', 'ics'];
+    var THREADS = Math.max(1, Math.min(8, parseInt(window.MF_DL_THREADS, 10) || 3));
+    var MBPS = Math.max(0, parseFloat(window.MF_DL_MBPS) || 0);
+
+    function extFromHref(href) {
+      var a = document.createElement('a');
+      a.href = href;
+      var f = '';
+      try { f = new URLSearchParams(a.search.replace(/^\?/, '')).get('f') || ''; } catch (e) { f = ''; }
+      var m = /\.([a-z0-9]{1,8})$/i.exec(f);
+      return m ? m[1].toLowerCase() : '';
+    }
+    function fmt(n) {
+      if (!n || n < 0) return '0 B';
+      if (n < 1024) return n + ' B';
+      if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+      if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+      return (n / 1073741824).toFixed(2) + ' GB';
+    }
+
+    /* ---------- 预览模态 ---------- */
+    var pvMask = null;
+    function closeModal() {
+      if (pvMask && pvMask.parentNode) pvMask.parentNode.removeChild(pvMask);
+      pvMask = null;
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(ev) { if (ev.key === 'Escape') closeModal(); }
+    function openModal(title, bodyEl, actions) {
+      closeModal();
+      pvMask = document.createElement('div');
+      pvMask.className = 'mf-pv-mask';
+      var box = document.createElement('div');
+      box.className = 'mf-pv';
+      box.setAttribute('role', 'dialog');
+      box.setAttribute('aria-label', title);
+      var head = document.createElement('div');
+      head.className = 'mf-pv-head';
+      var h3 = document.createElement('b');
+      h3.textContent = title;
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'mf-pv-x';
+      x.setAttribute('aria-label', '关闭预览');
+      x.textContent = '×';
+      x.addEventListener('click', closeModal);
+      head.appendChild(h3); head.appendChild(x);
+      var body = document.createElement('div');
+      body.className = 'mf-pv-body';
+      body.appendChild(bodyEl);
+      var foot = document.createElement('div');
+      foot.className = 'mf-pv-foot';
+      (actions || []).forEach(function (a) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = a.primary ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+        b.textContent = a.label;
+        b.addEventListener('click', a.onClick);
+        foot.appendChild(b);
+      });
+      box.appendChild(head); box.appendChild(body); box.appendChild(foot);
+      pvMask.appendChild(box);
+      pvMask.addEventListener('click', function (ev) { if (ev.target === pvMask) closeModal(); });
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(pvMask);
+    }
+    function openTextPreview(href, name) {
+      var pre = document.createElement('pre');
+      pre.className = 'mf-pv-pre';
+      pre.textContent = '加载中…';
+      openModal(name, pre, [
+        { label: '下载文件', primary: true, onClick: function () { startDownload(href, name, true); } }
+      ]);
+      fetch(href, { credentials: 'same-origin' }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var len = parseInt(r.headers.get('Content-Length') || '0', 10) || 0;
+        if (len > 2 * 1048576) { pre.textContent = '文件较大（' + fmt(len) + '），请下载后查看。'; return null; }
+        return r.text();
+      }).then(function (t) {
+        if (typeof t === 'string') {
+          pre.textContent = t.length > 200000 ? t.slice(0, 200000) + '\n\n…（内容过长已截断，可下载查看全文）' : t;
+        }
+      }).catch(function (err) {
+        pre.textContent = '预览加载失败（' + err.message + '），请下载后查看。';
+      });
+    }
+    function openPdfPreview(href, name) {
+      var fr = document.createElement('iframe');
+      fr.className = 'mf-pv-pdf';
+      fr.src = href + '&pv=1';
+      fr.setAttribute('title', name);
+      openModal(name, fr, [
+        { label: '下载文件', primary: true, onClick: function () { startDownload(href, name, true); } }
+      ]);
+    }
+
+    /* ---------- 右下角下载面板 ---------- */
+    var panelEl = null, panelList = null;
+    function ensurePanel() {
+      if (panelEl) return;
+      panelEl = document.createElement('div');
+      panelEl.className = 'mf-dl-panel';
+      panelEl.setAttribute('aria-live', 'polite');
+      panelList = document.createElement('div');
+      panelList.className = 'mf-dl-list';
+      panelEl.appendChild(panelList);
+      document.body.appendChild(panelEl);
+    }
+    function makeItem(name, size, onCancel) {
+      ensurePanel();
+      var it = document.createElement('div');
+      it.className = 'mf-dl-item';
+      var top = document.createElement('div');
+      top.className = 'mf-dl-top';
+      var nm = document.createElement('span');
+      nm.className = 'mf-dl-name';
+      nm.textContent = name;
+      nm.title = name;
+      var cx = document.createElement('button');
+      cx.type = 'button';
+      cx.className = 'mf-dl-x';
+      cx.setAttribute('aria-label', '取消下载');
+      cx.textContent = '×';
+      top.appendChild(nm); top.appendChild(cx);
+      var bar = document.createElement('div');
+      bar.className = 'mf-dl-bar';
+      var fill = document.createElement('i');
+      bar.appendChild(fill);
+      var sub = document.createElement('div');
+      sub.className = 'mf-dl-sub';
+      sub.textContent = size ? '准备中…（' + fmt(size) + '）' : '准备中…';
+      it.appendChild(top); it.appendChild(bar); it.appendChild(sub);
+      panelList.appendChild(it);
+      var state = { last: 0, lastAt: Date.now(), speed: 0 };
+      var timer = setInterval(function () {
+        var now = Date.now();
+        state.speed = (state.bytes - state.last) * 1000 / Math.max(1, now - state.lastAt);
+        state.last = state.bytes; state.lastAt = now;
+        sub.textContent = Math.round(state.pct) + '% · ' + fmt(state.bytes) + (size ? ' / ' + fmt(size) : '')
+          + (state.speed > 0 ? ' · ' + fmt(state.speed) + '/s' : '');
+      }, 500);
+      cx.addEventListener('click', function () {
+        clearInterval(timer);
+        it.remove();
+        if (!panelList.children.length && panelEl && panelEl.parentNode) panelEl.parentNode.removeChild(panelEl);
+        panelEl = null; panelList = null;
+        if (onCancel) onCancel();
+      });
+      state.bytes = 0; state.pct = 0;
+      return {
+        tick: function (bytes) {
+          state.bytes = bytes;
+          state.pct = size ? Math.min(100, bytes / size * 100) : 0;
+          fill.style.width = state.pct + '%';
+        },
+        done: function (msg) {
+          clearInterval(timer);
+          fill.style.width = '100%';
+          sub.textContent = msg || '已完成';
+          cx.hidden = true;
+          setTimeout(function () {
+            it.remove();
+            if (panelList && !panelList.children.length && panelEl && panelEl.parentNode) {
+              panelEl.parentNode.removeChild(panelEl);
+              panelEl = null; panelList = null;
+            }
+          }, 2600);
+        }
+      };
+    }
+
+    /* ---------- 多线程限速下载 ---------- */
+    function splitRanges(size, n) {
+      var out = [], step = Math.floor(size / n), s = 0;
+      for (var i = 0; i < n; i++) {
+        var e = (i === n - 1) ? size - 1 : s + step - 1;
+        if (e < s) break;
+        out.push({ s: s, e: e });
+        s = e + 1;
+      }
+      return out;
+    }
+    function probeSize(href) {
+      return fetch(href, { credentials: 'same-origin', headers: { 'Range': 'bytes=0-0' } }).then(function (r) {
+        if (r.status !== 206) return 0; /* 服务端不支持 Range → 单连接 */
+        var cr = r.headers.get('Content-Range') || '';
+        var m = /\/(\d+)\s*$/.exec(cr);
+        return m ? parseInt(m[1], 10) : 0;
+      }).catch(function () { return 0; });
+    }
+    function threadedDownload(href, name, size, threads) {
+      var cancelled = false;
+      var panel = makeItem(name, size, function () { cancelled = true; });
+      var ranges = splitRanges(size, threads);
+      var parts = new Array(ranges.length);
+      var got = new Array(ranges.length);
+      for (var i = 0; i < got.length; i++) got[i] = 0;
+      var totalGot = function () { var s = 0; for (var i = 0; i < got.length; i++) s += got[i]; return s; };
+      var perCap = MBPS > 0 ? (MBPS * 125000) / ranges.length : 0; /* 1 Mbps = 125,000 B/s */
+      var perTh = MBPS > 0 ? (MBPS / ranges.length) : 0;
+      var urlBase = href + (href.indexOf('?') >= 0 ? '&' : '?') + 'th=' + perTh.toFixed(3);
+      Promise.all(ranges.map(function (rg, i) {
+        return fetch(urlBase, { credentials: 'same-origin', headers: { 'Range': 'bytes=' + rg.s + '-' + rg.e } })
+          .then(function (res) {
+            if (cancelled) throw new Error('已取消');
+            if (res.status !== 206 && !res.ok) throw new Error('HTTP ' + res.status);
+            var reader = res.body && res.body.getReader ? res.body.getReader() : null;
+            if (!reader) {
+              return res.arrayBuffer().then(function (b) {
+                parts[i] = [new Uint8Array(b)];
+                got[i] = b.byteLength;
+                panel.tick(totalGot());
+              });
+            }
+            var acc = [];
+            var winStart = Date.now(), winBytes = 0;
+            function pump() {
+              return reader.read().then(function (r) {
+                if (cancelled) { try { reader.cancel(); } catch (e) {} throw new Error('已取消'); }
+                if (r.done) { parts[i] = acc; return; }
+                acc.push(r.value);
+                got[i] += r.value.byteLength;
+                panel.tick(totalGot());
+                if (perCap > 0) {
+                  /* 每线程令牌桶：份额 = 总带宽 / 线程数，按本线程自己的 1 秒窗口结算（与后端 th= 双保险） */
+                  winBytes += r.value.byteLength;
+                  var el = Date.now() - winStart;
+                  if (winBytes >= perCap && el < 1000) {
+                    var wait = Math.max(1, 1000 - el);
+                    winStart = Date.now() + wait;
+                    winBytes = 0;
+                    return new Promise(function (rs) { setTimeout(rs, wait); }).then(pump);
+                  }
+                  if (el >= 1000) { winStart = Date.now(); winBytes = 0; }
+                }
+                return pump();
+              });
+            }
+            return pump();
+          });
+      })).then(function () {
+        if (cancelled) return;
+        var flat = [];
+        for (var i = 0; i < parts.length; i++) flat = flat.concat(parts[i]);
+        var blob = new Blob(flat, { type: 'application/octet-stream' });
+        var a2 = document.createElement('a');
+        a2.href = URL.createObjectURL(blob);
+        a2.download = name;
+        document.body.appendChild(a2);
+        a2.click();
+        a2.remove();
+        setTimeout(function () { try { URL.revokeObjectURL(a2.href); } catch (e) {} }, 5000);
+        panel.done('已完成 · ' + fmt(size));
+      }).catch(function (err) {
+        if (cancelled) return;
+        panel.done('多线程失败（' + err.message + '），已回退单连接下载');
+        setTimeout(function () { window.location.href = href; }, 400);
+      });
+    }
+    function startDownload(href, name, force) {
+      if (!window.fetch) { window.location.href = href; return; }
+      probeSize(href).then(function (size) {
+        var threads = THREADS;
+        if (!force && (!size || size < 2 * 1048576 || threads <= 1)) { window.location.href = href; return; }
+        if (size && size < 2 * 1048576) threads = 1;
+        if (!size) { window.location.href = href; return; }
+        threadedDownload(href, name, size, Math.min(threads, Math.max(1, Math.ceil(size / (1048576)))));
+      });
+    }
+
+    /* ---------- 点击拦截（事件委托，动态内容也生效） ---------- */
+    document.addEventListener('click', function (ev) {
+      var t = ev.target;
+      var a = t && t.closest ? t.closest('a.mf-att') : null;
+      if (!a) return;
+      var href = a.getAttribute('href') || '';
+      if (href.indexOf('p=media') < 0) return;
+      ev.preventDefault();
+      var name = (a.textContent || '').trim() || '附件';
+      var ext = extFromHref(href);
+      if (ext === 'pdf') { openPdfPreview(href, name); return; }
+      if (TEXT_EXT.indexOf(ext) >= 0) { openTextPreview(href, name); return; }
+      startDownload(href, name, false);
     });
   })();
   })();

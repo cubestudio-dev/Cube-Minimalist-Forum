@@ -84,6 +84,10 @@ function route_action(string $a): void
         case 'change_pass':      act_change_pass(); return;
         case 'profile_save':     act_profile_save(); return;
         case 'upload':           act_media_upload(); return;
+        case 'upload_init':      act_upload_init(); return;    /* v1.47.0 大文件分块上传 */
+        case 'upload_chunk':     act_upload_chunk(); return;   /* v1.47.0 分块接收 */
+        case 'upload_finish':    act_upload_finish(); return;  /* v1.47.0 合并落位 */
+        case 'upload_abort':     act_upload_abort(); return;   /* v1.47.0 中止清理 */
         case 'thread_edit':      act_thread_edit(); return;
         case 'reply_edit':       act_reply_edit(); return;
         case 'thread_new':       act_thread_new(); return;
@@ -1012,6 +1016,49 @@ function media_count_guard(string $content, string $what): void
     }
 }
 
+/** v1.47.0 上传预检（单发与分块共用）：扩展名白名单 / 拒绝清单 / 大小上限一次把关；
+ *  返回 ['ext'=>小写扩展名, 'img'=>是否图片, 'max'=>字节上限]；不通过直接 act_err 出站 */
+function mf_upload_preflight(string $name, int $size, bool $skipSize = false): array
+{
+    $ext = strtolower((string)pathinfo($name, PATHINFO_EXTENSION));
+    $deny = ['php', 'php3', 'php5', 'php7', 'phtml', 'phar', 'cgi', 'pl', 'py', 'sh', 'bash', 'htaccess', 'svg', 'exe', 'bat', 'cmd', 'com', 'js', 'jse', 'vbs', 'html', 'htm', 'ini', 'dll', 'so'];
+    $imgExt = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+    if ($ext === '' || in_array($ext, $deny, true)) {
+        act_err('不支持的文件类型：.' . $ext);
+    }
+    $isImg = in_array($ext, $imgExt, true);
+    $allow = preg_split('/[\s,，;；]+/u', trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'))) ?: [];
+    $allow = array_values(array_filter(array_map(fn ($x) => strtolower(trim(ltrim((string)$x, '.'))), $allow)));
+    if (!$isImg && !in_array($ext, $allow, true)) {
+        act_err('不支持的附件类型：.' . $ext . '（后台「基本设置」可调整允许的扩展名）');
+    }
+    $max = ($isImg ? max(1, (int)cfg('upload_img_max_mb', 5)) : max(1, (int)cfg('upload_file_max_mb', 10))) * 1048576;
+    if (!$skipSize && ($size <= 0 || $size > $max)) {
+        act_err('文件大小 ' . fmt_bytes($size) . ' 超过上限 ' . round($max / 1048576) . 'MB');
+    }
+    return ['ext' => $ext, 'img' => $isImg, 'max' => $max];
+}
+
+/** v1.47.0 上传 meta 边车：原始文件名 / 大小 / 时间 / 上传者，与附件同目录；
+ *  下载（p=media&dl=1）据此还原真实文件名；读不出边车时各处须静默降级 */
+function mf_upload_meta_write(string $finalPath, string $origName, int $size, int $uid): void
+{
+    $meta = ['n' => cut_str($origName, 120), 's' => $size, 't' => time(), 'u' => $uid];
+    @file_put_contents($finalPath . '.meta.json', json_encode($meta, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    @chmod($finalPath . '.meta.json', 0644);
+}
+
+/** v1.47.0 读取上传 meta 边车（静默降级：不存在 / 损坏一律返回 []） */
+function mf_upload_meta_read(string $finalPath): array
+{
+    $j = @file_get_contents($finalPath . '.meta.json');
+    if (!is_string($j) || $j === '') {
+        return [];
+    }
+    $d = json_decode($j, true);
+    return is_array($d) ? $d : [];
+}
+
 /** v1.32.0 图片 / 附件上传（发帖 / 回复 / 编辑表单的上传工具条走这里）：
  *  仅登录用户；「允许上传图片 / 附件」开关门控；图片做真实内容嗅探（防伪装扩展名）；
  *  存储为 data/uploads/年月/16位随机hex.扩展名（文件名不可猜测）；返回 Markdown 片段 */
@@ -1041,22 +1088,9 @@ function act_media_upload(): void
     }
     $size = (int)($f['size'] ?? 0);
     $name = (string)$f['name'];
-    $ext = strtolower((string)pathinfo($name, PATHINFO_EXTENSION));
-    $deny = ['php', 'php3', 'php5', 'php7', 'phtml', 'phar', 'cgi', 'pl', 'py', 'sh', 'bash', 'htaccess', 'svg', 'exe', 'bat', 'cmd', 'com', 'js', 'jse', 'vbs', 'html', 'htm', 'ini', 'dll', 'so'];
-    $imgExt = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
-    if ($ext === '' || in_array($ext, $deny, true)) {
-        act_err('不支持的文件类型：.' . $ext);
-    }
-    $isImg = in_array($ext, $imgExt, true);
-    $allow = preg_split('/[\s,，;；]+/u', trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'))) ?: [];
-    $allow = array_values(array_filter(array_map(fn ($x) => strtolower(trim(ltrim((string)$x, '.'))), $allow)));
-    if (!$isImg && !in_array($ext, $allow, true)) {
-        act_err('不支持的附件类型：.' . $ext . '（后台「基本设置」可调整允许的扩展名）');
-    }
-    $max = ($isImg ? max(1, (int)cfg('upload_img_max_mb', 5)) : max(1, (int)cfg('upload_file_max_mb', 10))) * 1048576;
-    if ($size <= 0 || $size > $max) {
-        act_err('文件大小 ' . fmt_bytes($size) . ' 超过上限 ' . round($max / 1048576) . 'MB');
-    }
+    $pf = mf_upload_preflight($name, $size);
+    $ext = $pf['ext'];
+    $isImg = $pf['img'];
     if ($isImg) {
         /* 图片内容嗅探：非真实图片（伪装扩展名 / 内嵌恶意载荷）一律拒绝 */
         $info = @getimagesize((string)$f['tmp_name']);
@@ -1075,6 +1109,7 @@ function act_media_upload(): void
         act_err('文件保存失败：' . $dir . ' 不可写或属主不对（请将 data/ 及其子目录权限设为 755，确保 PHP 运行账号可写，或到后台「监控」页一键修复）');
     }
     @chmod($target, 0644);
+    mf_upload_meta_write($target, $name, $size, (int)$u['id']); /* v1.47.0 原始文件名随附件落盘 */
     /* 环境中立 URL（v1.32.0）：存储内容不带演示网关参数；渲染时 markdown 规则经 u() 重写 */
     $url = 'index.php?p=media&f=uploads/' . $sub . '/' . $hex . '.' . $ext;
     $md = $isImg
@@ -1082,6 +1117,246 @@ function act_media_upload(): void
         : '[' . cut_str($name, 60) . '](' . $url . ')';
     log_action('media_upload', '上传' . ($isImg ? '图片' : '附件') . '：' . cut_str($name, 40) . '（' . fmt_bytes($size) . '）');
     json_response(['ok' => true, 'msg' => '上传成功', 'url' => $url, 'md' => $md, 'img' => $isImg]);
+}
+
+/* ================= v1.47.0 大文件分块上传 =================
+   单发 multipart 受 post_max_size / upload_max_filesize 硬顶，大文件必然半路夭折；
+   分块把一个大文件拆成一串小请求逐块上送，单块只有 MB 级，绕开全部整包限制：
+   · init    建会话（token 目录 + meta + 顺手 GC 24h 前的陈旧会话）
+   · chunk   逐块接收（索引命名落盘，支持并发乱序；X-CSRF-Token 头过闸）
+   · finish  按索引合并 → 复用单发同款预检 / 图片嗅探 → 原子落位 + meta 边车
+   · abort   中止即清（用户移除 chip / 关页面时调用；陈旧会话由 init GC 兜底）
+   会话目录：data/uploads/tmp/<token>/（meta.json + 0000.chunk…）；token 绑定 uid，越权一律 403。 */
+
+function mf_upload_tmp_dir(): string
+{
+    return DATA_DIR . '/uploads/tmp';
+}
+
+function mf_upload_session_dir(string $token): string
+{
+    return mf_upload_tmp_dir() . '/' . $token;
+}
+
+/** 校验分块会话存在且属于当前用户；失败直接 act_err 出站 */
+function mf_upload_session_guard(string $token, int $uid): array
+{
+    if (!preg_match('/^[a-f0-9]{24}$/', $token)) {
+        act_err('上传会话无效（token 格式不对），请重新发起上传');
+    }
+    $dir = mf_upload_session_dir($token);
+    $raw = @file_get_contents($dir . '/meta.json');
+    $m = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+    if (!is_array($m) || !is_dir($dir)) {
+        act_err('上传会话不存在或已过期（可能超过 24 小时被清理），请重新发起上传');
+    }
+    if ((int)($m['u'] ?? 0) !== (int)$uid) {
+        act_err('无权操作该上传会话');
+    }
+    return ['dir' => $dir, 'meta' => $m];
+}
+
+/** 陈旧分块会话回收：init 时顺手清扫 24 小时前的残留目录（幂等、失败静默） */
+function mf_upload_tmp_gc(): void
+{
+    $root = mf_upload_tmp_dir();
+    if (!is_dir($root)) {
+        return;
+    }
+    $cut = time() - 86400;
+    foreach ((@scandir($root) ?: []) as $d) {
+        if ($d === '.' || $d === '..') {
+            continue;
+        }
+        $p = $root . '/' . $d;
+        $mt = @filemtime($p);
+        if ($mt !== false && $mt < $cut) {
+            foreach ((@scandir($p) ?: []) as $f) {
+                if ($f !== '.' && $f !== '..') {
+                    @unlink($p . '/' . $f);
+                }
+            }
+            @rmdir($p);
+        }
+    }
+}
+
+function act_upload_init(): void
+{
+    $u = require_login();
+    feat_guard('upload', '上传功能已关闭');
+    $name = trim((string)($_POST['name'] ?? ''));
+    $size = (int)($_POST['size'] ?? 0);
+    if ($name === '' || $size <= 0) {
+        act_err('缺少文件名或大小');
+    }
+    $pf = mf_upload_preflight($name, $size);
+    mf_upload_tmp_gc();
+    if (!is_dir(mf_upload_tmp_dir()) && !@mkdir(mf_upload_tmp_dir(), 0755, true)) {
+        act_err('临时目录创建失败：data/uploads/tmp/ 不可写');
+    }
+    $token = bin2hex(random_bytes(12));
+    $dir = mf_upload_session_dir($token);
+    if (!@mkdir($dir, 0755, true)) {
+        act_err('上传会话目录创建失败，请重试');
+    }
+    $chunk = max(1, min(16, (int)cfg('upload_chunk_mb', 4))) * 1048576;
+    $conc = max(1, min(6, (int)cfg('upload_conc', 2)));
+    $total = (int)ceil($size / $chunk);
+    file_put_contents($dir . '/meta.json', json_encode([
+        'name' => cut_str($name, 200), 'size' => $size, 'ext' => $pf['ext'], 'img' => $pf['img'] ? 1 : 0,
+        'u' => (int)$u['id'], 't' => time(), 'chunk' => $chunk, 'total' => $total,
+    ], JSON_UNESCAPED_UNICODE), LOCK_EX);
+    log_action('media_upload', '发起分块上传：' . cut_str($name, 40) . '（' . fmt_bytes($size) . '，' . $total . ' 块）');
+    json_response(['ok' => true, 'token' => $token, 'chunk' => $chunk, 'conc' => $conc, 'total' => $total]);
+}
+
+function act_upload_chunk(): void
+{
+    $u = require_login();
+    $token = (string)($_GET['token'] ?? '');
+    $idx = (int)($_GET['idx'] ?? -1);
+    if (!csrf_ok()) {
+        act_err('CSRF 校验失败，请刷新页面后重试');
+    }
+    $s = mf_upload_session_guard($token, (int)$u['id']);
+    $total = (int)($s['meta']['total'] ?? 0);
+    $chunk = (int)($s['meta']['chunk'] ?? 0);
+    if ($idx < 0 || $idx >= $total) {
+        act_err('分块序号越界（' . $idx . ' / 共 ' . $total . ' 块）');
+    }
+    $body = @file_get_contents('php://input');
+    if ($body === false || $body === '') {
+        act_err('分块内容为空');
+    }
+    $expect = ($idx === $total - 1) ? ($s['meta']['size'] - $chunk * ($total - 1)) : $chunk;
+    if (strlen($body) !== $expect) {
+        act_err('分块大小不符（收到 ' . strlen($body) . ' B，应为 ' . $expect . ' B），请重试该块');
+    }
+    $target = $s['dir'] . '/' . sprintf('%04d', $idx) . '.chunk';
+    $tmp = $target . '.w';
+    if (@file_put_contents($tmp, $body) !== strlen($body) || !@rename($tmp, $target)) {
+        act_err('分块写入失败：磁盘不可写或已满');
+    }
+    json_response(['ok' => true, 'idx' => $idx]);
+}
+
+function act_upload_finish(): void
+{
+    $u = require_login();
+    $token = (string)($_POST['token'] ?? '');
+    if (!csrf_ok()) {
+        act_err('CSRF 校验失败，请刷新页面后重试');
+    }
+    $s = mf_upload_session_guard($token, (int)$u['id']);
+    $m = $s['meta'];
+    $dir = $s['dir'];
+    $total = (int)($m['total'] ?? 0);
+    $chunk = (int)($m['chunk'] ?? 0);
+    $size = (int)($m['size'] ?? 0);
+    $ext = (string)($m['ext'] ?? '');
+    $isImg = ((int)($m['img'] ?? 0)) === 1;
+    /* 逐块核对：块数齐 + 每块大小精确（末块允许短）——任何一块缺失都明确报错可续传 */
+    $missing = [];
+    for ($i = 0; $i < $total; $i++) {
+        $p = $dir . '/' . sprintf('%04d', $i) . '.chunk';
+        $expect = ($i === $total - 1) ? ($size - $chunk * ($total - 1)) : $chunk;
+        $sz = @filesize($p);
+        if ($sz === false || (int)$sz !== (int)$expect) {
+            $missing[] = $i;
+        }
+    }
+    if ($missing) {
+        act_err('还有 ' . count($missing) . ' 块未传完（第 ' . implode('、', array_slice($missing, 0, 8)) . ' 块'
+            . (count($missing) > 8 ? ' 等' : '') . '），请重试 missing 提示对应的分块后重新完成');
+    }
+    /* 合并（流式，避免大文件二次进内存） */
+    $assembled = $dir . '/assembled.bin';
+    $out = @fopen($assembled, 'wb');
+    if (!$out) {
+        act_err('合并临时文件创建失败');
+    }
+    for ($i = 0; $i < $total; $i++) {
+        $in = @fopen($dir . '/' . sprintf('%04d', $i) . '.chunk', 'rb');
+        if (!$in) {
+            fclose($out);
+            act_err('读取第 ' . $i . ' 块失败');
+        }
+        while (!feof($in)) {
+            $buf = fread($in, 262144);
+            if ($buf === false || $buf === '') {
+                break;
+            }
+            fwrite($out, $buf);
+        }
+        fclose($in);
+    }
+    fclose($out);
+    clearstatcache(true, $assembled);
+    if ((int)@filesize($assembled) !== $size) {
+        @unlink($assembled);
+        act_err('合并后大小与声明不符（' . (int)@filesize($assembled) . ' / ' . $size . ' B），请重新上传');
+    }
+    if ($isImg) {
+        $info = @getimagesize($assembled);
+        if ($info === false || empty($info[2])) {
+            @unlink($assembled);
+            act_err('图片内容校验失败：文件不是有效图片');
+        }
+    }
+    $sub = date('Ym');
+    $finalDir = DATA_DIR . '/uploads/' . $sub;
+    if (!is_dir($finalDir) && !@mkdir($finalDir, 0755, true)) {
+        act_err('存储目录创建失败：data/uploads/ 不可写');
+    }
+    $hex = bin2hex(random_bytes(8));
+    $target = $finalDir . '/' . $hex . '.' . $ext;
+    if (!@rename($assembled, $target)) {
+        act_err('文件落位失败：' . $finalDir . ' 不可写');
+    }
+    @chmod($target, 0644);
+    mf_upload_meta_write($target, (string)($m['name'] ?? ('file.' . $ext)), $size, (int)$u['id']);
+    /* 清理会话目录（块文件 + meta） */
+    foreach ((@scandir($dir) ?: []) as $f) {
+        if ($f !== '.' && $f !== '..') {
+            @unlink($dir . '/' . $f);
+        }
+    }
+    @rmdir($dir);
+    $url = 'index.php?p=media&f=uploads/' . $sub . '/' . $hex . '.' . $ext;
+    $name = (string)($m['name'] ?? 'file');
+    $md = $isImg
+        ? '![' . cut_str((string)pathinfo($name, PATHINFO_FILENAME), 40) . '](' . $url . ')'
+        : '[' . cut_str($name, 60) . '](' . $url . ')';
+    log_action('media_upload', '分块上传完成：' . cut_str($name, 40) . '（' . fmt_bytes($size) . '，' . $total . ' 块）');
+    json_response(['ok' => true, 'msg' => '上传成功', 'url' => $url, 'md' => $md, 'img' => $isImg]);
+}
+
+function act_upload_abort(): void
+{
+    $u = require_login();
+    $token = (string)($_POST['token'] ?? '');
+    if (!csrf_ok()) {
+        act_err('CSRF 校验失败');
+    }
+    if (!preg_match('/^[a-f0-9]{24}$/', $token)) {
+        json_response(['ok' => true]); /* 幂等：无效 token 视为已清理 */
+    }
+    $dir = mf_upload_session_dir($token);
+    $raw = @file_get_contents($dir . '/meta.json');
+    $m = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+    if (is_array($m) && (int)($m['u'] ?? 0) !== (int)$u['id']) {
+        act_err('无权操作该上传会话');
+    }
+    if (is_dir($dir)) {
+        foreach ((@scandir($dir) ?: []) as $f) {
+            if ($f !== '.' && $f !== '..') {
+                @unlink($dir . '/' . $f);
+            }
+        }
+        @rmdir($dir);
+    }
+    json_response(['ok' => true]);
 }
 
 function act_thread_new(): void
@@ -1482,7 +1757,7 @@ function act_admin_save_basic(): void
         post_guard('csrf', 'site_name');
         return;
     }
-    post_guard('csrf', 'thread_title_max', 'thread_len_max', 'reply_len_max', 'name_max', 'sign_len_max', 'upload_img_max_mb', 'upload_file_max_mb', 'upload_per_post', 'upload_allow_ext');
+    post_guard('csrf', 'thread_title_max', 'thread_len_max', 'reply_len_max', 'name_max', 'sign_len_max', 'upload_img_max_mb', 'upload_file_max_mb', 'upload_per_post', 'upload_allow_ext', 'upload_chunk_mb', 'upload_conc', 'dl_threads', 'dl_max_mbps');
     cfg_update([
         /* v1.32.0 内容与限制 */
         'thread_title_max' => max(4, min(200, (int)($_POST['thread_title_max'] ?? 30))),
@@ -1496,6 +1771,11 @@ function act_admin_save_basic(): void
         'upload_allow_ext' => cut_str(trim((string)preg_replace('/\s+/', ' ', preg_replace('/[^a-z0-9]+/', ' ', strtolower(trim((string)($_POST['upload_allow_ext'] ?? '')))))), 1000),
         /* v1.41.0：分隔符统一化 —— 逗号 / 中文逗号 / 分号 / 点号等一律转空格（旧版正则直接吞掉分隔符，
          * 「jpg,png,gif」保存后粘成一坨「jpgpnggif」，白名单失效导致附件上传全部被拒）；上限 200 → 1000 */
+        /* v1.47.0 大文件传输：分块大小 / 上传并发 / 下载线程 / 带宽上限（Mbps，0=不限） */
+        'upload_chunk_mb' => max(1, min(16, (int)($_POST['upload_chunk_mb'] ?? 4))),
+        'upload_conc' => max(1, min(6, (int)($_POST['upload_conc'] ?? 2))),
+        'dl_threads' => max(1, min(8, (int)($_POST['dl_threads'] ?? 3))),
+        'dl_max_mbps' => max(0, min(1000, (float)($_POST['dl_max_mbps'] ?? 0))),
     ]);
     log_action('admin_save_limits', '内容与限制已保存');
     act_ok('内容与限制已保存', u('p=admin&tab=basic'));
