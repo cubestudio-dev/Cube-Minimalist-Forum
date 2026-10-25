@@ -11,7 +11,11 @@ defined('APP') or exit('Forbidden');
  */
 function layout_css_html(bool $alwaysInline = false): string
 {
-    $href = e(u('p=asset&f=style.css&v=' . app_version()));
+    /* v1.48.1 关键修复：资源版本号必须取代码版本 MF_VERSION（随文件更新必然变化），
+       不能用 app_version()（cfg 数据版本，FTP 覆盖升级 / 搬站时不动）。
+       否则升级后 ?v= 不变，浏览器按 immutable 缓存继续用旧 app.js——
+       旧 JS 无分块上传 / 点击交互契约旧，前台直接「上传不了」。 */
+    $href = e(u('p=asset&f=style.css&v=' . MF_VERSION));
     $inline = false;
     if ($alwaysInline) {
         $inline = true;
@@ -148,7 +152,7 @@ function layout_header(string $title = '', int $boardId = 0): void
 <meta name="live-interval" content="<?= $liveInt ?>">
 <meta name="ping-interval" content="<?= $pingInt ?>">
 <meta name="monitor-interval" content="<?= max(0, min(300, (int)cfg('monitor_interval', 5))) ?>">
-<script src="<?= e(u('p=asset&f=app.js&v=' . app_version())) ?>" defer></script>
+<script src="<?= e(u('p=asset&f=app.js&v=' . MF_VERSION)) ?>" defer></script>
 <?php mf_do_action('page_head'); /* v1.22.0 拓展：插件自定义 <head> 输出（meta/样式等） */ ?>
 </head>
 <?php $mfMotion = feat_on('motion'); /* v1.23.0 行云流水动效总开关（后台「功能」页可关） */ ?>

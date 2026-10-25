@@ -751,6 +751,12 @@ function selfcheck_run_item(string $key, bool $remote): array
             if ($diff) {
                 return ['key' => 'manifest', 'name' => '程序文件完整性', 'state' => 'warn', 'detail' => '以下文件与官方包 sha256 不一致：' . implode('、', $diff) . '。若是您自行改过属正常；否则可能是版本混合/传输损坏，建议重新上传官方更新包覆盖'];
             }
+            /* v1.48.1：程序文件版本 vs 数据版本一致性——专抓「FTP 覆盖了文件但没装更新包」。
+               此状态下资源缓存键（?v=）不前进，浏览器会继续用旧 app.js/style.css（immutable 一年缓存），
+               前台随机出现「上传不了 / 点击交互失效」等新功能失灵；迁移脚本也没跑过。 */
+            if ((string)MF_VERSION !== (string)app_version()) {
+                return ['key' => 'manifest', 'name' => '程序文件完整性', 'state' => 'warn', 'detail' => '文件全部完好，但版本不一致：程序文件已为 v' . MF_VERSION . '，数据版本仍为 v' . app_version() . '（多半是 FTP 覆盖升级 / 搬站后未装更新包）。旧浏览器缓存会继续用旧 app.js 导致「上传不了 / 新功能失灵」——请到后台「更新升级」上传 forum-update-any-to-' . MF_VERSION . '.zip 完成安装，或让每位用户强制刷新（Ctrl+F5）'];
+            }
             return ['key' => 'manifest', 'name' => '程序文件完整性', 'state' => 'pass', 'detail' => 'manifest.txt 全部 ' . $n . ' 个程序文件 sha256 与官方包逐一相符'];
 
         case 'search':

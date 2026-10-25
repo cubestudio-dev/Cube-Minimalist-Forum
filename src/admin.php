@@ -1778,7 +1778,14 @@ function admin_tab_update(): void
         '<div class="stat"><b>v' . e(MF_VERSION) . '</b><span>程序内置版本</span></div>' .
         '<div class="stat"><b>' . count($his) . '</b><span>已安装更新包</span></div>' .
         '</div>' .
-        '<p class="hint">「程序内置版本」表示当前部署的代码版本；「当前版本」会随更新包安装自动前进。若通过更新包升级，二者可以不同（以「当前版本」为准，数据不会丢失）。</p></div>';
+        '<p class="hint">「程序内置版本」表示当前部署的代码版本；「当前版本」会随更新包安装自动前进。若通过更新包升级，二者可以不同（以「当前版本」为准，数据不会丢失）。</p>' .
+        /* v1.48.1 版本一致性警示：两个版本不一致 = 升级只做了一半。
+           典型场景：FTP 覆盖了程序文件但没装更新包（数据版本没推进）——
+           资源缓存键、自检 manifest、迁移脚本都停留在旧版本，随机出现「上传不了 / 功能异常」。 */
+        ((string)MF_VERSION !== (string)$cur
+            ? '<p class="hint" style="color:#b45309">⚠ 版本不一致：程序文件已为 v' . e(MF_VERSION) . '，数据版本仍为 v' . e($cur) . '。请在本页上传 v' . e(MF_VERSION) . ' 的官方更新包（forum-update-any-to-' . e(MF_VERSION) . '.zip）完成升级；安装后两个版本会一致，前台缓存也会自动刷新。</p>'
+            : '') .
+        '</div>';
 
     echo '<div class="card form-card"><h2 class="card-title">' . t('上传更新包') . '</h2>' .
         '<form method="post" action="' . e(u('a=admin_update')) . '" enctype="multipart/form-data" data-confirm="确认安装该更新包？安装前会自动备份当前程序文件。">' . csrf_field() .

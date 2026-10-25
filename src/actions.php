@@ -1204,6 +1204,18 @@ function mf_chunk_session_create(int $uid, string $name, int $size, int $chunkBy
         throw new RuntimeException('上传会话目录创建失败，请重试');
     }
     $chunk = $chunkBytes > 0 ? max(1, $chunkBytes) : max(1, min(16, (int)cfg('upload_chunk_mb', 4))) * 1048576;
+    if ($chunkBytes <= 0) {
+        /* v1.48.1 关键修复：分块必须落在主机 post_max_size 之内。
+           upload_chunk 用原始 octet-stream 请求体（不走 $_FILES），PHP 对超过
+           post_max_size 的请求体会整包静默丢弃（$_POST 空、php://input 空）——
+           每一块都必死，前台表现为反复重试后「上传失败」，即「上传不了」。
+           后台配置只管体验偏好，主机硬限制是物理上限，此处一律钳制：
+           取 90% 余量并对齐 64KB（post_max_size 语义为整请求体，留防护空间）。 */
+        $postB = sysmon_memlimit_bytes((string)ini_get('post_max_size'));
+        if ($postB > 0 && $chunk > $postB) {
+            $chunk = max(65536, (int)(floor($postB * 0.9 / 65536) * 65536));
+        }
+    }
     $conc = max(1, min(6, (int)cfg('upload_conc', 2)));
     $total = (int)ceil($size / $chunk);
     file_put_contents($dir . '/meta.json', json_encode([
