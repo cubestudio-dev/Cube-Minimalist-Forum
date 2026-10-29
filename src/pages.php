@@ -269,10 +269,10 @@ function upload_toolbar(string $targetSel): string
     if (!feat_on('upload')) {
         return '';
     }
-    $imgMb = max(1, (int)cfg('upload_img_max_mb', 5));
-    $fileMb = max(1, (int)cfg('upload_file_max_mb', 10));
-    $chunkMb = max(1, min(16, (int)cfg('upload_chunk_mb', 4)));
-    $conc = max(1, min(6, (int)cfg('upload_conc', 2)));
+    $imgMb = cfg_int('upload_img_max_mb', 5); /* v1.48.2：空串/缺键回退默认，不再静默跌到 1MB */
+    $fileMb = cfg_int('upload_file_max_mb', 10);
+    $chunkMb = cfg_int('upload_chunk_mb', 4, 1, 16); /* v1.48.2：空串/缺键防御，不再静默跌到 1MB 分块（会让大文件分块数暴增） */
+    $conc = cfg_int('upload_conc', 2, 1, 6);
     $ext = trim((string)cfg('upload_allow_ext', 'zip pdf txt md csv doc docx xls xlsx ppt pptx'));
     $accept = 'image/*';
     foreach (preg_split('/[\s,，]+/u', $ext) ?: [] as $x) {

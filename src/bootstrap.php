@@ -13,7 +13,7 @@ if (!defined('DATA_DIR')) {
     define('DATA_DIR', dirname(__DIR__) . '/data');
 }
 if (!defined('MF_VERSION')) {
-    define('MF_VERSION', '1.48.1');
+    define('MF_VERSION', '1.48.2');
 }
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0755, true);
@@ -180,6 +180,22 @@ function cfg(string $k = '', $def = null)
         return $c;
     }
     return $c[$k] ?? $def;
+}
+
+/** v1.48.2 整数型配置读取：键缺失、空串、非数字值统一回退默认值。
+ *  修「升级后 config 缺键 / 被存成空串 → (int)'' 为 0 → max(1,0)=1 → 上传上限静默跌到 1MB」
+ *  一类静默降级（老站点升级后「突然传不了稍大文件」的典型根因）。 */
+function cfg_int(string $k, int $def, int $min = 1, int $max = 1000000): int
+{
+    $raw = cfg($k, $def);
+    if (is_int($raw)) {
+        $v = $raw;
+    } elseif (is_string($raw) && trim($raw) !== '' && is_numeric(trim($raw))) {
+        $v = (int)trim($raw);
+    } else {
+        $v = $def;
+    }
+    return max($min, min($max, $v));
 }
 
 /**

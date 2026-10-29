@@ -275,31 +275,17 @@ function ai_call_model(array $m, string $content, string &$verdict, string &$not
             $j = json_decode($res, true);
             $text = is_array($j) ? ($j['choices'][0]['message']['content'] ?? '') : '';
             if (is_string($text) && $text !== '') {
-                $mm = [];
-                if (preg_match('/\{[^{}]*\}/s', $text, $mm)) {
-                    $v = json_decode($mm[0], true);
-                    if (is_array($v) && array_key_exists('violation', $v)) {
-                        $verdict = !empty($v['violation']) ? 'violation' : 'ok';
-                        $note = trim((string)($v['reason'] ?? ''));
-                        return true;
-                    }
-                }
-                $t = strtolower(preg_replace('/\s+/', '', $text));
-                if (strpos($t, '"violation":true') !== false) {
-                    $verdict = 'violation';
-                    $note = cut_str($text, 60);
-                    return true;
-                }
-                if (strpos($t, '"violation":false') !== false) {
-                    $verdict = 'ok';
-                    $note = cut_str($text, 60);
+                if (ai_extract_verdict($text, $verdict, $note)) {
                     return true;
                 }
                 $err = 'AI 返回格式无法解析：' . cut_str($text, 120);
-            } else {
-                $msg = is_array($j) ? (string)($j['error']['message'] ?? json_encode($j, JSON_UNESCAPED_UNICODE)) : '响应非 JSON';
-                $err = '响应异常：' . cut_str($msg, 160);
+                /* v1.48.2：格式解析失败不重试——模型输出习惯稳定，同样输入重试大概率同样格式，
+                   只会白等 ai_retries-1 轮（实测最坏叠加 38 秒）；网络/5xx 错误仍照常重试 */
+                $note = $err;
+                return false;
             }
+            $msg = is_array($j) ? (string)($j['error']['message'] ?? json_encode($j, JSON_UNESCAPED_UNICODE)) : '响应非 JSON';
+            $err = '响应异常：' . cut_str($msg, 160);
         }
         if ($i < $retries) {
             sleep(1);
@@ -327,6 +313,52 @@ function ai_mode(): string
     return $m;
 }
 
+/** v1.48.2 违规判定字段布尔化：兼容 true/false 布尔、1/0 数字、"true"/"false"/"yes"/"no"/"违规" 字符串变体。
+ *  此前 !empty($v['violation']) 会把模型返回的字符串 "false" 误判为 true（非空字符串），
+ *  无害内容被错杀成「违规」——即用户报的「AI 审核不对」典型根因。 */
+function ai_violation_bool($raw): bool
+{
+    if (is_bool($raw)) {
+        return $raw;
+    }
+    if (is_int($raw) || is_float($raw)) {
+        return $raw != 0;
+    }
+    if (is_string($raw)) {
+        return in_array(strtolower(trim($raw)), ['true', '1', 'yes', 'y', 'violation', '违规'], true);
+    }
+    return false;
+}
+
+/** v1.48.2 从模型输出文本提取判定（ai_call_model / ai_parse_reply 共用同一套规则，单一数据源）。
+ *  解析优先级：① 第一个 {...} JSON 对象的 violation 键（严格布尔化）；
+ *  ② 兼容嵌套（模型把判定包在 result 等外层里时，内层 {...} 同样能提取）；
+ *  ③ 字符串兜底：压缩空白后找 "violation":true / "violation":"true" 等变体。 */
+function ai_extract_verdict(string $text, string &$verdict, string &$note): bool
+{
+    $mm = [];
+    if (preg_match('/\{[^{}]*\}/s', $text, $mm)) {
+        $v = json_decode($mm[0], true);
+        if (is_array($v) && array_key_exists('violation', $v)) {
+            $verdict = ai_violation_bool($v['violation']) ? 'violation' : 'ok';
+            $note = trim((string)($v['reason'] ?? $v['note'] ?? '')); /* v1.48.2：兼容模型把理由放 note 键 */
+            return true;
+        }
+    }
+    $t = strtolower(preg_replace('/\s+/', '', $text));
+    if (strpos($t, '"violation":true') !== false || strpos($t, '"violation":"true"') !== false) {
+        $verdict = 'violation';
+        $note = cut_str($text, 60);
+        return true;
+    }
+    if (strpos($t, '"violation":false') !== false || strpos($t, '"violation":"false"') !== false) {
+        $verdict = 'ok';
+        $note = cut_str($text, 60);
+        return true;
+    }
+    return false;
+}
+
 /** 解析单次 AI 响应文本（与 ai_call_model 内联解析同一套规则，供并行批量调用复用） */
 function ai_parse_reply(string $res, string &$verdict, string &$note): bool
 {
@@ -335,24 +367,7 @@ function ai_parse_reply(string $res, string &$verdict, string &$note): bool
     $j = json_decode($res, true);
     $text = is_array($j) ? ($j['choices'][0]['message']['content'] ?? '') : '';
     if (is_string($text) && $text !== '') {
-        $mm = [];
-        if (preg_match('/\{[^{}]*\}/s', $text, $mm)) {
-            $v = json_decode($mm[0], true);
-            if (is_array($v) && array_key_exists('violation', $v)) {
-                $verdict = !empty($v['violation']) ? 'violation' : 'ok';
-                $note = trim((string)($v['reason'] ?? ''));
-                return true;
-            }
-        }
-        $t = strtolower(preg_replace('/\s+/', '', $text));
-        if (strpos($t, '"violation":true') !== false) {
-            $verdict = 'violation';
-            $note = cut_str($text, 60);
-            return true;
-        }
-        if (strpos($t, '"violation":false') !== false) {
-            $verdict = 'ok';
-            $note = cut_str($text, 60);
+        if (ai_extract_verdict($text, $verdict, $note)) {
             return true;
         }
         $note = 'AI 返回格式无法解析：' . cut_str($text, 120);

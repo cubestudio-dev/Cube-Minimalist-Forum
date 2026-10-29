@@ -1,6 +1,6 @@
 <?php
 /**
- * 极简论坛 · 功能一键自检 + 自动修复（v1.44.0 引擎 / v1.45.0 实时进度升级 / v1.46.0 端到端测试）
+ * 极简论坛 · 功能一键自检 + 自动修复（v1.44.0 引擎 / v1.45.0 实时进度 / v1.46.0 端到端 / v1.48.0 分块与出站 / v1.48.2 上传链路环境层）
  *
  * 把「后台一个个点测试、一条条敲命令排查」变成一次跑完：
  *   环境基线 / 读写 / 存储完整性与帖子索引 / 会话 / 程序文件完整性（manifest 校验）/
@@ -11,9 +11,10 @@
  * v1.45.0：拆分为「目录（selfcheck_catalog）+ 逐项执行（selfcheck_run_item）」——
  *   前端逐项请求后端，检查进度 / 修复进度 / 清单 / 日志全程实时可视；
  *   selfcheck_run() 整跑接口保持不变（CLI / 旧调用方零改动），逐项失败不再拖垮整场。
- * v1.46.0：新增三个端到端（E2E）探针测试——注册 / 登录 / 发帖互动，
- *   用一次性探针账号真实走完用户旅程（即建即删不留痕，失败自动清理）;
- *   新增修复项 clean_probes（清理中断残留的探针账号与探针帖）。
+ * v1.48.0：新增「分块上传端到端」与「附件出站与限速下载」两项（16 项）。
+ * v1.48.2：新增「文件上传链路」环境层检测项（17 项）——PHP 引擎限制（file_uploads /
+ *   upload_max_filesize / post_max_size / 临时目录）→ data/uploads/ 落盘探针 →
+ *   后台上限与 PHP 承接能力对比 → 存量附件完整性抽样（与 chunkup 功能层检测互补）。
  *
  * 报告落盘 data/selfcheck.php（后台「监控」标签页可回看上次结果与运行日志）。
  */
@@ -45,6 +46,8 @@ function selfcheck_catalog(): array
             'desc' => 'data/ 真实写入 → 读回 → 删除探针文件，验证存储层可写（发帖 / 注册 / 设置的基础）'],
         ['key' => 'store', 'name' => '存储完整性与帖子索引', 'remote' => false,
             'desc' => '核心数据文件可解析、抽样校验帖子可读、索引与 threads/ 目录一致性（帖子「消失」的常见根因）'],
+        ['key' => 'upload', 'name' => '文件上传链路', 'remote' => false,
+            'desc' => '环境层四重探测：PHP 引擎限制（file_uploads / upload_max_filesize / post_max_size / 临时目录）→ data/uploads/ 真实写入探针 → 后台上限与 PHP 承接能力对比 → 存量附件完整性抽样（与「分块上传端到端」互补：那项测功能链路，这项测环境配置；「上传不了」先看这里）'],
         ['key' => 'sess', 'name' => '会话', 'remote' => false,
             'desc' => 'PHP 会话激活状态（登录态基础）'],
         ['key' => 'reg', 'name' => '注册端到端', 'remote' => false,
@@ -410,6 +413,94 @@ function selfcheck_run_item(string $key, bool $remote): array
                 return ['key' => 'store', 'name' => '存储完整性与帖子索引', 'state' => 'warn', 'detail' => '索引记录 ' . $idxN . ' 条，但 threads/ 目录实际有 ' . $fileN . ' 个帖子文件——不一致会导致部分帖子在列表「消失」但详情页直链仍可访问（典型于更新中断 / 手工搬数据）。可一键重建索引修复', 'fixkey' => 'rebuild_index', 'fixable' => true];
             }
             return ['key' => 'store', 'name' => '存储完整性与帖子索引', 'state' => 'pass', 'detail' => '核心数据可解析；索引 ' . $idxN . ' 条与 threads/ 目录 ' . $fileN . ' 帖一致'];
+
+        case 'upload':
+            /* v1.48.2 文件上传链路（环境层）：PHP 引擎限制 → 落盘目录探针 → 后台设置与承接能力对比 → 存量附件抽样
+               （与 chunkup 分块上传端到端互补：chunkup 验证功能链路走通，本项验证环境配置是否本来就接得住） */
+            if (!feat_on('upload')) {
+                return ['key' => 'upload', 'name' => '文件上传链路', 'state' => 'skip', 'detail' => '「允许上传图片 / 附件」功能开关当前为关（后台「功能开关」）——上传链路无从测起，开启后可再测'];
+            }
+            $problems = [];
+            $notes = [];
+            /* ① PHP 引擎层：file_uploads 开关 / 尺寸限制 / 临时目录 */
+            if (((int)ini_get('file_uploads')) !== 1) {
+                $problems[] = 'PHP file_uploads 已关闭（php.ini 开启后才能接收任何上传）';
+            }
+            $iniBytes = static function (string $v): int {
+                $v = trim($v);
+                if ($v === '' || $v === '0' || $v === '-1') { return 0; }
+                if (preg_match('/^(\d+)([KMGT]?)$/i', $v, $mm)) {
+                    $m = ['' => 1, 'K' => 1024, 'M' => 1048576, 'G' => 1073741824, 'T' => 1099511627776];
+                    return (int)$mm[1] * $m[strtoupper($mm[2] ?: '')];
+                }
+                return (int)$v;
+            };
+            $umf = $iniBytes((string)ini_get('upload_max_filesize'));
+            $pms = $iniBytes((string)ini_get('post_max_size'));
+            if ($umf <= 0) { $problems[] = 'PHP upload_max_filesize 为 0（任何文件都传不上）'; }
+            if ($pms > 0 && $pms < $umf) {
+                $problems[] = 'post_max_size（' . fmt_bytes($pms) . '）小于 upload_max_filesize（' . fmt_bytes($umf) . '），实际只能传 ' . fmt_bytes($pms) . ' 以内';
+            }
+            $tmpDir = (string)(ini_get('upload_tmp_dir') ?: sys_get_temp_dir());
+            if ($tmpDir === '' || !is_dir($tmpDir) || !is_writable($tmpDir)) {
+                $problems[] = 'PHP 上传临时目录不可写（' . ($tmpDir === '' ? '未配置且系统临时目录不可用' : $tmpDir) . '）——错误码 6/7 的来源';
+            }
+            /* ② 落盘层：data/uploads/ 真实写入探针（与 act_media_upload 同样的目录结构） */
+            $sub = date('Ym');
+            $upDir = DATA_DIR . '/uploads';
+            $probeDir = $upDir . '/' . $sub;
+            $probeFile = $probeDir . '/selfcheck-probe-' . bin2hex(random_bytes(4)) . '.tmp';
+            try {
+                if (!is_dir($probeDir) && !@mkdir($probeDir, 0755, true) && !is_dir($probeDir)) {
+                    $problems[] = 'data/uploads/' . $sub . ' 目录创建失败（权限或属主不对）';
+                } else {
+                    $okW = @file_put_contents($probeFile, 'selfcheck-' . time());
+                    if ($okW === false) {
+                        $problems[] = 'data/uploads/ 写入探针失败（' . $probeDir . ' 不可写）';
+                    } elseif ((string)@file_get_contents($probeFile) === '') {
+                        $problems[] = 'data/uploads/ 写入后读回为空（存储介质异常，SD 卡 / 磁盘可能有问题）';
+                        @unlink($probeFile);
+                    } else {
+                        @unlink($probeFile);
+                        $notes[] = '落盘探针通过（data/uploads/' . $sub . ' 写入 → 读回 → 删除）';
+                    }
+                }
+            } catch (Throwable $e) {
+                $problems[] = 'data/uploads/ 探针异常：' . cut_str($e->getMessage(), 100);
+            }
+            /* ③ 后台设置与 PHP 承接能力对比：后台设 50MB 而 PHP 只接 2M 时用户会看到「错误码 1」
+               （分块上传可绕过整包硬顶，但小文件直传路径仍受此限制） */
+            $imgMb = cfg_int('upload_img_max_mb', 5);
+            $fileMb = cfg_int('upload_file_max_mb', 10);
+            $wantMb = max($imgMb, $fileMb);
+            if ($umf > 0 && $wantMb * 1048576 > $umf) {
+                $problems[] = '后台上限 ' . $wantMb . 'MB 超出 PHP upload_max_filesize（' . fmt_bytes($umf) . '）——直传路径传 ' . fmt_bytes($umf) . ' ～ ' . $wantMb . 'MB 的文件会报「超过服务器 PHP 上传限制」（后台「监控 → 运行环境」可一键调大；超过分块大小的文件自动走分块直传不受此限）';
+            } else {
+                $notes[] = '后台上限 图片 ' . $imgMb . 'MB / 附件 ' . $fileMb . 'MB，PHP 可承接 ' . ($umf > 0 ? fmt_bytes($umf) : '?') . '（表单层 ' . ($pms > 0 ? fmt_bytes($pms) : '?') . '）';
+            }
+            /* ④ 存量附件抽样：正文引用的站内上传文件存在性 */
+            $refer = 0; $missing = [];
+            foreach (array_slice(array_reverse(thread_index()), 0, 100) as $t) {
+                $th = thread_get((int)($t['id'] ?? 0));
+                if ($th === null) { continue; }
+                $body = (string)($th['content'] ?? '');
+                foreach ((array)($th['replies'] ?? []) as $r) { $body .= "\n" . (string)($r['content'] ?? ''); }
+                if (preg_match_all('/p=media&(?:amp;)?f=(uploads\/[A-Za-z0-9_\/.\-]+)/', $body, $mm)) {
+                    foreach ($mm[1] as $rel) {
+                        $refer++;
+                        if (count($missing) < 5 && !is_file(DATA_DIR . '/' . $rel)) { $missing[] = $rel; }
+                    }
+                }
+            }
+            if ($missing) {
+                $problems[] = '帖子正文引用的 ' . count($missing) . '+ 个上传文件已丢失（如 ' . implode('、', $missing) . '）——附件点开 404 多源于此；请检查 data/uploads/ 是否被误清';
+            } elseif ($refer > 0) {
+                $notes[] = '最近 100 帖引用 ' . $refer . ' 个站内附件全部存在';
+            }
+            if ($problems) {
+                return ['key' => 'upload', 'name' => '文件上传链路', 'state' => count($problems) > 1 ? 'fail' : 'warn', 'detail' => implode('；', $problems) . ($notes ? '。已通过：' . implode('；', $notes) : '') . '。另外：Nginx 默认 client_max_body_size 仅 1M（超过直接 413，PHP 侧探测不到）——反代/网关环境请确认已调大；内网穿透（frp 等）链路也可能有体积/超时限制'];
+            }
+            return ['key' => 'upload', 'name' => '文件上传链路', 'state' => 'pass', 'detail' => '上传链路各层正常：' . implode('；', $notes) . '。若仍有个别文件传不上：Nginx 反代请确认 client_max_body_size 不小于后台上限（默认仅 1M，超出直接 413）；内网穿透链路可能有体积 / 超时限制'];
 
         case 'sess':
             /* 4. 会话 */

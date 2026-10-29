@@ -159,10 +159,12 @@ function mfdoc_dns_query(string $host, float $timeout = 3.0): string
             }
             $m = unpack('ntype/nclass/nttl/ndlen', substr($resp, $off, 10));
             $off += 10;
-            if ((int)$m['type'] === 1 && (int)$m['ndlen'] === 4 && $off + 4 <= strlen($resp)) {
+            /* v1.48.2 修复：unpack 键名是 dlen（ndlen = 格式码 n + 键名 dlen），
+               此前误用 $m['ndlen'] 取不到值（PHP 8 警告刷屏 + 层3 解析永远失败） */
+            if ((int)$m['type'] === 1 && (int)$m['dlen'] === 4 && $off + 4 <= strlen($resp)) {
                 return long2ip((int)unpack('N', substr($resp, $off, 4))[1]);
             }
-            $off += (int)$m['ndlen'];
+            $off += (int)$m['dlen'];
         }
     }
     return '';

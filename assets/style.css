@@ -645,7 +645,7 @@ a.online-row:hover { background: var(--hover); }
 .emoji-bar { position: relative; display: flex; gap: 8px; margin: 6px 0; }
 .emoji-btn { border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 999px; padding: 3px 14px; font-size: 13px; cursor: pointer; transition: border-color .15s, color .15s; }
 .emoji-btn:hover { border-color: var(--accent); color: var(--accent); }
-.emoji-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 90; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; display: grid; grid-template-columns: repeat(8, 34px); gap: 2px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
+.emoji-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 120; /* v1.48.2：90→120 统一弹层层级 */ background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; display: grid; grid-template-columns: repeat(8, 34px); gap: 2px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
 .emoji-item { border: none; background: none; font-size: 19px; line-height: 32px; height: 32px; cursor: pointer; border-radius: 8px; }
 .emoji-item:hover { background: var(--hover); }
 .emoji-pop[hidden] { display: none; } /* 关键：覆盖 display:grid，让 hidden 属性真正生效 */
@@ -747,7 +747,7 @@ a .mention, .mention a { text-decoration: none; }
 /* ================= v1.16.0 ================= */
 /* @ 提及补全下拉 */
 .mention-pop {
-  position: absolute; z-index: 60; background: var(--card, #fff); border: 1px solid var(--border);
+  position: absolute; z-index: 120; /* v1.48.2：60→120 统一弹层层级 */ background: var(--card, #fff); border: 1px solid var(--border);
   border-radius: var(--radius-s); box-shadow: var(--shadow, 0 6px 24px rgba(0,0,0,.12));
   max-height: 220px; overflow-y: auto; min-width: 180px; padding: 4px; margin-top: 4px;
 }
@@ -918,7 +918,7 @@ a .mention, .mention a { text-decoration: none; }
 /* ================= v1.22.0 后台设置搜索 + 拓展（插件） ================= */
 .admin-search { position: relative; margin: 0 0 10px; }
 .admin-search-input { width: 100%; max-width: 640px; padding-left: 34px; background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 10px center; }
-.admin-search-pop { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: min(640px, 94vw); background: var(--card, #fff); border: 1px solid var(--border, #e5e5ea); border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.14); overflow: hidden; max-height: 60vh; overflow-y: auto; }
+.admin-search-pop { position: absolute; z-index: 120; /* v1.48.2：60→120 统一弹层层级 */ top: calc(100% + 6px); left: 0; width: min(640px, 94vw); background: var(--card, #fff); border: 1px solid var(--border, #e5e5ea); border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.14); overflow: hidden; max-height: 60vh; overflow-y: auto; }
 .admin-search-pop .asr { display: block; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--border, #eee); padding: 9px 14px; cursor: pointer; font: inherit; color: inherit; }
 .admin-search-pop .asr:first-child { border-top: 0; }
 .admin-search-pop .asr b { display: block; font-size: 14px; }
@@ -942,14 +942,16 @@ a .mention, .mention a { text-decoration: none; }
 @media (max-width: 880px) { .admin-nav .nav-quick { width: 100%; } }
 /* v1.30.0 前台搜索预览（侧栏搜索框输入联想，点击直达帖子） */
 .side-search { position: relative; }
-.srs-pop { position: absolute; top: calc(100% + 6px); left: 0; width: min(360px, 92vw); z-index: 85; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.16); max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+.srs-pop { position: absolute; top: calc(100% + 6px); left: 0; width: min(360px, 92vw); z-index: 120; /* v1.48.2：85→120 统一弹层层级，防被 live-bar(90)/emoji-pop(90) 偶发遮挡 */ background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.16); max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
 .srs-pop .srs { display: block; padding: 8px 12px; border-top: 1px solid var(--border); text-decoration: none; }
 .srs-pop .srs:first-child { border-top: 0; border-radius: 12px 12px 0 0; }
 .srs-pop .srs:last-child { border-radius: 0 0 12px 12px; }
 .srs-pop .srs b { display: block; font-size: 13.5px; font-weight: 600; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srs-pop .srs span { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
 .srs-pop .srs:hover, .srs-pop .srs.on { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.srs-pop.flip-up { top: auto; bottom: calc(100% + 6px); } /* v1.48.2：搜索框靠近视口下缘时向上展开，修「联想偶尔出不来」 */
 @media (max-width: 860px) { .srs-pop { width: 100%; } }
+@media (max-width: 860px) { .srs-pop.flip-up { width: 100%; } }
 .mf-flash { animation: mfFlash 1.6s ease-out 1; }
 @keyframes mfFlash { 0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #0f766e) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 .mf-flash-l { color: var(--accent, #0f766e); transition: color .2s; }

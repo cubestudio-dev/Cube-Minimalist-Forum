@@ -1032,7 +1032,7 @@ function mf_upload_preflight(string $name, int $size, bool $skipSize = false): a
     if (!$isImg && !in_array($ext, $allow, true)) {
         act_err('不支持的附件类型：.' . $ext . '（后台「基本设置」可调整允许的扩展名）');
     }
-    $max = ($isImg ? max(1, (int)cfg('upload_img_max_mb', 5)) : max(1, (int)cfg('upload_file_max_mb', 10))) * 1048576;
+    $max = ($isImg ? cfg_int('upload_img_max_mb', 5) : cfg_int('upload_file_max_mb', 10)) * 1048576; /* v1.48.2：空串/缺键静默跌 1MB 防御 */
     if (!$skipSize && ($size <= 0 || $size > $max)) {
         act_err('文件大小 ' . fmt_bytes($size) . ' 超过上限 ' . round($max / 1048576) . 'MB');
     }
@@ -1203,7 +1203,7 @@ function mf_chunk_session_create(int $uid, string $name, int $size, int $chunkBy
     if (!@mkdir($dir, 0755, true)) {
         throw new RuntimeException('上传会话目录创建失败，请重试');
     }
-    $chunk = $chunkBytes > 0 ? max(1, $chunkBytes) : max(1, min(16, (int)cfg('upload_chunk_mb', 4))) * 1048576;
+    $chunk = $chunkBytes > 0 ? max(1, $chunkBytes) : cfg_int('upload_chunk_mb', 4, 1, 16) * 1048576; /* v1.48.2：空串/缺键防御 */
     if ($chunkBytes <= 0) {
         /* v1.48.1 关键修复：分块必须落在主机 post_max_size 之内。
            upload_chunk 用原始 octet-stream 请求体（不走 $_FILES），PHP 对超过

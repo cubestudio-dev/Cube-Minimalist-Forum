@@ -861,7 +861,16 @@
         return '<a class="srs" href="' + escHtml(apiUrl('p=thread&id=' + it.id)) + '" data-n="' + n + '">' +
           '<b>' + escHtml(it.title) + '</b><span>' + escHtml(it.board) + '</span></a>';
       }).join('');
+      /* v1.48.2 视口自适应：侧栏不随页滚动吸顶，搜索框可能落在视口任意位置；
+         下方空间不够展开 320px 弹层时改为向上翻（flip-up），修「输入了却看不到联想」的偶然性问题 */
+      fePop.classList.remove('flip-up');
       fePop.hidden = false;
+      try {
+        var sr = feSearch.getBoundingClientRect();
+        var vh = window.innerHeight || document.documentElement.clientHeight;
+        var need = Math.min(fePop.offsetHeight, 320) + 12;
+        if (sr.bottom + need > vh && sr.top > need) { fePop.classList.add('flip-up'); }
+      } catch (e) { /* 测量失败保持默认向下展开 */ }
       $$('.srs', fePop).forEach(function (a) {
         a.addEventListener('mousedown', function (e) { // mousedown 先于 blur，避免弹层先收起
           e.preventDefault();
